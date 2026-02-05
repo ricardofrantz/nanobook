@@ -17,7 +17,7 @@ A **simulated stock exchange** that processes orders exactly like a real exchang
 - **Price-time priority**: FIFO matching at each price level
 - **Nanosecond timestamps**: Monotonic counter (not system clock)
 - **Deterministic**: Same inputs → same outputs (essential for backtesting)
-- **Fast**: >1M orders/second single-threaded
+- **Fast**: 8M+ orders/second single-threaded (see Performance)
 - **Book snapshots**: L1 (BBO), L2 (depth), L3 (full book)
 - **Event replay**: Complete audit trail for deterministic replay
 
@@ -61,7 +61,7 @@ limit-order-book = "0.1"
 Or build from source:
 
 ```bash
-git clone https://github.com/krylov-rs/limit-order-book-rs
+git clone https://github.com/ricardofrantz/limit-order-book-rs
 cd limit-order-book-rs
 cargo build --release
 cargo test
@@ -189,22 +189,64 @@ $99.00:  [O6]                   $102.00: [O10]→[O11]
 
 ## Performance
 
-Target benchmarks (on modern hardware):
+### Benchmarks
 
-| Operation | Target | Complexity |
-|-----------|--------|------------|
-| Submit (no match) | <1μs | O(log P) |
-| Submit (with match) | <10μs | O(log P + M) |
-| Cancel | <100ns | O(1) |
-| L1 snapshot | <50ns | O(1) |
-| L2 snapshot (10 levels) | <1μs | O(N) |
-| Throughput | >1M/sec | Mixed workload |
+Measured on AMD Ryzen / Intel Core (single-threaded):
 
-Where P = price levels, M = orders matched, N = depth levels.
+| Operation | Time | Throughput | Complexity |
+|-----------|------|------------|------------|
+| Submit (no match) | **120 ns** | 8.3M ops/sec | O(log P) |
+| Submit (with match) | ~200 ns | 5M ops/sec | O(log P + M) |
+| BBO query | **1 ns** | 1B ops/sec | O(1) |
+| Cancel | 660 ns† | 1.5M ops/sec | O(N) |
+| L2 snapshot (10 levels) | ~500 ns | 2M ops/sec | O(D) |
+
+Where P = price levels, M = orders matched, N = orders at price level, D = depth.
+
+†Cancel is O(N) in orders at that price level. See "Future Optimizations" below.
 
 ```bash
 cargo bench
 ```
+
+### Optimizations Applied
+
+1. **FxHash** — Non-cryptographic hash for OrderId lookups (+25% vs std HashMap)
+2. **Cached BBO** — Best bid/ask cached for O(1) access
+3. **Optional event logging** — Disable for max throughput:
+
+```bash
+# With event logging (default) - enables replay
+cargo build --release
+
+# Without event logging - maximum performance
+cargo build --release --no-default-features
+```
+
+### Where Time Goes (Submit, No Match)
+
+```
+submit_limit() ~120 ns breakdown:
+├── FxHashMap insert     ~30 ns   order storage
+├── BTreeMap insert      ~30 ns   price level (O(log P))
+├── VecDeque push        ~5 ns    FIFO queue
+├── Event recording      ~10 ns   (optional, for replay)
+└── Overhead             ~45 ns   struct creation, etc.
+```
+
+### Future Optimizations
+
+| Optimization | Potential Gain | Complexity | Tradeoff |
+|--------------|----------------|------------|----------|
+| **O(1) cancel** | 10x for deep levels | High | Intrusive linked list or tombstones |
+| **Array-indexed levels** | -30 ns | Medium | Requires bounded price range |
+| **Slab allocator** | -10 ns | Medium | More complex memory management |
+
+**O(1) Cancel**: Currently cancel scans the VecDeque to find the order. For true O(1):
+- Tombstone approach: mark cancelled, skip during matching
+- Intrusive doubly-linked list with HashMap<OrderId, NodePtr>
+
+These add complexity. Current O(N) cancel is fine unless you have thousands of orders at a single price level (rare in practice).
 
 ## Use Cases
 
