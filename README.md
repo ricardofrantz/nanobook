@@ -4,11 +4,49 @@ A deterministic, nanosecond-precision limit order book and matching engine for t
 
 ## What Is This?
 
-A **simulated stock exchange** that processes orders exactly like a real exchange — with proper price-time priority, partial fills, and cancellations. Built for:
+A **simulated stock exchange** that processes orders exactly like a real exchange — with proper price-time priority, partial fills, and cancellations.
 
-- Testing trading strategies against realistic market microstructure
-- Learning how exchanges actually work
-- Demonstrating Rust + finance skills for quant roles
+### Who Should Use This?
+
+| If you're a... | Use this for... |
+|----------------|-----------------|
+| **Quant developer** | Backtesting trading strategies with realistic market microstructure |
+| **Algo trader** | Testing order execution logic (slippage, queue position, fill rates) |
+| **Student** | Learning how exchanges actually work under the hood |
+| **Rust developer** | Reference implementation of a financial data structure |
+
+### Why This Library?
+
+- **Deterministic** — Same inputs always produce same outputs (essential for reproducible backtests)
+- **Fast** — 8M+ orders/sec single-threaded, sub-microsecond latency
+- **Complete** — GTC/IOC/FOK, partial fills, modify, cancel, L1/L2/L3 snapshots
+- **Simple** — Single-threaded, in-process, zero dependencies beyond `thiserror`
+
+## See It In Action
+
+```bash
+cargo run --example demo        # Interactive walkthrough with explanations
+cargo run --example demo_quick  # Quick non-interactive demo
+```
+
+```
+Building order book...
+  SELL 100 @ $50.25 (Alice)       ASK  $50.50   150 shares
+  SELL 150 @ $50.50 (Bob)         ASK  $50.25   100 shares
+  BUY  100 @ $50.00 (Carol)       ---- spread: $0.25 ----
+  BUY  200 @ $49.75 (Dan)         BID  $50.00   100 shares
+                                  BID  $49.75   200 shares
+
+Incoming: BUY 120 @ $50.25 (Eve) - CROSSES SPREAD!
+  Trades: 100 shares @ $50.25    (Alice filled completely)
+  Filled: 100, Resting: 20       (Eve's remainder rests on book)
+
+Incoming: MARKET BUY 200 (Frank) - SWEEPS THE BOOK!
+  Trades: 150 shares @ $50.50    (Bob filled completely)
+  Unfilled: 50                   (no more liquidity!)
+```
+
+The interactive demo explains price-time priority, partial fills, IOC/FOK, and order cancellation.
 
 ## Features
 
@@ -298,6 +336,21 @@ println!("Filled: {}, Cancelled: {}",
 );
 ```
 
+## Comparison with Other Rust LOBs
+
+| Library | Throughput | Threading | Order Types | Deterministic | Use Case |
+|---------|------------|-----------|-------------|---------------|----------|
+| **limit-order-book-rs** (this) | **8M ops/sec** | Single | Limit, Market, GTC/IOC/FOK | **Yes** | Backtesting, education |
+| [limitbook](https://lib.rs/crates/limitbook) | 3-5M ops/sec | Single | Limit, Market | No | General purpose |
+| [lobster](https://lib.rs/crates/lobster) | ~300K ops/sec | Single | Limit, Market | No | Simple matching |
+| [OrderBook-rs](https://github.com/joaquinbejar/OrderBook-rs) | 200K ops/sec | **Multi** | Many (iceberg, peg, etc.) | No | Production HFT |
+
+**When to use what:**
+
+- **This library**: You need deterministic replay for backtesting, or you're learning how exchanges work
+- **limitbook**: General-purpose LOB without replay requirements
+- **OrderBook-rs**: Production systems needing thread-safety and complex order types
+
 ## Limitations
 
 This is an **educational/testing tool**, not a production exchange:
@@ -317,3 +370,16 @@ MIT
 ## Contributing
 
 Issues and PRs welcome. See SPECS.md for the technical specification.
+
+### Recording a Demo GIF
+
+To create an animated GIF of the demo (for docs, presentations, etc.):
+
+```bash
+# Using vhs (recommended): https://github.com/charmbracelet/vhs
+vhs examples/demo.tape
+
+# Using asciinema + agg:
+asciinema rec demo.cast -c "cargo run --example demo_quick"
+agg demo.cast demo.gif
+```
