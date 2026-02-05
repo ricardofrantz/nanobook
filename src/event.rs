@@ -15,6 +15,7 @@ use crate::{OrderId, Price, Quantity, Side, TimeInForce, Trade};
 /// Events capture all inputs (not outputs like trades).
 /// Replaying the same events produces identical state.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Event {
     /// Submit a limit order
     SubmitLimit {
@@ -32,6 +33,20 @@ pub enum Event {
         order_id: OrderId,
         new_price: Price,
         new_quantity: Quantity,
+    },
+    /// Submit a stop-market order
+    SubmitStopMarket {
+        side: Side,
+        stop_price: Price,
+        quantity: Quantity,
+    },
+    /// Submit a stop-limit order
+    SubmitStopLimit {
+        side: Side,
+        stop_price: Price,
+        limit_price: Price,
+        quantity: Quantity,
+        time_in_force: TimeInForce,
     },
 }
 
@@ -69,10 +84,37 @@ impl Event {
             new_quantity,
         }
     }
+
+    /// Create a SubmitStopMarket event.
+    pub fn submit_stop_market(side: Side, stop_price: Price, quantity: Quantity) -> Self {
+        Event::SubmitStopMarket {
+            side,
+            stop_price,
+            quantity,
+        }
+    }
+
+    /// Create a SubmitStopLimit event.
+    pub fn submit_stop_limit(
+        side: Side,
+        stop_price: Price,
+        limit_price: Price,
+        quantity: Quantity,
+        time_in_force: TimeInForce,
+    ) -> Self {
+        Event::SubmitStopLimit {
+            side,
+            stop_price,
+            limit_price,
+            quantity,
+            time_in_force,
+        }
+    }
 }
 
 /// Result of applying an event.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ApplyResult {
     /// Trades that occurred (if any)
     pub trades: Vec<Trade>,
@@ -119,6 +161,30 @@ impl Exchange {
             } => {
                 let result = self.modify_internal(*order_id, *new_price, *new_quantity);
                 result.trades
+            }
+            Event::SubmitStopMarket {
+                side,
+                stop_price,
+                quantity,
+            } => {
+                self.submit_stop_internal(*side, *stop_price, None, *quantity, TimeInForce::GTC);
+                Vec::new()
+            }
+            Event::SubmitStopLimit {
+                side,
+                stop_price,
+                limit_price,
+                quantity,
+                time_in_force,
+            } => {
+                self.submit_stop_internal(
+                    *side,
+                    *stop_price,
+                    Some(*limit_price),
+                    *quantity,
+                    *time_in_force,
+                );
+                Vec::new()
             }
         };
 

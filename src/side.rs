@@ -4,6 +4,7 @@ use std::fmt;
 
 /// Side of an order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Side {
     Buy,
     Sell,

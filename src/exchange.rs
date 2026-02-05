@@ -7,8 +7,10 @@
 #[cfg(feature = "event-log")]
 use crate::event::Event;
 use crate::{
-    result::{CancelError, CancelResult, ModifyError, ModifyResult, SubmitResult},
+    error::ValidationError,
+    result::{CancelError, CancelResult, ModifyError, ModifyResult, StopSubmitResult, SubmitResult},
     snapshot::BookSnapshot,
+    stop::{StopBook, StopOrder, StopStatus},
     Order, OrderBook, OrderId, OrderStatus, Price, Quantity, Side, TimeInForce, Trade,
 };
 
@@ -27,6 +29,10 @@ pub struct Exchange {
     pub(crate) book: OrderBook,
     /// Complete trade history
     pub(crate) trades: Vec<Trade>,
+    /// Stop order book
+    pub(crate) stop_book: StopBook,
+    /// Last trade price (for stop order triggers)
+    pub(crate) last_trade_price: Option<Price>,
     /// Event log for replay (only with "event-log" feature)
     #[cfg(feature = "event-log")]
     pub(crate) events: Vec<crate::event::Event>,
@@ -38,6 +44,8 @@ impl Exchange {
         Self {
             book: OrderBook::new(),
             trades: Vec::new(),
+            stop_book: StopBook::new(),
+            last_trade_price: None,
             #[cfg(feature = "event-log")]
             events: Vec::new(),
         }
@@ -67,7 +75,13 @@ impl Exchange {
             time_in_force: tif,
         });
 
-        self.submit_limit_internal(side, price, quantity, tif)
+        let result = self.submit_limit_internal(side, price, quantity, tif);
+        if !result.trades.is_empty() {
+            let last_price = result.trades.last().unwrap().price;
+            self.last_trade_price = Some(last_price);
+            self.process_trade_triggers();
+        }
+        result
     }
 
     /// Submit a market order.
@@ -86,7 +100,47 @@ impl Exchange {
             Side::Buy => Price::MAX,
             Side::Sell => Price::MIN,
         };
-        self.submit_limit_internal(side, price, quantity, TimeInForce::IOC)
+        let result = self.submit_limit_internal(side, price, quantity, TimeInForce::IOC);
+        if !result.trades.is_empty() {
+            let last_price = result.trades.last().unwrap().price;
+            self.last_trade_price = Some(last_price);
+            self.process_trade_triggers();
+        }
+        result
+    }
+
+    /// Submit a limit order with input validation.
+    ///
+    /// Returns `Err(ValidationError::ZeroQuantity)` if quantity is 0,
+    /// or `Err(ValidationError::ZeroPrice)` if price is <= 0.
+    pub fn try_submit_limit(
+        &mut self,
+        side: Side,
+        price: Price,
+        quantity: Quantity,
+        tif: TimeInForce,
+    ) -> Result<SubmitResult, ValidationError> {
+        if quantity == 0 {
+            return Err(ValidationError::ZeroQuantity);
+        }
+        if price.0 <= 0 {
+            return Err(ValidationError::ZeroPrice);
+        }
+        Ok(self.submit_limit(side, price, quantity, tif))
+    }
+
+    /// Submit a market order with input validation.
+    ///
+    /// Returns `Err(ValidationError::ZeroQuantity)` if quantity is 0.
+    pub fn try_submit_market(
+        &mut self,
+        side: Side,
+        quantity: Quantity,
+    ) -> Result<SubmitResult, ValidationError> {
+        if quantity == 0 {
+            return Err(ValidationError::ZeroQuantity);
+        }
+        Ok(self.submit_market(side, quantity))
     }
 
     /// Internal: submit limit order without recording event.
@@ -179,7 +233,16 @@ impl Exchange {
 
     /// Internal: cancel without recording event.
     pub(crate) fn cancel_internal(&mut self, order_id: OrderId) -> CancelResult {
-        // Check if order exists
+        // Check stop book first
+        if self.stop_book.contains_pending(order_id) {
+            if let Some(stop) = self.stop_book.get(order_id) {
+                let qty = stop.quantity;
+                self.stop_book.cancel(order_id);
+                return CancelResult::success(qty);
+            }
+        }
+
+        // Check if order exists in regular book
         let order = match self.book.get_order(order_id) {
             Some(o) => o,
             None => return CancelResult::failure(CancelError::OrderNotFound),
@@ -251,6 +314,153 @@ impl Exchange {
         ModifyResult::success(order_id, result.order_id, cancelled, result.trades)
     }
 
+    // === Stop Orders ===
+
+    /// Maximum cascade depth to prevent infinite stop-trigger loops.
+    const MAX_CASCADE_DEPTH: usize = 100;
+
+    /// Submit a stop-market order.
+    ///
+    /// The order becomes a market order when `last_trade_price` reaches `stop_price`.
+    /// - Buy stop: triggers when `last_trade_price >= stop_price`
+    /// - Sell stop: triggers when `last_trade_price <= stop_price`
+    pub fn submit_stop_market(
+        &mut self,
+        side: Side,
+        stop_price: Price,
+        quantity: Quantity,
+    ) -> StopSubmitResult {
+        #[cfg(feature = "event-log")]
+        self.events.push(Event::SubmitStopMarket {
+            side,
+            stop_price,
+            quantity,
+        });
+
+        self.submit_stop_internal(side, stop_price, None, quantity, TimeInForce::GTC)
+    }
+
+    /// Submit a stop-limit order.
+    ///
+    /// The order becomes a limit order at `limit_price` when `last_trade_price`
+    /// reaches `stop_price`.
+    pub fn submit_stop_limit(
+        &mut self,
+        side: Side,
+        stop_price: Price,
+        limit_price: Price,
+        quantity: Quantity,
+        tif: TimeInForce,
+    ) -> StopSubmitResult {
+        #[cfg(feature = "event-log")]
+        self.events.push(Event::SubmitStopLimit {
+            side,
+            stop_price,
+            limit_price,
+            quantity,
+            time_in_force: tif,
+        });
+
+        self.submit_stop_internal(side, stop_price, Some(limit_price), quantity, tif)
+    }
+
+    /// Internal: submit stop order without recording event.
+    pub(crate) fn submit_stop_internal(
+        &mut self,
+        side: Side,
+        stop_price: Price,
+        limit_price: Option<Price>,
+        quantity: Quantity,
+        tif: TimeInForce,
+    ) -> StopSubmitResult {
+        let id = self.book.next_order_id();
+        let timestamp = self.book.next_timestamp();
+
+        let order = StopOrder {
+            id,
+            side,
+            stop_price,
+            limit_price,
+            quantity,
+            time_in_force: tif,
+            timestamp,
+            status: StopStatus::Pending,
+        };
+
+        self.stop_book.insert(order);
+
+        // Check for immediate trigger
+        if let Some(last_price) = self.last_trade_price {
+            let should_trigger = match side {
+                Side::Buy => last_price >= stop_price,
+                Side::Sell => last_price <= stop_price,
+            };
+            if should_trigger {
+                self.process_trade_triggers();
+                // After trigger, check the updated status
+                let status = self
+                    .stop_book
+                    .get(id)
+                    .map(|o| o.status)
+                    .unwrap_or(StopStatus::Triggered);
+                return StopSubmitResult {
+                    order_id: id,
+                    status,
+                };
+            }
+        }
+
+        StopSubmitResult {
+            order_id: id,
+            status: StopStatus::Pending,
+        }
+    }
+
+    /// Process stop order triggers after trades occur.
+    ///
+    /// Triggered stops may produce trades that trigger more stops (cascade).
+    /// Limited to `MAX_CASCADE_DEPTH` iterations to prevent infinite loops.
+    fn process_trade_triggers(&mut self) {
+        for _ in 0..Self::MAX_CASCADE_DEPTH {
+            let trade_price = match self.last_trade_price {
+                Some(p) => p,
+                None => return,
+            };
+
+            let triggered = self.stop_book.collect_triggered(trade_price);
+            if triggered.is_empty() {
+                return;
+            }
+
+            let mut new_last_price = None;
+
+            for stop in triggered {
+                let result = match stop.limit_price {
+                    Some(limit) => {
+                        self.submit_limit_internal(stop.side, limit, stop.quantity, stop.time_in_force)
+                    }
+                    None => {
+                        let price = match stop.side {
+                            Side::Buy => Price::MAX,
+                            Side::Sell => Price::MIN,
+                        };
+                        self.submit_limit_internal(stop.side, price, stop.quantity, TimeInForce::IOC)
+                    }
+                };
+
+                // submit_limit_internal already records trades in self.trades
+                if let Some(last_trade) = result.trades.last() {
+                    new_last_price = Some(last_trade.price);
+                }
+            }
+
+            match new_last_price {
+                Some(p) => self.last_trade_price = Some(p),
+                None => return, // No new trades, no more triggers possible
+            }
+        }
+    }
+
     // === Queries ===
 
     /// Get an order by ID.
@@ -298,6 +508,26 @@ impl Exchange {
         &self.book
     }
 
+    /// Get a stop order by ID.
+    pub fn get_stop_order(&self, order_id: OrderId) -> Option<&StopOrder> {
+        self.stop_book.get(order_id)
+    }
+
+    /// Get the number of pending stop orders.
+    pub fn pending_stop_count(&self) -> usize {
+        self.stop_book.pending_count()
+    }
+
+    /// Get the last trade price.
+    pub fn last_trade_price(&self) -> Option<Price> {
+        self.last_trade_price
+    }
+
+    /// Get the stop book (for advanced queries).
+    pub fn stop_book(&self) -> &StopBook {
+        &self.stop_book
+    }
+
     // === Memory Management ===
 
     /// Clear trade history to free memory.
@@ -310,8 +540,9 @@ impl Exchange {
     /// Remove filled and cancelled orders from history.
     ///
     /// Active orders (on the book) are preserved. Returns the number
-    /// of orders removed.
+    /// of orders removed. Also clears triggered/cancelled stop orders.
     pub fn clear_order_history(&mut self) -> usize {
+        self.stop_book.clear_history();
         self.book.clear_history()
     }
 }
@@ -605,6 +836,179 @@ mod tests {
 
         assert!(!result.success);
         assert_eq!(result.error, Some(ModifyError::InvalidQuantity));
+    }
+
+    // === Validation ===
+
+    #[test]
+    fn try_submit_limit_zero_quantity() {
+        let mut exchange = Exchange::new();
+        let result = exchange.try_submit_limit(Side::Buy, Price(100_00), 0, TimeInForce::GTC);
+        assert_eq!(result.unwrap_err(), ValidationError::ZeroQuantity);
+    }
+
+    #[test]
+    fn try_submit_limit_zero_price() {
+        let mut exchange = Exchange::new();
+        let result = exchange.try_submit_limit(Side::Buy, Price(0), 100, TimeInForce::GTC);
+        assert_eq!(result.unwrap_err(), ValidationError::ZeroPrice);
+    }
+
+    #[test]
+    fn try_submit_limit_negative_price() {
+        let mut exchange = Exchange::new();
+        let result = exchange.try_submit_limit(Side::Buy, Price(-100), 100, TimeInForce::GTC);
+        assert_eq!(result.unwrap_err(), ValidationError::ZeroPrice);
+    }
+
+    #[test]
+    fn try_submit_limit_valid() {
+        let mut exchange = Exchange::new();
+        let result = exchange.try_submit_limit(Side::Buy, Price(100_00), 100, TimeInForce::GTC);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().order_id, OrderId(1));
+    }
+
+    #[test]
+    fn try_submit_market_zero_quantity() {
+        let mut exchange = Exchange::new();
+        let result = exchange.try_submit_market(Side::Buy, 0);
+        assert_eq!(result.unwrap_err(), ValidationError::ZeroQuantity);
+    }
+
+    #[test]
+    fn try_submit_market_valid() {
+        let mut exchange = Exchange::new();
+        exchange.submit_limit(Side::Sell, Price(100_00), 100, TimeInForce::GTC);
+        let result = exchange.try_submit_market(Side::Buy, 50);
+        assert!(result.is_ok());
+    }
+
+    // === Stop Orders ===
+
+    #[test]
+    fn submit_stop_market_pending() {
+        let mut exchange = Exchange::new();
+
+        let result = exchange.submit_stop_market(Side::Buy, Price(105_00), 100);
+        assert_eq!(result.status, StopStatus::Pending);
+        assert_eq!(exchange.pending_stop_count(), 1);
+    }
+
+    #[test]
+    fn stop_market_triggers_on_trade() {
+        let mut exchange = Exchange::new();
+
+        // Set up a resting ask
+        exchange.submit_limit(Side::Sell, Price(100_00), 50, TimeInForce::GTC);
+        // Set up asks for the triggered order to fill against
+        exchange.submit_limit(Side::Sell, Price(105_00), 100, TimeInForce::GTC);
+
+        // Place buy stop at 100
+        exchange.submit_stop_market(Side::Buy, Price(100_00), 100);
+
+        // Now submit a buy that crosses the ask and produces a trade at 100
+        let result = exchange.submit_limit(Side::Buy, Price(100_00), 50, TimeInForce::GTC);
+        assert_eq!(result.trades.len(), 1);
+
+        // Stop should have triggered and filled against the 105 ask
+        assert_eq!(exchange.pending_stop_count(), 0);
+        assert_eq!(exchange.last_trade_price(), Some(Price(105_00)));
+    }
+
+    #[test]
+    fn stop_limit_triggers_with_limit_price() {
+        let mut exchange = Exchange::new();
+
+        // Set up asks
+        exchange.submit_limit(Side::Sell, Price(100_00), 50, TimeInForce::GTC);
+        exchange.submit_limit(Side::Sell, Price(106_00), 100, TimeInForce::GTC);
+
+        // Place buy stop-limit: triggers at 100, but only buy up to 105
+        exchange.submit_stop_limit(
+            Side::Buy,
+            Price(100_00),
+            Price(105_00),
+            100,
+            TimeInForce::GTC,
+        );
+
+        // Trigger with a trade at 100
+        exchange.submit_limit(Side::Buy, Price(100_00), 50, TimeInForce::GTC);
+
+        // Stop triggered, but limit price 105 doesn't cross ask at 106
+        // So it should rest on the book
+        assert_eq!(exchange.pending_stop_count(), 0);
+        assert_eq!(exchange.best_bid(), Some(Price(105_00)));
+    }
+
+    #[test]
+    fn cancel_stop_order() {
+        let mut exchange = Exchange::new();
+
+        let stop = exchange.submit_stop_market(Side::Buy, Price(105_00), 100);
+        assert_eq!(exchange.pending_stop_count(), 1);
+
+        let result = exchange.cancel(stop.order_id);
+        assert!(result.success);
+        assert_eq!(result.cancelled_quantity, 100);
+        assert_eq!(exchange.pending_stop_count(), 0);
+    }
+
+    #[test]
+    fn sell_stop_triggers_on_price_drop() {
+        let mut exchange = Exchange::new();
+
+        // Set up a resting bid to establish a price
+        exchange.submit_limit(Side::Buy, Price(100_00), 50, TimeInForce::GTC);
+        // Set up bids for the triggered sell to fill against
+        exchange.submit_limit(Side::Buy, Price(95_00), 100, TimeInForce::GTC);
+
+        // Sell stop at 100: triggers when price drops to 100
+        exchange.submit_stop_market(Side::Sell, Price(100_00), 100);
+
+        // Trade at 100 triggers the sell stop
+        exchange.submit_limit(Side::Sell, Price(100_00), 50, TimeInForce::GTC);
+
+        assert_eq!(exchange.pending_stop_count(), 0);
+    }
+
+    #[test]
+    fn immediate_trigger_if_price_already_past() {
+        let mut exchange = Exchange::new();
+
+        // Create a trade to establish last_trade_price at 100
+        exchange.submit_limit(Side::Sell, Price(100_00), 50, TimeInForce::GTC);
+        exchange.submit_limit(Side::Buy, Price(100_00), 50, TimeInForce::GTC);
+        assert_eq!(exchange.last_trade_price(), Some(Price(100_00)));
+
+        // Set up more asks for the stop to fill against
+        exchange.submit_limit(Side::Sell, Price(105_00), 100, TimeInForce::GTC);
+
+        // Submit buy stop at 99 — already past, should trigger immediately
+        let result = exchange.submit_stop_market(Side::Buy, Price(99_00), 100);
+        assert_eq!(result.status, StopStatus::Triggered);
+        assert_eq!(exchange.pending_stop_count(), 0);
+    }
+
+    #[test]
+    fn stop_cascade() {
+        let mut exchange = Exchange::new();
+
+        // Set up asks at different levels
+        exchange.submit_limit(Side::Sell, Price(100_00), 50, TimeInForce::GTC);
+        exchange.submit_limit(Side::Sell, Price(102_00), 50, TimeInForce::GTC);
+        exchange.submit_limit(Side::Sell, Price(104_00), 50, TimeInForce::GTC);
+
+        // Buy stop at 100 — when triggered, will trade at 102
+        exchange.submit_stop_market(Side::Buy, Price(100_00), 50);
+        // Buy stop at 102 — cascading trigger from first stop's trade
+        exchange.submit_stop_market(Side::Buy, Price(102_00), 50);
+
+        // Trigger cascade: trade at 100 -> stop1 triggers -> trades at 102 -> stop2 triggers
+        exchange.submit_limit(Side::Buy, Price(100_00), 50, TimeInForce::GTC);
+
+        assert_eq!(exchange.pending_stop_count(), 0);
     }
 
     // === Queries ===

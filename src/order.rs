@@ -4,6 +4,7 @@ use crate::{OrderId, Price, Quantity, Side, TimeInForce, Timestamp};
 
 /// Status of an order in its lifecycle.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum OrderStatus {
     /// Order accepted, resting on book (no fills yet)
     #[default]
@@ -32,6 +33,7 @@ impl OrderStatus {
 
 /// An order in the order book.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Order {
     /// Unique identifier assigned by exchange
     pub id: OrderId,

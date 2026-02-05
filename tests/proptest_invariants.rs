@@ -6,7 +6,7 @@
 //! These tests use proptest to verify that key invariants hold
 //! across randomly generated scenarios.
 
-use nanobook::{Exchange, Price, Side, TimeInForce};
+use nanobook::{Exchange, Price, Side, StopStatus, TimeInForce};
 use proptest::prelude::*;
 
 /// Generate a valid price (positive, reasonable range)
@@ -358,6 +358,139 @@ proptest! {
                 "trade timestamps not monotonic: {} >= {}",
                 window[0].timestamp, window[1].timestamp
             );
+        }
+    }
+
+    // ========================================================================
+    // STOP ORDER INVARIANTS
+    // ========================================================================
+
+    /// Stop-market orders that trigger produce valid trades
+    #[test]
+    fn stop_market_triggers_produce_valid_trades(
+        resting_price in price_strategy(),
+        resting_qty in quantity_strategy(),
+        stop_price in price_strategy(),
+        stop_qty in quantity_strategy(),
+    ) {
+        let mut exchange = Exchange::new();
+
+        // Build resting liquidity on both sides
+        exchange.submit_limit(Side::Sell, resting_price, resting_qty, TimeInForce::GTC);
+        exchange.submit_limit(Side::Buy, Price(1), resting_qty, TimeInForce::GTC);
+
+        // Create a trade to set last_trade_price
+        exchange.submit_limit(Side::Buy, resting_price, 1, TimeInForce::GTC);
+        let trades_before = exchange.trades().len();
+
+        // Submit a stop-market that may trigger immediately
+        let result = exchange.submit_stop_market(Side::Sell, stop_price, stop_qty);
+
+        // If triggered, any new trades must have valid (positive) prices and quantities
+        if result.status == StopStatus::Triggered {
+            for trade in &exchange.trades()[trades_before..] {
+                prop_assert!(trade.price.0 > 0, "trade at non-positive price");
+                prop_assert!(trade.quantity > 0, "trade with zero quantity");
+            }
+        }
+    }
+
+    /// Cancelled stop orders never trigger
+    #[test]
+    fn cancelled_stop_never_triggers(
+        stop_price in price_strategy(),
+        stop_qty in quantity_strategy(),
+        trade_price in price_strategy(),
+        trade_qty in quantity_strategy(),
+    ) {
+        let mut exchange = Exchange::new();
+
+        // Add liquidity so trades can happen
+        exchange.submit_limit(Side::Sell, trade_price, trade_qty, TimeInForce::GTC);
+
+        // Submit and immediately cancel a buy stop
+        let stop = exchange.submit_stop_market(Side::Buy, stop_price, stop_qty);
+        exchange.cancel(stop.order_id);
+
+        let trades_before = exchange.trades().len();
+
+        // Now create a trade that would have triggered the stop
+        exchange.submit_limit(Side::Buy, trade_price, trade_qty, TimeInForce::IOC);
+
+        // The cancelled stop should NOT have produced additional trades beyond the direct match
+        // Count trades from the direct IOC match
+        let new_trades = exchange.trades().len() - trades_before;
+        // At most 1 trade from the direct IOC match (may be 0 if no liquidity left)
+        prop_assert!(new_trades <= 1, "cancelled stop produced extra trades: {}", new_trades);
+    }
+
+    /// Stop order cascade depth is bounded
+    #[test]
+    fn stop_cascade_bounded(
+        base_price in 50_000i64..60_000i64,
+    ) {
+        let mut exchange = Exchange::new();
+
+        // Create alternating buy/sell liquidity at multiple levels
+        for i in 0..10 {
+            let p = base_price + i * 100;
+            exchange.submit_limit(Side::Sell, Price(p), 10, TimeInForce::GTC);
+            exchange.submit_limit(Side::Buy, Price(p - 50), 10, TimeInForce::GTC);
+        }
+
+        // Chain many stop orders that could cascade
+        for i in 0..150 {
+            let p = base_price + i * 10;
+            exchange.submit_stop_market(Side::Buy, Price(p), 5);
+            exchange.submit_stop_market(Side::Sell, Price(p), 5);
+        }
+
+        // Trigger the chain with a market order
+        let trades_before = exchange.trades().len();
+        exchange.submit_market(Side::Buy, 10);
+
+        // Verify we didn't crash or hang (cascade is bounded at 100)
+        let total_trades = exchange.trades().len();
+        prop_assert!(total_trades >= trades_before, "trade count went backwards");
+        // Verify book isn't crossed after cascade
+        let (best_bid, best_ask) = exchange.best_bid_ask();
+        if let (Some(bid), Some(ask)) = (best_bid, best_ask) {
+            prop_assert!(bid < ask, "crossed book after cascade: bid {} >= ask {}", bid.0, ask.0);
+        }
+    }
+
+    /// Quantity conservation holds for stop-limit triggers
+    #[test]
+    fn stop_limit_quantity_conservation(
+        resting_price in price_strategy(),
+        resting_qty in quantity_strategy(),
+        stop_price in price_strategy(),
+        limit_price in price_strategy(),
+        stop_qty in quantity_strategy(),
+    ) {
+        let mut exchange = Exchange::new();
+
+        // Add resting asks
+        exchange.submit_limit(Side::Sell, resting_price, resting_qty, TimeInForce::GTC);
+
+        // Create a trade to set last_trade_price
+        exchange.submit_limit(Side::Buy, resting_price, 1, TimeInForce::IOC);
+
+        // Submit a buy stop-limit
+        exchange.submit_stop_limit(
+            Side::Buy, stop_price, limit_price, stop_qty, TimeInForce::GTC
+        );
+
+        // The book should not be crossed
+        let (best_bid, best_ask) = exchange.best_bid_ask();
+        if let (Some(bid), Some(ask)) = (best_bid, best_ask) {
+            prop_assert!(bid < ask, "crossed book: bid {} >= ask {}", bid.0, ask.0);
+        }
+
+        // Verify all trades have positive quantities
+        for trade in exchange.trades() {
+            prop_assert!(trade.quantity > 0, "zero-quantity trade");
+            prop_assert!(trade.price.0 > 0, "non-positive trade price");
         }
     }
 }

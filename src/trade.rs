@@ -8,6 +8,7 @@ use std::fmt;
 /// Trades are created when an incoming (aggressor) order matches
 /// against a resting (passive) order on the book.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Trade {
     /// Unique identifier assigned by exchange
     pub id: TradeId,

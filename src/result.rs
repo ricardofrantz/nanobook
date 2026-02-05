@@ -1,9 +1,11 @@
 //! Result types for Exchange operations.
 
+use crate::stop::StopStatus;
 use crate::{OrderId, OrderStatus, Quantity, Trade};
 
 /// Result of submitting an order.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SubmitResult {
     /// The order ID assigned by the exchange
     pub order_id: OrderId,
@@ -38,6 +40,7 @@ impl SubmitResult {
 
 /// Result of cancelling an order.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CancelResult {
     /// Whether the cancellation succeeded
     pub success: bool,
@@ -69,6 +72,7 @@ impl CancelResult {
 
 /// Errors that can occur when cancelling an order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CancelError {
     /// Order ID not found
     OrderNotFound,
@@ -78,6 +82,7 @@ pub enum CancelError {
 
 /// Result of modifying an order.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ModifyResult {
     /// Whether the modification succeeded
     pub success: bool,
@@ -126,6 +131,7 @@ impl ModifyResult {
 
 /// Errors that can occur when modifying an order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ModifyError {
     /// Order ID not found
     OrderNotFound,
@@ -133,4 +139,14 @@ pub enum ModifyError {
     OrderNotActive,
     /// New quantity is zero
     InvalidQuantity,
+}
+
+/// Result of submitting a stop order.
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct StopSubmitResult {
+    /// The order ID assigned by the exchange.
+    pub order_id: OrderId,
+    /// Status of the stop order (Pending or Triggered if immediate).
+    pub status: StopStatus,
 }

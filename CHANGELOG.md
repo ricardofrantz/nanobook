@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-05
+
+### Added
+
+- **Stop orders**: Stop-market and stop-limit orders with automatic triggering
+  - `submit_stop_market()` — triggers market order on price threshold
+  - `submit_stop_limit()` — triggers limit order on price threshold
+  - Cascading triggers with depth limit (max 100 iterations)
+  - `cancel()` works on both regular and stop orders
+  - New types: `StopOrder`, `StopStatus`, `StopBook`, `StopSubmitResult`
+- **Input validation**: `try_submit_limit()` and `try_submit_market()` with `ValidationError`
+  - `ZeroQuantity` — quantity must be > 0
+  - `ZeroPrice` — price must be > 0 for limit orders
+- **Serde support**: Optional `serde` feature flag adds `Serialize`/`Deserialize` to all public types
+- **Persistence**: Optional `persistence` feature for file-based event sourcing
+  - `exchange.save(path)` / `Exchange::load(path)` — JSON Lines format
+  - `save_events()` / `load_events()` — lower-level API
+- **Examples**: `basic_usage`, `market_making`, `ioc_execution`
+- **CLI commands**: `stop`, `stoplimit`, `save`, `load`
+
+### Changed
+
+- `cancel()` now checks stop book before regular order book
+- `clear_order_history()` also clears triggered/cancelled stop orders
+- Event enum extended with `SubmitStopMarket` and `SubmitStopLimit` variants
+
 ## [0.1.0] - 2026-02-05
 
 Initial release of nanobook - a deterministic limit order book and matching engine.
@@ -40,5 +66,6 @@ Initial release of nanobook - a deterministic limit order book and matching engi
 - Fixed-point price representation (avoids floating-point errors)
 - Deterministic via monotonic timestamps (not system clock)
 
-[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ricardofrantz/nanobook/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ricardofrantz/nanobook/releases/tag/v0.1.0

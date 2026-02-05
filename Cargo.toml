@@ -1,6 +1,6 @@
 [package]
 name = "nanobook"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.70"
 description = "Deterministic limit order book and matching engine for testing trading algorithms"
@@ -16,10 +16,14 @@ authors = ["Ricardo Frantz"]
 [dependencies]
 thiserror = "2.0"
 rustc-hash = "2.1"  # FxHash - fast non-cryptographic hash
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 
 [features]
 default = ["event-log"]
 event-log = []  # Enable event recording for replay (disable for max perf)
+serde = ["dep:serde"]
+persistence = ["serde", "event-log", "dep:serde_json"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

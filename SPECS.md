@@ -521,7 +521,7 @@ pub struct CancelResult {
 #[derive(Debug)]
 pub enum CancelError {
     OrderNotFound,
-    OrderAlreadyCompleted,
+    OrderNotActive,
 }
 
 pub struct ModifyResult {
@@ -536,9 +536,8 @@ pub struct ModifyResult {
 #[derive(Debug)]
 pub enum ModifyError {
     OrderNotFound,
-    OrderAlreadyCompleted,
+    OrderNotActive,
     InvalidQuantity,
-    InvalidPrice,
 }
 
 /// Result of applying an event during replay
@@ -572,24 +571,12 @@ For deterministic replay, all inputs are logged as events:
 ```rust
 #[derive(Clone, Debug)]
 pub enum Event {
-    SubmitLimit {
-        side: Side,
-        price: Price,
-        quantity: Quantity,
-        time_in_force: TimeInForce,
-    },
-    SubmitMarket {
-        side: Side,
-        quantity: Quantity,
-    },
-    Cancel {
-        order_id: OrderId,
-    },
-    Modify {
-        order_id: OrderId,
-        new_price: Price,
-        new_quantity: Quantity,
-    },
+    SubmitLimit { side, price, quantity, time_in_force },
+    SubmitMarket { side, quantity },
+    Cancel { order_id },
+    Modify { order_id, new_price, new_quantity },
+    SubmitStopMarket { side, stop_price, quantity },
+    SubmitStopLimit { side, stop_price, limit_price, quantity, time_in_force },
 }
 ```
 
@@ -610,13 +597,13 @@ assert_eq!(exchange.best_bid_ask(), restored.best_bid_ask());
 
 ### 8.1 Validation Errors
 
-Orders are validated before processing:
+Validated submission methods return errors instead of accepting any input:
 
 ```rust
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ValidationError {
-    ZeroQuantity,
-    InvalidPrice,  // e.g., negative price for a buy
+    ZeroQuantity,   // quantity == 0
+    ZeroPrice,      // price <= 0 for limit orders
 }
 ```
 
@@ -629,7 +616,7 @@ impl Exchange {
 }
 ```
 
-The non-`try_` versions panic on validation errors (for convenience in trusted contexts).
+The non-`try_` versions accept any input (no validation) for convenience in trusted contexts.
 
 ---
 
@@ -669,9 +656,84 @@ The following must **always** hold:
 
 ---
 
-## 11. Out of Scope (v1)
+## 11. Stop Orders
 
-The following are **explicitly not included** in v1:
+### 11.1 Stop-Market Order
+
+Submits a market order when last trade price reaches the stop price.
+
+```rust
+exchange.submit_stop_market(side: Side, stop_price: Price, quantity: Quantity) -> StopSubmitResult
+```
+
+- **Buy stop**: triggers when `last_trade_price >= stop_price`
+- **Sell stop**: triggers when `last_trade_price <= stop_price`
+
+### 11.2 Stop-Limit Order
+
+Submits a limit order at `limit_price` when the stop triggers.
+
+```rust
+exchange.submit_stop_limit(side, stop_price, limit_price, quantity, tif) -> StopSubmitResult
+```
+
+### 11.3 Trigger Semantics
+
+- Triggers are checked after every trade
+- If `last_trade_price` already past stop price at submission, triggers immediately
+- Triggered stops may cascade (limited to 100 iterations)
+- Stops share the global OrderId space
+- `cancel()` works on both regular and stop orders
+- `modify()` does NOT work on stops — cancel and re-submit instead
+
+### 11.4 StopBook
+
+```rust
+pub struct StopBook {
+    buy_stops: BTreeMap<Price, Vec<OrderId>>,
+    sell_stops: BTreeMap<Price, Vec<OrderId>>,
+    orders: FxHashMap<OrderId, StopOrder>,
+}
+```
+
+---
+
+## 12. Persistence
+
+### 12.1 Feature Flag
+
+```toml
+nanobook = { version = "0.2", features = ["persistence"] }
+```
+
+The `persistence` feature enables `serde` and `event-log`.
+
+### 12.2 JSON Lines Format
+
+Events are stored one per line (`.jsonl`):
+
+```rust
+// Save
+exchange.save(Path::new("orders.jsonl"))?;
+
+// Load (replay from scratch)
+let exchange = Exchange::load(Path::new("orders.jsonl"))?;
+```
+
+### 12.3 Lower-Level API
+
+```rust
+use nanobook::persistence::{save_events, load_events};
+
+save_events(&events, path)?;
+let events = load_events(path)?;
+```
+
+---
+
+## 13. Out of Scope
+
+The following are **explicitly not included**:
 
 | Feature | Reason |
 |---------|--------|
@@ -679,17 +741,15 @@ The following are **explicitly not included** in v1:
 | **Circuit breakers** | Market-wide feature, not single-book |
 | **Iceberg orders** | Display quantity ≠ actual quantity adds complexity |
 | **Pegged orders** | Requires reference price feed |
-| **Stop orders** | Requires trigger mechanism / market data |
 | **Good-til-date** | Requires time management beyond monotonic counter |
 | **Minimum quantity** | Edge case, rarely needed |
 | **All-or-none (AON)** | Different from FOK (can wait for liquidity) |
 | **Multi-symbol** | Single book only; use multiple Exchange instances |
-| **Persistence** | In-memory only; serialize events for durability |
 | **Networking** | In-process only; wrap in server for network access |
 
 ---
 
-## 12. Testing Strategy
+## 14. Testing Strategy
 
 ### 12.1 Unit Tests
 
@@ -754,7 +814,7 @@ fn bench_deep_book_snapshot(c: &mut Criterion);
 
 ---
 
-## 13. File Structure
+## 15. File Structure
 
 ```
 nanobook/
@@ -763,7 +823,6 @@ nanobook/
 ├── SPECS.md
 ├── LICENSE
 ├── CHANGELOG.md
-├── CONTRIBUTING.md
 ├── src/
 │   ├── lib.rs           # Public API re-exports
 │   ├── types.rs         # Price, Quantity, Timestamp, OrderId, TradeId
@@ -777,7 +836,10 @@ nanobook/
 │   ├── exchange.rs      # Exchange (high-level API)
 │   ├── event.rs         # Event enum for replay
 │   ├── snapshot.rs      # BookSnapshot, LevelSnapshot
-│   └── error.rs         # Error types
+│   ├── error.rs         # ValidationError
+│   ├── stop.rs          # StopOrder, StopStatus, StopBook
+│   ├── persistence.rs   # JSON Lines save/load (feature-gated)
+│   └── result.rs        # SubmitResult, CancelResult, etc.
 ├── tests/
 │   └── proptest_invariants.rs  # Property-based invariant tests
 ├── benches/
@@ -790,45 +852,34 @@ nanobook/
 
 ---
 
-## 14. Dependencies
+## 16. Dependencies
 
 Minimal dependencies for performance:
 
 ```toml
-[package]
-name = "nanobook"
-version = "0.1.0"
-edition = "2021"
-
 [dependencies]
-thiserror = "2.0"  # Error derive macros
-
-[dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-proptest = "1.5"
+thiserror = "2.0"       # Error derive macros
+rustc-hash = "2.1"      # FxHash - fast non-cryptographic hash
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 
 [features]
-default = []
-serde = ["dep:serde"]   # Optional serialization
-python = ["dep:pyo3"]   # Optional Python bindings
-
-[[bench]]
-name = "throughput"
-harness = false
+default = ["event-log"]
+event-log = []                                     # Event recording for replay
+serde = ["dep:serde"]                              # Serialize/Deserialize derives
+persistence = ["serde", "event-log", "dep:serde_json"]  # File-based save/load
 ```
 
 ---
 
-## 15. Future Extensions (v2+)
+## 17. Future Extensions (v3+)
 
 Potential additions based on demand:
 
-1. **Stop orders**: Trigger on price threshold crossing
-2. **Stop-limit orders**: Stop triggers limit order
-3. **Multi-symbol**: HashMap<Symbol, Exchange>
-4. **ITCH/OUCH parsing**: Replay historical market data
-5. **Python bindings**: PyO3 for strategy testing in Python
-6. **WebSocket feed**: Real-time book updates
-7. **Persistence**: Event sourcing to SQLite/RocksDB
-8. **Self-trade prevention**: Block orders from same trader ID
-9. **Display quantity**: Iceberg order support
+1. **Multi-symbol**: HashMap<Symbol, Exchange>
+2. **ITCH/OUCH parsing**: Replay historical market data
+3. **Python bindings**: PyO3 for strategy testing in Python
+4. **WebSocket feed**: Real-time book updates
+5. **Self-trade prevention**: Block orders from same trader ID
+6. **Display quantity**: Iceberg order support
+7. **Trailing stops**: Stop price that follows market

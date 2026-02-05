@@ -149,6 +149,7 @@
 //! ```
 
 mod book;
+mod error;
 mod event;
 mod exchange;
 mod level;
@@ -158,21 +159,28 @@ mod price_levels;
 mod result;
 mod side;
 mod snapshot;
+#[cfg(feature = "persistence")]
+pub mod persistence;
+pub mod stop;
 mod tif;
 mod trade;
 mod types;
 
 // Re-export public API
 pub use book::OrderBook;
+pub use error::ValidationError;
 pub use event::{ApplyResult, Event};
 pub use exchange::Exchange;
 pub use level::Level;
 pub use matching::MatchResult;
 pub use order::{Order, OrderStatus};
 pub use price_levels::PriceLevels;
-pub use result::{CancelError, CancelResult, ModifyError, ModifyResult, SubmitResult};
+pub use result::{
+    CancelError, CancelResult, ModifyError, ModifyResult, StopSubmitResult, SubmitResult,
+};
 pub use side::Side;
 pub use snapshot::{BookSnapshot, LevelSnapshot};
+pub use stop::{StopBook, StopOrder, StopStatus};
 pub use tif::TimeInForce;
 pub use trade::Trade;
 pub use types::{OrderId, Price, Quantity, Timestamp, TradeId};

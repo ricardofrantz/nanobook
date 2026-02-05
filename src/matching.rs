@@ -9,6 +9,7 @@ use crate::{Order, OrderBook, Price, Quantity, Side, Trade};
 
 /// Result of matching an incoming order against the book.
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MatchResult {
     /// Trades that occurred during matching
     pub trades: Vec<Trade>,

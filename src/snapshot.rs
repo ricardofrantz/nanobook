@@ -4,6 +4,7 @@ use crate::{OrderBook, Price, Quantity, Timestamp};
 
 /// A snapshot of the order book at a point in time.
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BookSnapshot {
     /// Bid levels (highest price first)
     pub bids: Vec<LevelSnapshot>,
@@ -53,6 +54,7 @@ impl BookSnapshot {
 
 /// A snapshot of a single price level.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LevelSnapshot {
     /// Price at this level
     pub price: Price,

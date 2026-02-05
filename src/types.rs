@@ -7,6 +7,7 @@ use std::fmt;
 /// `Price(10050)` represents $100.50 if tick size is $0.01.
 /// Using fixed-point avoids floating-point errors in financial calculations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Price(pub i64);
 
 impl Price {
@@ -37,6 +38,7 @@ pub type Timestamp = u64;
 
 /// Unique order identifier assigned by exchange.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OrderId(pub u64);
 
 impl fmt::Display for OrderId {
@@ -47,6 +49,7 @@ impl fmt::Display for OrderId {
 
 /// Unique trade identifier assigned by exchange.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TradeId(pub u64);
 
 impl fmt::Display for TradeId {

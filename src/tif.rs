@@ -5,6 +5,7 @@ use std::fmt;
 /// Time-in-force determines how long an order remains active
 /// and how partial fills are handled.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TimeInForce {
     /// Good-til-cancelled: rests on book until filled or explicitly cancelled.
     /// Allows partial fills; remainder stays on book.
