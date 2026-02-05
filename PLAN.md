@@ -2,11 +2,11 @@
 
 **Project**: rustbook
 **Date**: 2026-02-05
-**Status**: COMPLETE ✓
+**Status**: v0.1.0 COMPLETE ✓ | v0.2.0 IN PROGRESS
 
 ---
 
-## Completion Summary
+## Completion Summary (v0.1.0)
 
 All 11 phases complete:
 - ✓ Phase 1-5: Core types, Order, Trade, Level, PriceLevels, OrderBook
@@ -16,9 +16,67 @@ All 11 phases complete:
 - ✓ Phase 9: Error handling (CancelError, ModifyError)
 - ✓ Phase 10: Benchmarks (~6.5M orders/sec, ~1B BBO queries/sec)
 - ✓ Phase 11: Documentation with 7 doc-tested examples
+- ✓ Phase 12: Property-based tests (proptest)
+- ✓ Phase 13: Release prep (LICENSE, CHANGELOG, CONTRIBUTING)
 
-**Tests**: 130 passing (123 unit + 7 doc)
+**Tests**: 144 passing (123 unit + 14 proptest + 7 doc)
 **Repo**: https://github.com/ricardofrantz/rustbook
+
+---
+
+## Roadmap: v0.2.0
+
+### Phase 14: Serialization (serde)
+| Task | Status |
+|------|--------|
+| Add `serde` feature flag | ☐ |
+| Derive Serialize/Deserialize for all public types | ☐ |
+| Add JSON export for events, trades, snapshots | ☐ |
+| Add `Exchange::save()` / `Exchange::load()` | ☐ |
+
+### Phase 15: Python Bindings (PyO3)
+| Task | Status |
+|------|--------|
+| Add `python` feature flag with PyO3 dependency | ☐ |
+| Create `src/python.rs` with PyClass wrappers | ☐ |
+| Expose: Exchange, Side, TimeInForce, Price | ☐ |
+| Expose: submit_limit, submit_market, cancel, depth | ☐ |
+| Add maturin build config | ☐ |
+| Create `examples/python/` with usage examples | ☐ |
+| Add pip install instructions to README | ☐ |
+
+### Phase 16: Stop Orders
+| Task | Status |
+|------|--------|
+| Add `OrderType::Stop { trigger_price }` | ☐ |
+| Add `OrderType::StopLimit { trigger_price, limit_price }` | ☐ |
+| Track pending stop orders separately | ☐ |
+| Trigger stops when market price crosses | ☐ |
+| Add tests for stop order scenarios | ☐ |
+
+### Phase 17: CLI Enhancements
+| Task | Status |
+|------|--------|
+| Add `lob replay <file.json>` command | ☐ |
+| Add `lob export <file.json>` for event log | ☐ |
+| Add `--stats` flag for performance metrics | ☐ |
+
+### Phase 18: Documentation
+| Task | Status |
+|------|--------|
+| Add `#![doc = include_str!("../README.md")]` to lib.rs | ☐ |
+| Add sample market data file for examples | ☐ |
+| Create Jupyter notebook example (with Python bindings) | ☐ |
+
+---
+
+## Priority Order
+
+1. **Serde** — enables persistence, needed for Python bindings
+2. **Python bindings** — 10x user base, biggest impact
+3. **docs.rs integration** — quick win, improves discoverability
+4. **Stop orders** — common backtesting need
+5. **CLI enhancements** — nice to have
 
 ---
 
