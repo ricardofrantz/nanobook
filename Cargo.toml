@@ -23,6 +23,7 @@ event-log = []  # Enable event recording for replay (disable for max perf)
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.5"
 
 [[bin]]
 name = "lob"
