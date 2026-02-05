@@ -63,10 +63,10 @@ impl Level {
 
     /// Add an order to the back of the queue.
     ///
-    /// The quantity is added to the level's total.
+    /// The quantity is added to the level's total (saturating on overflow).
     pub fn push_back(&mut self, order_id: OrderId, quantity: Quantity) {
         self.orders.push_back(order_id);
-        self.total_quantity += quantity;
+        self.total_quantity = self.total_quantity.saturating_add(quantity);
     }
 
     /// Remove and return the order at the front of the queue.

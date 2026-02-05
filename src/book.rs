@@ -259,6 +259,19 @@ impl OrderBook {
         let timestamp = self.next_timestamp();
         Order::new(id, side, price, quantity, timestamp, time_in_force)
     }
+
+    /// Remove filled and cancelled orders from history to free memory.
+    ///
+    /// Active orders (on the book) are preserved. Returns the number of
+    /// orders removed.
+    ///
+    /// Use this periodically for long-running instances to prevent
+    /// unbounded memory growth.
+    pub fn clear_history(&mut self) -> usize {
+        let before = self.orders.len();
+        self.orders.retain(|_, order| order.is_active());
+        before - self.orders.len()
+    }
 }
 
 impl Default for OrderBook {
@@ -503,5 +516,39 @@ mod tests {
         let order = book.get_order(order_id).unwrap();
         assert_eq!(order.remaining_quantity, 70);
         assert_eq!(order.filled_quantity, 30);
+    }
+
+    #[test]
+    fn clear_history_removes_inactive_orders() {
+        let mut book = OrderBook::new();
+
+        // Add some orders
+        let o1 = book.create_order(Side::Buy, Price(100_00), 100, TimeInForce::GTC);
+        let o2 = book.create_order(Side::Buy, Price(99_00), 100, TimeInForce::GTC);
+        let o3 = book.create_order(Side::Sell, Price(101_00), 100, TimeInForce::GTC);
+        let o1_id = o1.id;
+        let o2_id = o2.id;
+
+        book.add_order(o1);
+        book.add_order(o2);
+        book.add_order(o3);
+
+        assert_eq!(book.order_count(), 3);
+
+        // Cancel one order (becomes inactive but stays in history)
+        book.cancel_order(o1_id);
+        assert_eq!(book.order_count(), 3);
+        assert_eq!(book.active_order_count(), 2);
+
+        // Clear history - should remove the cancelled order
+        let removed = book.clear_history();
+        assert_eq!(removed, 1);
+        assert_eq!(book.order_count(), 2);
+        assert_eq!(book.active_order_count(), 2);
+
+        // Cancelled order should no longer be accessible
+        assert!(book.get_order(o1_id).is_none());
+        // Active orders should still be there
+        assert!(book.get_order(o2_id).is_some());
     }
 }
