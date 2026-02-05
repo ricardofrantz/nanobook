@@ -24,11 +24,15 @@
 //! assert!(tif.can_rest());
 //! ```
 
+mod order;
 mod side;
 mod tif;
+mod trade;
 mod types;
 
 // Re-export public API
+pub use order::{Order, OrderStatus};
 pub use side::Side;
 pub use tif::TimeInForce;
+pub use trade::Trade;
 pub use types::{OrderId, Price, Quantity, Timestamp, TradeId};
