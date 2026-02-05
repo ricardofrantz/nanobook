@@ -528,6 +528,7 @@ mod tests {
         let o3 = book.create_order(Side::Sell, Price(101_00), 100, TimeInForce::GTC);
         let o1_id = o1.id;
         let o2_id = o2.id;
+        let o3_id = o3.id;
 
         book.add_order(o1);
         book.add_order(o2);
@@ -550,5 +551,6 @@ mod tests {
         assert!(book.get_order(o1_id).is_none());
         // Active orders should still be there
         assert!(book.get_order(o2_id).is_some());
+        assert!(book.get_order(o3_id).is_some());
     }
 }
