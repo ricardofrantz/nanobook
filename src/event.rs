@@ -6,7 +6,9 @@
 //! - Debugging and audit trails
 //! - Serialization/persistence of exchange state
 
-use crate::{Exchange, OrderId, Price, Quantity, Side, TimeInForce, Trade};
+#[cfg(feature = "event-log")]
+use crate::Exchange;
+use crate::{OrderId, Price, Quantity, Side, TimeInForce, Trade};
 
 /// An event that can be applied to an exchange.
 ///
@@ -81,6 +83,7 @@ pub struct ApplyResult {
     pub trades: Vec<Trade>,
 }
 
+#[cfg(feature = "event-log")]
 impl Exchange {
     /// Apply a single event to the exchange.
     ///
@@ -162,7 +165,7 @@ impl Exchange {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "event-log"))]
 mod tests {
     use super::*;
     use crate::OrderStatus;

@@ -5,7 +5,7 @@
 //! - Asks (sell orders) sorted low → high
 //! - Central order storage for O(1) lookup by OrderId
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::{Order, OrderId, Price, PriceLevels, Quantity, Side, TimeInForce, Timestamp, TradeId};
 
@@ -24,7 +24,7 @@ pub struct OrderBook {
     /// Sell orders, sorted by price ascending (best = lowest)
     asks: PriceLevels,
     /// All orders indexed by ID (includes filled/cancelled for history)
-    pub(crate) orders: HashMap<OrderId, Order>,
+    pub(crate) orders: FxHashMap<OrderId, Order>,
     /// Next order ID to assign
     next_order_id: u64,
     /// Next trade ID to assign
@@ -39,7 +39,7 @@ impl OrderBook {
         Self {
             bids: PriceLevels::new(Side::Buy),
             asks: PriceLevels::new(Side::Sell),
-            orders: HashMap::new(),
+            orders: FxHashMap::default(),
             next_order_id: 1,
             next_trade_id: 1,
             next_timestamp: 1,

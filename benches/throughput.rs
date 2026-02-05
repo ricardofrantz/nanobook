@@ -162,7 +162,8 @@ fn bench_depth_snapshot(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark: Replay events
+/// Benchmark: Replay events (only with event-log feature)
+#[cfg(feature = "event-log")]
 fn bench_replay(c: &mut Criterion) {
     let mut group = c.benchmark_group("replay");
 
@@ -189,6 +190,7 @@ fn bench_replay(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "event-log")]
 criterion_group!(
     benches,
     bench_submit_no_match,
@@ -199,4 +201,16 @@ criterion_group!(
     bench_depth_snapshot,
     bench_replay,
 );
+
+#[cfg(not(feature = "event-log"))]
+criterion_group!(
+    benches,
+    bench_submit_no_match,
+    bench_submit_with_match,
+    bench_cancel,
+    bench_market_sweep,
+    bench_bbo_query,
+    bench_depth_snapshot,
+);
+
 criterion_main!(benches);

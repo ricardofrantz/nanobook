@@ -4,8 +4,9 @@
 //! OrderBook and provides methods for submitting orders with proper
 //! time-in-force handling.
 
+#[cfg(feature = "event-log")]
+use crate::event::Event;
 use crate::{
-    event::Event,
     result::{CancelError, CancelResult, ModifyError, ModifyResult, SubmitResult},
     snapshot::BookSnapshot,
     Order, OrderBook, OrderId, OrderStatus, Price, Quantity, Side, TimeInForce, Trade,
@@ -26,7 +27,8 @@ pub struct Exchange {
     pub(crate) book: OrderBook,
     /// Complete trade history
     pub(crate) trades: Vec<Trade>,
-    /// Event log for replay
+    /// Event log for replay (only with "event-log" feature)
+    #[cfg(feature = "event-log")]
     pub(crate) events: Vec<crate::event::Event>,
 }
 
@@ -36,6 +38,7 @@ impl Exchange {
         Self {
             book: OrderBook::new(),
             trades: Vec::new(),
+            #[cfg(feature = "event-log")]
             events: Vec::new(),
         }
     }
@@ -56,7 +59,7 @@ impl Exchange {
         quantity: Quantity,
         tif: TimeInForce,
     ) -> SubmitResult {
-        // Record event
+        #[cfg(feature = "event-log")]
         self.events.push(Event::SubmitLimit {
             side,
             price,
@@ -75,7 +78,7 @@ impl Exchange {
     /// This is equivalent to a limit order at the worst possible price
     /// with IOC time-in-force.
     pub fn submit_market(&mut self, side: Side, quantity: Quantity) -> SubmitResult {
-        // Record event
+        #[cfg(feature = "event-log")]
         self.events.push(Event::SubmitMarket { side, quantity });
 
         // Market order = limit at worst price + IOC
@@ -185,7 +188,7 @@ impl Exchange {
     ///
     /// Returns the cancelled quantity if successful.
     pub fn cancel(&mut self, order_id: OrderId) -> CancelResult {
-        // Record event
+        #[cfg(feature = "event-log")]
         self.events.push(Event::Cancel { order_id });
 
         self.cancel_internal(order_id)
@@ -224,7 +227,7 @@ impl Exchange {
         new_price: Price,
         new_quantity: Quantity,
     ) -> ModifyResult {
-        // Record event (even if it fails)
+        #[cfg(feature = "event-log")]
         self.events.push(Event::Modify {
             order_id,
             new_price,
