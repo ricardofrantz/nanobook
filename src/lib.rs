@@ -26,6 +26,7 @@
 
 mod level;
 mod order;
+mod price_levels;
 mod side;
 mod tif;
 mod trade;
@@ -34,6 +35,7 @@ mod types;
 // Re-export public API
 pub use level::Level;
 pub use order::{Order, OrderStatus};
+pub use price_levels::PriceLevels;
 pub use side::Side;
 pub use tif::TimeInForce;
 pub use trade::Trade;
