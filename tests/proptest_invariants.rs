@@ -1,3 +1,6 @@
+// Allow our dollar.cents digit grouping convention (e.g., 100_00 = $100.00)
+#![allow(clippy::inconsistent_digit_grouping)]
+
 //! Property-based tests for order book invariants.
 //!
 //! These tests use proptest to verify that key invariants hold
