@@ -1,6 +1,6 @@
 # PLAN.md — Implementation Plan
 
-**Project**: limit-order-book-rs
+**Project**: rustbook
 **Date**: 2026-02-05
 **Status**: COMPLETE ✓
 
@@ -18,7 +18,7 @@ All 11 phases complete:
 - ✓ Phase 11: Documentation with 7 doc-tested examples
 
 **Tests**: 130 passing (123 unit + 7 doc)
-**Repo**: https://github.com/ricardofrantz/limit-order-book-rs
+**Repo**: https://github.com/ricardofrantz/rustbook
 
 ---
 
@@ -36,7 +36,7 @@ All 11 phases complete:
 ### 1.1 Cargo.toml
 ```toml
 [package]
-name = "limit-order-book"
+name = "rustbook"
 version = "0.1.0"
 edition = "2021"
 

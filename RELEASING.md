@@ -54,11 +54,11 @@ After release, users can install via:
 
 ```bash
 # From crates.io (compiles from source)
-cargo install limit-order-book
+cargo install rustbook
 
 # From crates.io (pre-built binary, faster)
-cargo binstall limit-order-book
+cargo binstall rustbook
 
 # From GitHub releases (direct download)
-# Download from https://github.com/ricardofrantz/limit-order-book-rs/releases
+# Download from https://github.com/ricardofrantz/rustbook/releases
 ```

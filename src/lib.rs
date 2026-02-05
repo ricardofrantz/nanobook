@@ -1,7 +1,7 @@
 // Allow our dollar.cents digit grouping convention (e.g., 100_00 = $100.00)
 #![allow(clippy::inconsistent_digit_grouping)]
 
-//! # limit-order-book
+//! # rustbook
 //!
 //! A deterministic limit order book and matching engine for testing trading algorithms.
 //!
@@ -16,7 +16,7 @@
 //! ## Quick Start
 //!
 //! ```
-//! use limit_order_book::{Exchange, Side, Price, TimeInForce};
+//! use rustbook::{Exchange, Side, Price, TimeInForce};
 //!
 //! let mut exchange = Exchange::new();
 //!
@@ -37,7 +37,7 @@
 //! Prices are stored as [`i64`] in the smallest unit (e.g., cents):
 //!
 //! ```
-//! use limit_order_book::Price;
+//! use rustbook::Price;
 //!
 //! let price = Price(100_50);  // $100.50
 //! assert_eq!(format!("{}", price), "$100.50");
@@ -52,7 +52,7 @@
 //! | **FOK** | Fill entirely or cancel entirely (no partial fills) |
 //!
 //! ```
-//! use limit_order_book::{Exchange, Side, Price, TimeInForce};
+//! use rustbook::{Exchange, Side, Price, TimeInForce};
 //!
 //! let mut exchange = Exchange::new();
 //!
@@ -74,7 +74,7 @@
 //! Market orders execute at the best available prices:
 //!
 //! ```
-//! use limit_order_book::{Exchange, Side, Price, TimeInForce};
+//! use rustbook::{Exchange, Side, Price, TimeInForce};
 //!
 //! let mut exchange = Exchange::new();
 //! exchange.submit_limit(Side::Sell, Price(100_00), 50, TimeInForce::GTC);
@@ -90,7 +90,7 @@
 //! ## Cancel and Modify
 //!
 //! ```
-//! use limit_order_book::{Exchange, Side, Price, TimeInForce};
+//! use rustbook::{Exchange, Side, Price, TimeInForce};
 //!
 //! let mut exchange = Exchange::new();
 //!
@@ -112,7 +112,7 @@
 //! All operations are recorded as events for deterministic replay:
 //!
 //! ```
-//! use limit_order_book::{Exchange, Side, Price, TimeInForce};
+//! use rustbook::{Exchange, Side, Price, TimeInForce};
 //!
 //! let mut exchange = Exchange::new();
 //! exchange.submit_limit(Side::Sell, Price(101_00), 100, TimeInForce::GTC);
@@ -133,7 +133,7 @@
 //! Get market data snapshots:
 //!
 //! ```
-//! use limit_order_book::{Exchange, Side, Price, TimeInForce};
+//! use rustbook::{Exchange, Side, Price, TimeInForce};
 //!
 //! let mut exchange = Exchange::new();
 //! exchange.submit_limit(Side::Buy, Price(99_00), 100, TimeInForce::GTC);

@@ -2,7 +2,7 @@
 //!
 //! Run with: cargo run --example demo
 
-use limit_order_book::{Exchange, OrderId, Price, Side, TimeInForce};
+use rustbook::{Exchange, OrderId, Price, Side, TimeInForce};
 
 fn main() {
     println!("\n{}", "=".repeat(70));
@@ -259,7 +259,7 @@ Let's see the difference...",
     println!("    ✓ Orders can be cancelled while resting");
 
     println!("\n{}", "=".repeat(70));
-    println!("  For more, see: https://github.com/ricardofrantz/limit-order-book-rs");
+    println!("  For more, see: https://github.com/ricardofrantz/rustbook");
     println!("{}\n", "=".repeat(70));
 }
 

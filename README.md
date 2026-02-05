@@ -1,4 +1,4 @@
-# limit-order-book-rs
+# rustbook
 
 A deterministic, nanosecond-precision limit order book and matching engine for testing trading algorithms.
 
@@ -62,7 +62,7 @@ The interactive demo explains price-time priority, partial fills, IOC/FOK, and o
 ## Quick Example
 
 ```rust
-use limit_order_book::{Exchange, Side, Price, TimeInForce};
+use rustbook::{Exchange, Side, Price, TimeInForce};
 
 fn main() {
     let mut exchange = Exchange::new();
@@ -93,14 +93,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-limit-order-book = "0.1"
+rustbook = "0.1"
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/ricardofrantz/limit-order-book-rs
-cd limit-order-book-rs
+git clone https://github.com/ricardofrantz/rustbook
+cd rustbook
 cargo build --release
 cargo test
 cargo bench
@@ -340,7 +340,7 @@ println!("Filled: {}, Cancelled: {}",
 
 | Library | Throughput | Threading | Order Types | Deterministic | Use Case |
 |---------|------------|-----------|-------------|---------------|----------|
-| **limit-order-book-rs** (this) | **8M ops/sec** | Single | Limit, Market, GTC/IOC/FOK | **Yes** | Backtesting, education |
+| **rustbook** (this) | **8M ops/sec** | Single | Limit, Market, GTC/IOC/FOK | **Yes** | Backtesting, education |
 | [limitbook](https://lib.rs/crates/limitbook) | 3-5M ops/sec | Single | Limit, Market | No | General purpose |
 | [lobster](https://lib.rs/crates/lobster) | ~300K ops/sec | Single | Limit, Market | No | Simple matching |
 | [OrderBook-rs](https://github.com/joaquinbejar/OrderBook-rs) | 200K ops/sec | **Multi** | Many (iceberg, peg, etc.) | No | Production HFT |

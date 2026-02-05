@@ -6,7 +6,7 @@
 //!   cargo run --bin lob
 //!   lob  (if installed via cargo install)
 
-use limit_order_book::{Exchange, OrderId, Price, Side, TimeInForce};
+use rustbook::{Exchange, OrderId, Price, Side, TimeInForce};
 use std::io::{self, BufRead, Write};
 
 fn main() {

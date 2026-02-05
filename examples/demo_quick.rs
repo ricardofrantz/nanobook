@@ -2,7 +2,7 @@
 //!
 //! Run with: cargo run --example demo_quick
 
-use limit_order_book::{Exchange, Price, Side, TimeInForce};
+use rustbook::{Exchange, Price, Side, TimeInForce};
 
 fn main() {
     println!("\n{}", "=".repeat(60));

@@ -4,7 +4,7 @@
 
 | Property | Value |
 |----------|-------|
-| **Name** | limit-order-book-rs |
+| **Name** | rustbook |
 | **Purpose** | Deterministic exchange simulator for strategy testing |
 | **Language** | Rust (2021 edition) |
 | **Scope** | Educational/testing quality (not production-grade) |
@@ -757,7 +757,7 @@ fn bench_deep_book_snapshot(c: &mut Criterion);
 ## 13. File Structure
 
 ```
-limit-order-book-rs/
+rustbook/
 ├── Cargo.toml
 ├── README.md
 ├── SPECS.md
@@ -797,7 +797,7 @@ Minimal dependencies for performance:
 
 ```toml
 [package]
-name = "limit-order-book"
+name = "rustbook"
 version = "0.1.0"
 edition = "2021"
 
