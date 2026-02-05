@@ -172,19 +172,13 @@ fn print_trades(exchange: &Exchange) {
 
 fn handle_order(exchange: &mut Exchange, side: Side, args: &[&str]) {
     if args.len() < 2 {
-        println!(
-            "Usage: {} <price> <qty> [ioc|fok]",
-            if side == Side::Buy { "buy" } else { "sell" }
-        );
+        println!("Usage: {} <price> <qty> [ioc|fok]", side.to_string().to_lowercase());
         return;
     }
 
-    let price = match parse_price(args[0]) {
-        Some(p) => p,
-        None => {
-            println!("Invalid price: '{}'", args[0]);
-            return;
-        }
+    let Some(price) = parse_price(args[0]) else {
+        println!("Invalid price: '{}'", args[0]);
+        return;
     };
 
     let qty: u64 = match args[1].parse() {
@@ -207,11 +201,10 @@ fn handle_order(exchange: &mut Exchange, side: Side, args: &[&str]) {
 
     let result = exchange.submit_limit(side, price, qty, tif);
 
-    let side_str = if side == Side::Buy { "BUY" } else { "SELL" };
     println!(
         "Order #{}: {} {} @ ${:.2} {:?}",
         result.order_id.0,
-        side_str,
+        side,
         qty,
         price.0 as f64 / 100.0,
         tif
@@ -259,8 +252,7 @@ fn handle_market(exchange: &mut Exchange, args: &[&str]) {
 
     let result = exchange.submit_market(side, qty);
 
-    let side_str = if side == Side::Buy { "BUY" } else { "SELL" };
-    println!("Order #{}: MARKET {} {}", result.order_id.0, side_str, qty);
+    println!("Order #{}: MARKET {} {}", result.order_id.0, side, qty);
 
     if !result.trades.is_empty() {
         println!("  Trades:");

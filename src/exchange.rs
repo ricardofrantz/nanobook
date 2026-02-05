@@ -129,48 +129,30 @@ impl Exchange {
 
         // Handle remaining quantity based on TIF
         let (status, resting, cancelled) = if remaining == 0 {
-            // Fully filled - store for history
+            // Fully filled
             order.status = OrderStatus::Filled;
             self.book.orders.insert(order_id, order);
             (OrderStatus::Filled, 0, 0)
+        } else if tif == TimeInForce::GTC {
+            // Rest on book
+            let status = if filled > 0 {
+                OrderStatus::PartiallyFilled
+            } else {
+                OrderStatus::New
+            };
+            order.status = status;
+            self.book.add_order(order);
+            (status, remaining, 0)
         } else {
-            match tif {
-                TimeInForce::GTC => {
-                    // Rest on book
-                    if filled > 0 {
-                        order.status = OrderStatus::PartiallyFilled;
-                    }
-                    self.book.add_order(order);
-                    (
-                        if filled > 0 {
-                            OrderStatus::PartiallyFilled
-                        } else {
-                            OrderStatus::New
-                        },
-                        remaining,
-                        0,
-                    )
-                }
-                TimeInForce::IOC | TimeInForce::FOK => {
-                    // Cancel remainder (FOK shouldn't reach here with remainder)
-                    order.status = if filled > 0 {
-                        OrderStatus::PartiallyFilled
-                    } else {
-                        OrderStatus::Cancelled
-                    };
-                    // Store the order for history but don't add to book
-                    self.book.orders.insert(order_id, order);
-                    (
-                        if filled > 0 {
-                            OrderStatus::PartiallyFilled
-                        } else {
-                            OrderStatus::Cancelled
-                        },
-                        0,
-                        remaining,
-                    )
-                }
-            }
+            // IOC/FOK: cancel remainder (FOK shouldn't reach here with remainder)
+            let status = if filled > 0 {
+                OrderStatus::PartiallyFilled
+            } else {
+                OrderStatus::Cancelled
+            };
+            order.status = status;
+            self.book.orders.insert(order_id, order);
+            (status, 0, remaining)
         };
 
         SubmitResult {

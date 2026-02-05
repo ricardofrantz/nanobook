@@ -152,9 +152,11 @@ impl PriceLevels {
     /// - Asks: lowest to highest
     pub fn iter_best_to_worst(&self) -> impl Iterator<Item = (&Price, &Level)> {
         BestToWorstIter {
-            side: self.side,
-            forward: self.levels.iter(),
-            backward: self.levels.iter().rev(),
+            inner: if self.side == Side::Buy {
+                IterDirection::Reverse(self.levels.iter().rev())
+            } else {
+                IterDirection::Forward(self.levels.iter())
+            },
         }
     }
 
@@ -215,28 +217,26 @@ impl PriceLevels {
     }
 }
 
-/// Iterator that yields levels from best to worst price.
-struct BestToWorstIter<'a, F, B>
-where
-    F: Iterator<Item = (&'a Price, &'a Level)>,
-    B: Iterator<Item = (&'a Price, &'a Level)>,
-{
-    side: Side,
-    forward: F,  // For asks (lowest first)
-    backward: B, // For bids (highest first)
+/// Direction wrapper for the iterator.
+enum IterDirection<F, R> {
+    Forward(F),
+    Reverse(R),
 }
 
-impl<'a, F, B> Iterator for BestToWorstIter<'a, F, B>
-where
-    F: Iterator<Item = (&'a Price, &'a Level)>,
-    B: Iterator<Item = (&'a Price, &'a Level)>,
-{
+type BTreeIter<'a> = std::collections::btree_map::Iter<'a, Price, Level>;
+
+/// Iterator that yields levels from best to worst price.
+struct BestToWorstIter<'a> {
+    inner: IterDirection<BTreeIter<'a>, std::iter::Rev<BTreeIter<'a>>>,
+}
+
+impl<'a> Iterator for BestToWorstIter<'a> {
     type Item = (&'a Price, &'a Level);
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.side {
-            Side::Buy => self.backward.next(),
-            Side::Sell => self.forward.next(),
+        match &mut self.inner {
+            IterDirection::Forward(iter) => iter.next(),
+            IterDirection::Reverse(iter) => iter.next(),
         }
     }
 }

@@ -65,32 +65,22 @@ pub struct LevelSnapshot {
 impl OrderBook {
     /// Take a snapshot of the top N levels on each side.
     pub fn snapshot(&self, depth: usize) -> BookSnapshot {
-        let bids: Vec<_> = self
-            .bids()
-            .iter_best_to_worst()
-            .take(depth)
-            .map(|(price, level)| LevelSnapshot {
-                price: *price,
-                quantity: level.total_quantity(),
-                order_count: level.order_count(),
-            })
-            .collect();
-
-        let asks: Vec<_> = self
-            .asks()
-            .iter_best_to_worst()
-            .take(depth)
-            .map(|(price, level)| LevelSnapshot {
-                price: *price,
-                quantity: level.total_quantity(),
-                order_count: level.order_count(),
-            })
-            .collect();
+        fn snapshot_levels(levels: &crate::PriceLevels, depth: usize) -> Vec<LevelSnapshot> {
+            levels
+                .iter_best_to_worst()
+                .take(depth)
+                .map(|(price, level)| LevelSnapshot {
+                    price: *price,
+                    quantity: level.total_quantity(),
+                    order_count: level.order_count(),
+                })
+                .collect()
+        }
 
         BookSnapshot {
-            bids,
-            asks,
-            timestamp: self.peek_next_order_id().0, // Use current counter as proxy
+            bids: snapshot_levels(self.bids(), depth),
+            asks: snapshot_levels(self.asks(), depth),
+            timestamp: self.peek_next_order_id().0,
         }
     }
 
