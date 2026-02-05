@@ -24,6 +24,7 @@
 //! assert!(tif.can_rest());
 //! ```
 
+mod level;
 mod order;
 mod side;
 mod tif;
@@ -31,6 +32,7 @@ mod trade;
 mod types;
 
 // Re-export public API
+pub use level::Level;
 pub use order::{Order, OrderStatus};
 pub use side::Side;
 pub use tif::TimeInForce;
