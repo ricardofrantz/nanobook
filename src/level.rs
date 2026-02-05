@@ -86,8 +86,8 @@ impl Level {
     /// Returns `true` if the order was found and removed, `false` otherwise.
     /// The provided quantity is subtracted from the level's total.
     ///
-    /// Note: This is O(n) where n is the number of orders at this price.
-    /// For high-frequency use, consider an indexed data structure.
+    /// Note: This is O(n) where n is the number of orders at this price level.
+    /// For O(1) cancel, consider a tombstone approach or intrusive linked list.
     pub fn remove(&mut self, order_id: OrderId, quantity: Quantity) -> bool {
         if let Some(pos) = self.orders.iter().position(|&id| id == order_id) {
             self.orders.remove(pos);
