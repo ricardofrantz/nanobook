@@ -25,6 +25,7 @@
 //! ```
 
 mod book;
+mod event;
 mod exchange;
 mod level;
 mod matching;
@@ -39,6 +40,7 @@ mod types;
 
 // Re-export public API
 pub use book::OrderBook;
+pub use event::{ApplyResult, Event};
 pub use exchange::Exchange;
 pub use level::Level;
 pub use matching::MatchResult;

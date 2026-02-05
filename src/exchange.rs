@@ -5,6 +5,7 @@
 //! time-in-force handling.
 
 use crate::{
+    event::Event,
     result::{CancelError, CancelResult, ModifyError, ModifyResult, SubmitResult},
     snapshot::BookSnapshot,
     Order, OrderBook, OrderId, OrderStatus, Price, Quantity, Side, TimeInForce, Trade,
@@ -18,12 +19,15 @@ use crate::{
 /// - Order cancellation and modification
 /// - Book snapshots for market data
 /// - Trade history
+/// - Event logging for replay
 #[derive(Clone, Debug)]
 pub struct Exchange {
     /// The underlying order book
-    book: OrderBook,
+    pub(crate) book: OrderBook,
     /// Complete trade history
-    trades: Vec<Trade>,
+    pub(crate) trades: Vec<Trade>,
+    /// Event log for replay
+    pub(crate) events: Vec<crate::event::Event>,
 }
 
 impl Exchange {
@@ -32,6 +36,7 @@ impl Exchange {
         Self {
             book: OrderBook::new(),
             trades: Vec::new(),
+            events: Vec::new(),
         }
     }
 
@@ -45,6 +50,44 @@ impl Exchange {
     /// - **IOC**: Cancelled (never rests)
     /// - **FOK**: If cannot fill entirely, order is rejected (no trades)
     pub fn submit_limit(
+        &mut self,
+        side: Side,
+        price: Price,
+        quantity: Quantity,
+        tif: TimeInForce,
+    ) -> SubmitResult {
+        // Record event
+        self.events.push(Event::SubmitLimit {
+            side,
+            price,
+            quantity,
+            time_in_force: tif,
+        });
+
+        self.submit_limit_internal(side, price, quantity, tif)
+    }
+
+    /// Submit a market order.
+    ///
+    /// Market orders execute immediately at the best available prices.
+    /// Any unfilled quantity is cancelled (IOC semantics).
+    ///
+    /// This is equivalent to a limit order at the worst possible price
+    /// with IOC time-in-force.
+    pub fn submit_market(&mut self, side: Side, quantity: Quantity) -> SubmitResult {
+        // Record event
+        self.events.push(Event::SubmitMarket { side, quantity });
+
+        // Market order = limit at worst price + IOC
+        let price = match side {
+            Side::Buy => Price::MAX,
+            Side::Sell => Price::MIN,
+        };
+        self.submit_limit_internal(side, price, quantity, TimeInForce::IOC)
+    }
+
+    /// Internal: submit limit order without recording event.
+    pub(crate) fn submit_limit_internal(
         &mut self,
         side: Side,
         price: Price,
@@ -136,28 +179,20 @@ impl Exchange {
         }
     }
 
-    /// Submit a market order.
-    ///
-    /// Market orders execute immediately at the best available prices.
-    /// Any unfilled quantity is cancelled (IOC semantics).
-    ///
-    /// This is equivalent to a limit order at the worst possible price
-    /// with IOC time-in-force.
-    pub fn submit_market(&mut self, side: Side, quantity: Quantity) -> SubmitResult {
-        // Market order = limit at worst price + IOC
-        let price = match side {
-            Side::Buy => Price::MAX,
-            Side::Sell => Price::MIN,
-        };
-        self.submit_limit(side, price, quantity, TimeInForce::IOC)
-    }
-
     // === Order Management ===
 
     /// Cancel an order.
     ///
     /// Returns the cancelled quantity if successful.
     pub fn cancel(&mut self, order_id: OrderId) -> CancelResult {
+        // Record event
+        self.events.push(Event::Cancel { order_id });
+
+        self.cancel_internal(order_id)
+    }
+
+    /// Internal: cancel without recording event.
+    pub(crate) fn cancel_internal(&mut self, order_id: OrderId) -> CancelResult {
         // Check if order exists
         let order = match self.book.get_order(order_id) {
             Some(o) => o,
@@ -189,6 +224,23 @@ impl Exchange {
         new_price: Price,
         new_quantity: Quantity,
     ) -> ModifyResult {
+        // Record event (even if it fails)
+        self.events.push(Event::Modify {
+            order_id,
+            new_price,
+            new_quantity,
+        });
+
+        self.modify_internal(order_id, new_price, new_quantity)
+    }
+
+    /// Internal: modify without recording event.
+    pub(crate) fn modify_internal(
+        &mut self,
+        order_id: OrderId,
+        new_price: Price,
+        new_quantity: Quantity,
+    ) -> ModifyResult {
         // Validate quantity
         if new_quantity == 0 {
             return ModifyResult::failure(order_id, ModifyError::InvalidQuantity);
@@ -208,7 +260,7 @@ impl Exchange {
         };
 
         // Submit the new order
-        let result = self.submit_limit(side, new_price, new_quantity, tif);
+        let result = self.submit_limit_internal(side, new_price, new_quantity, tif);
 
         ModifyResult::success(order_id, result.order_id, cancelled, result.trades)
     }
