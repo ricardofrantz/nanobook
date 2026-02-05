@@ -1,6 +1,11 @@
 # nanobook
 
-A deterministic, nanosecond-precision limit order book and matching engine for testing trading algorithms.
+[![CI](https://github.com/ricardofrantz/nanobook/actions/workflows/ci.yml/badge.svg)](https://github.com/ricardofrantz/nanobook/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/nanobook.svg)](https://crates.io/crates/nanobook)
+[![docs.rs](https://docs.rs/nanobook/badge.svg)](https://docs.rs/nanobook)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+**n*10⁻⁹** — A deterministic, nanosecond-precision limit order book and matching engine for testing trading algorithms.
 
 ## What Is This?
 

@@ -3,8 +3,8 @@
 //! These tests use proptest to verify that key invariants hold
 //! across randomly generated scenarios.
 
-use proptest::prelude::*;
 use nanobook::{Exchange, Price, Side, TimeInForce};
+use proptest::prelude::*;
 
 /// Generate a valid price (positive, reasonable range)
 fn price_strategy() -> impl Strategy<Value = Price> {

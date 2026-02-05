@@ -109,9 +109,10 @@
 //!
 //! ## Event Replay
 //!
-//! All operations are recorded as events for deterministic replay:
+//! All operations are recorded as events for deterministic replay
+//! (requires the `event-log` feature, enabled by default):
 //!
-//! ```
+//! ```ignore
 //! use nanobook::{Exchange, Side, Price, TimeInForce};
 //!
 //! let mut exchange = Exchange::new();
