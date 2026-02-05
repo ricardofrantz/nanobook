@@ -1,3 +1,6 @@
+// Allow our dollar.cents digit grouping convention (e.g., 100_00 = $100.00)
+#![allow(clippy::inconsistent_digit_grouping)]
+
 //! Throughput benchmarks for limit order book operations.
 //!
 //! Measures performance of core operations:
@@ -38,17 +41,21 @@ fn bench_submit_no_match(c: &mut Criterion) {
 
     for levels in [10, 100, 1000] {
         group.throughput(Throughput::Elements(1));
-        group.bench_with_input(BenchmarkId::from_parameter(levels), &levels, |b, &levels| {
-            let mut exchange = build_book(levels, 1);
-            let mut price_offset = 0i64;
+        group.bench_with_input(
+            BenchmarkId::from_parameter(levels),
+            &levels,
+            |b, &levels| {
+                let mut exchange = build_book(levels, 1);
+                let mut price_offset = 0i64;
 
-            b.iter(|| {
-                // Submit at a price that won't match (bid below best bid)
-                let price = Price(50_00 - price_offset);
-                price_offset = (price_offset + 1) % 1000;
-                black_box(exchange.submit_limit(Side::Buy, price, 100, TimeInForce::GTC))
-            });
-        });
+                b.iter(|| {
+                    // Submit at a price that won't match (bid below best bid)
+                    let price = Price(50_00 - price_offset);
+                    price_offset = (price_offset + 1) % 1000;
+                    black_box(exchange.submit_limit(Side::Buy, price, 100, TimeInForce::GTC))
+                });
+            },
+        );
     }
 
     group.finish();
@@ -82,23 +89,27 @@ fn bench_cancel(c: &mut Criterion) {
 
     for levels in [10, 100, 1000] {
         group.throughput(Throughput::Elements(1));
-        group.bench_with_input(BenchmarkId::from_parameter(levels), &levels, |b, &levels| {
-            b.iter_batched(
-                || {
-                    let exchange = build_book(levels, 10);
-                    // Get an order ID from the middle of the book
-                    let order_id = exchange
-                        .book()
-                        .bids()
-                        .best_level()
-                        .and_then(|l| l.front())
-                        .unwrap();
-                    (exchange, order_id)
-                },
-                |(mut exchange, order_id)| black_box(exchange.cancel(order_id)),
-                criterion::BatchSize::SmallInput,
-            );
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(levels),
+            &levels,
+            |b, &levels| {
+                b.iter_batched(
+                    || {
+                        let exchange = build_book(levels, 10);
+                        // Get an order ID from the middle of the book
+                        let order_id = exchange
+                            .book()
+                            .bids()
+                            .best_level()
+                            .and_then(|l| l.front())
+                            .unwrap();
+                        (exchange, order_id)
+                    },
+                    |(mut exchange, order_id)| black_box(exchange.cancel(order_id)),
+                    criterion::BatchSize::SmallInput,
+                );
+            },
+        );
     }
 
     group.finish();
@@ -136,11 +147,15 @@ fn bench_bbo_query(c: &mut Criterion) {
 
     for levels in [10, 100, 1000] {
         group.throughput(Throughput::Elements(1));
-        group.bench_with_input(BenchmarkId::from_parameter(levels), &levels, |b, &levels| {
-            let exchange = build_book(levels, 10);
+        group.bench_with_input(
+            BenchmarkId::from_parameter(levels),
+            &levels,
+            |b, &levels| {
+                let exchange = build_book(levels, 10);
 
-            b.iter(|| black_box(exchange.best_bid_ask()));
-        });
+                b.iter(|| black_box(exchange.best_bid_ask()));
+            },
+        );
     }
 
     group.finish();

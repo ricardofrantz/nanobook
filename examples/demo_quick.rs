@@ -40,7 +40,10 @@ fn main() {
             trade.price.0 as f64 / 100.0
         );
     }
-    println!("  Filled: {}, Resting: {}", result.filled_quantity, result.resting_quantity);
+    println!(
+        "  Filled: {}, Resting: {}",
+        result.filled_quantity, result.resting_quantity
+    );
 
     print_book(&exchange, "After Matching");
 

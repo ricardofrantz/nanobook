@@ -214,15 +214,9 @@ Let's see the difference...",
     // Find Dan's order (first bid at $50.00)
     let dan_order_id = OrderId(4); // Dan was order #4
 
-    step(&format!(
-        "Dan cancels his order #{}",
-        dan_order_id.0
-    ));
+    step(&format!("Dan cancels his order #{}", dan_order_id.0));
     let result = exchange.cancel(dan_order_id);
-    println!(
-        "  → Cancelled {} shares",
-        result.cancelled_quantity
-    );
+    println!("  → Cancelled {} shares", result.cancelled_quantity);
     print_book(&exchange);
 
     // ─────────────────────────────────────────────────────────────────────

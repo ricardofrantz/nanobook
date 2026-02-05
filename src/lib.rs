@@ -1,3 +1,6 @@
+// Allow our dollar.cents digit grouping convention (e.g., 100_00 = $100.00)
+#![allow(clippy::inconsistent_digit_grouping)]
+
 //! # limit-order-book
 //!
 //! A deterministic limit order book and matching engine for testing trading algorithms.

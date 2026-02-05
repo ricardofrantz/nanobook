@@ -2,8 +2,16 @@
 name = "limit-order-book"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.70"
 description = "Deterministic limit order book and matching engine for testing trading algorithms"
 license = "MIT"
+repository = "https://github.com/ricardofrantz/limit-order-book-rs"
+homepage = "https://github.com/ricardofrantz/limit-order-book-rs"
+documentation = "https://docs.rs/limit-order-book"
+readme = "README.md"
+keywords = ["orderbook", "trading", "matching-engine", "finance", "exchange"]
+categories = ["simulation", "algorithms", "data-structures"]
+authors = ["Ricardo Frantz"]
 
 [dependencies]
 thiserror = "2.0"
@@ -15,6 +23,10 @@ event-log = []  # Enable event recording for replay (disable for max perf)
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bin]]
+name = "lob"
+path = "src/bin/lob.rs"
 
 [[bench]]
 name = "throughput"

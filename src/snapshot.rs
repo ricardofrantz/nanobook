@@ -168,12 +168,8 @@ mod tests {
 
         // Add 5 bid levels
         for i in 0..5 {
-            let order = book.create_order(
-                Side::Buy,
-                Price(100_00 - i * 100),
-                100,
-                TimeInForce::GTC,
-            );
+            let order =
+                book.create_order(Side::Buy, Price(100_00 - i * 100), 100, TimeInForce::GTC);
             book.add_order(order);
         }
 
@@ -190,12 +186,8 @@ mod tests {
         let mut book = OrderBook::new();
 
         for i in 0..10 {
-            let order = book.create_order(
-                Side::Buy,
-                Price(100_00 - i * 100),
-                100,
-                TimeInForce::GTC,
-            );
+            let order =
+                book.create_order(Side::Buy, Price(100_00 - i * 100), 100, TimeInForce::GTC);
             book.add_order(order);
         }
 

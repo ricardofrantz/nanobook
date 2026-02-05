@@ -390,7 +390,10 @@ mod tests {
         // Order still exists but is not active
         assert_eq!(book.order_count(), 1);
         assert_eq!(book.active_order_count(), 0);
-        assert_eq!(book.get_order(order_id).unwrap().status, OrderStatus::Cancelled);
+        assert_eq!(
+            book.get_order(order_id).unwrap().status,
+            OrderStatus::Cancelled
+        );
 
         // Best bid is now gone
         assert_eq!(book.best_bid(), None);
@@ -481,9 +484,15 @@ mod tests {
         book.add_order(ask);
 
         // Opposite of buy is sell (asks)
-        assert_eq!(book.opposite_side(Side::Buy).best_price(), Some(Price(101_00)));
+        assert_eq!(
+            book.opposite_side(Side::Buy).best_price(),
+            Some(Price(101_00))
+        );
         // Opposite of sell is buy (bids)
-        assert_eq!(book.opposite_side(Side::Sell).best_price(), Some(Price(100_00)));
+        assert_eq!(
+            book.opposite_side(Side::Sell).best_price(),
+            Some(Price(100_00))
+        );
     }
 
     #[test]
