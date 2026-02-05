@@ -172,7 +172,10 @@ fn print_trades(exchange: &Exchange) {
 
 fn handle_order(exchange: &mut Exchange, side: Side, args: &[&str]) {
     if args.len() < 2 {
-        println!("Usage: {} <price> <qty> [ioc|fok]", side.to_string().to_lowercase());
+        println!(
+            "Usage: {} <price> <qty> [ioc|fok]",
+            side.to_string().to_lowercase()
+        );
         return;
     }
 

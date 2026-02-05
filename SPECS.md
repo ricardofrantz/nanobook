@@ -761,6 +761,9 @@ rustbook/
 ├── Cargo.toml
 ├── README.md
 ├── SPECS.md
+├── LICENSE
+├── CHANGELOG.md
+├── CONTRIBUTING.md
 ├── src/
 │   ├── lib.rs           # Public API re-exports
 │   ├── types.rs         # Price, Quantity, Timestamp, OrderId, TradeId
@@ -776,11 +779,7 @@ rustbook/
 │   ├── snapshot.rs      # BookSnapshot, LevelSnapshot
 │   └── error.rs         # Error types
 ├── tests/
-│   ├── basic.rs         # Basic functionality tests
-│   ├── matching.rs      # Matching edge cases
-│   ├── tif.rs           # Time-in-force behavior
-│   ├── determinism.rs   # Replay tests
-│   └── invariants.rs    # Property-based tests
+│   └── proptest_invariants.rs  # Property-based invariant tests
 ├── benches/
 │   └── throughput.rs    # Performance benchmarks
 └── examples/
@@ -806,7 +805,7 @@ thiserror = "2.0"  # Error derive macros
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-proptest = "1.4"
+proptest = "1.5"
 
 [features]
 default = []
