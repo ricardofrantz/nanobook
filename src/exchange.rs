@@ -100,7 +100,10 @@ impl Exchange {
         // FOK: Check feasibility before doing anything
         if tif == TimeInForce::FOK {
             if !self.book.can_fully_fill(side, price, quantity) {
-                // Reject the order - create it just for the ID
+                // Reject the order. We still consume an OrderId for consistency
+                // (the caller gets a valid ID even for rejected orders).
+                // Note: This creates gaps in the OrderId sequence for rejected FOKs,
+                // and the order is not stored (get_order returns None).
                 let order = self.book.create_order(side, price, quantity, tif);
                 return SubmitResult {
                     order_id: order.id,
@@ -313,6 +316,23 @@ impl Exchange {
     /// Get the underlying order book (for advanced queries).
     pub fn book(&self) -> &OrderBook {
         &self.book
+    }
+
+    // === Memory Management ===
+
+    /// Clear trade history to free memory.
+    ///
+    /// Use periodically for long-running instances.
+    pub fn clear_trades(&mut self) {
+        self.trades.clear();
+    }
+
+    /// Remove filled and cancelled orders from history.
+    ///
+    /// Active orders (on the book) are preserved. Returns the number
+    /// of orders removed.
+    pub fn clear_order_history(&mut self) -> usize {
+        self.book.clear_history()
     }
 }
 
