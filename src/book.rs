@@ -24,7 +24,7 @@ pub struct OrderBook {
     /// Sell orders, sorted by price ascending (best = lowest)
     asks: PriceLevels,
     /// All orders indexed by ID (includes filled/cancelled for history)
-    orders: HashMap<OrderId, Order>,
+    pub(crate) orders: HashMap<OrderId, Order>,
     /// Next order ID to assign
     next_order_id: u64,
     /// Next trade ID to assign

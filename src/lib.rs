@@ -25,22 +25,28 @@
 //! ```
 
 mod book;
+mod exchange;
 mod level;
 mod matching;
 mod order;
 mod price_levels;
+mod result;
 mod side;
+mod snapshot;
 mod tif;
 mod trade;
 mod types;
 
 // Re-export public API
 pub use book::OrderBook;
+pub use exchange::Exchange;
 pub use level::Level;
 pub use matching::MatchResult;
 pub use order::{Order, OrderStatus};
 pub use price_levels::PriceLevels;
+pub use result::{CancelError, CancelResult, ModifyError, ModifyResult, SubmitResult};
 pub use side::Side;
+pub use snapshot::{BookSnapshot, LevelSnapshot};
 pub use tif::TimeInForce;
 pub use trade::Trade;
 pub use types::{OrderId, Price, Quantity, Timestamp, TradeId};
