@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0] - 2026-02-05
 
-Initial release of rustbook - a deterministic limit order book and matching engine.
+Initial release of nanobook - a deterministic limit order book and matching engine.
 
 ### Added
 
@@ -40,5 +40,5 @@ Initial release of rustbook - a deterministic limit order book and matching engi
 - Fixed-point price representation (avoids floating-point errors)
 - Deterministic via monotonic timestamps (not system clock)
 
-[Unreleased]: https://github.com/ricardofrantz/rustbook/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/ricardofrantz/rustbook/releases/tag/v0.1.0
+[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ricardofrantz/nanobook/releases/tag/v0.1.0

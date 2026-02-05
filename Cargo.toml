@@ -1,13 +1,13 @@
 [package]
-name = "rustbook"
+name = "nanobook"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.70"
 description = "Deterministic limit order book and matching engine for testing trading algorithms"
 license = "MIT"
-repository = "https://github.com/ricardofrantz/rustbook"
-homepage = "https://github.com/ricardofrantz/rustbook"
-documentation = "https://docs.rs/rustbook"
+repository = "https://github.com/ricardofrantz/nanobook"
+homepage = "https://github.com/ricardofrantz/nanobook"
+documentation = "https://docs.rs/nanobook"
 readme = "README.md"
 keywords = ["orderbook", "trading", "matching-engine", "finance", "exchange"]
 categories = ["simulation", "algorithms", "data-structures"]

@@ -1,6 +1,6 @@
 # PLAN.md — Implementation Plan
 
-**Project**: rustbook
+**Project**: nanobook
 **Date**: 2026-02-05
 **Status**: v0.1.0 COMPLETE ✓ | v0.2.0 IN PROGRESS
 
@@ -20,7 +20,7 @@ All 11 phases complete:
 - ✓ Phase 13: Release prep (LICENSE, CHANGELOG, CONTRIBUTING)
 
 **Tests**: 144 passing (123 unit + 14 proptest + 7 doc)
-**Repo**: https://github.com/ricardofrantz/rustbook
+**Repo**: https://github.com/ricardofrantz/nanobook
 
 ---
 
@@ -94,7 +94,7 @@ All 11 phases complete:
 ### 1.1 Cargo.toml
 ```toml
 [package]
-name = "rustbook"
+name = "nanobook"
 version = "0.1.0"
 edition = "2021"
 

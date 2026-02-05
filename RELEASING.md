@@ -54,11 +54,11 @@ After release, users can install via:
 
 ```bash
 # From crates.io (compiles from source)
-cargo install rustbook
+cargo install nanobook
 
 # From crates.io (pre-built binary, faster)
-cargo binstall rustbook
+cargo binstall nanobook
 
 # From GitHub releases (direct download)
-# Download from https://github.com/ricardofrantz/rustbook/releases
+# Download from https://github.com/ricardofrantz/nanobook/releases
 ```

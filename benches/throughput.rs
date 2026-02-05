@@ -10,7 +10,7 @@
 //! - Book queries (BBO, depth)
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use rustbook::{Exchange, Price, Side, TimeInForce};
+use nanobook::{Exchange, Price, Side, TimeInForce};
 
 /// Build an exchange with N price levels on each side.
 fn build_book(levels: usize, orders_per_level: usize) -> Exchange {

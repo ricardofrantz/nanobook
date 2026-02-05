@@ -6,7 +6,7 @@
 //!   cargo run --bin lob
 //!   lob  (if installed via cargo install)
 
-use rustbook::{Exchange, OrderId, Price, Side, TimeInForce};
+use nanobook::{Exchange, OrderId, Price, Side, TimeInForce};
 use std::io::{self, BufRead, Write};
 
 fn main() {

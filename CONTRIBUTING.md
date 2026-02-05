@@ -1,11 +1,11 @@
-# Contributing to rustbook
+# Contributing to nanobook
 
-Thank you for your interest in contributing to rustbook!
+Thank you for your interest in contributing to nanobook!
 
 ## Getting Started
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/rustbook.git`
+2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/nanobook.git`
 3. Create a branch: `git checkout -b feature/your-feature`
 4. Make your changes
 5. Run tests: `cargo test --all-features`
@@ -20,8 +20,8 @@ Thank you for your interest in contributing to rustbook!
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Clone and build
-git clone https://github.com/ricardofrantz/rustbook.git
-cd rustbook
+git clone https://github.com/ricardofrantz/nanobook.git
+cd nanobook
 cargo build
 
 # Run tests

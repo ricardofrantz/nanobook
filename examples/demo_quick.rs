@@ -2,7 +2,7 @@
 //!
 //! Run with: cargo run --example demo_quick
 
-use rustbook::{Exchange, Price, Side, TimeInForce};
+use nanobook::{Exchange, Price, Side, TimeInForce};
 
 fn main() {
     println!("\n{}", "=".repeat(60));

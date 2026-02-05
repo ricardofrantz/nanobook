@@ -4,7 +4,7 @@
 
 | Property | Value |
 |----------|-------|
-| **Name** | rustbook |
+| **Name** | nanobook |
 | **Purpose** | Deterministic exchange simulator for strategy testing |
 | **Language** | Rust (2021 edition) |
 | **Scope** | Educational/testing quality (not production-grade) |
@@ -757,7 +757,7 @@ fn bench_deep_book_snapshot(c: &mut Criterion);
 ## 13. File Structure
 
 ```
-rustbook/
+nanobook/
 ├── Cargo.toml
 ├── README.md
 ├── SPECS.md
@@ -796,7 +796,7 @@ Minimal dependencies for performance:
 
 ```toml
 [package]
-name = "rustbook"
+name = "nanobook"
 version = "0.1.0"
 edition = "2021"
 

@@ -4,7 +4,7 @@
 //! across randomly generated scenarios.
 
 use proptest::prelude::*;
-use rustbook::{Exchange, Price, Side, TimeInForce};
+use nanobook::{Exchange, Price, Side, TimeInForce};
 
 /// Generate a valid price (positive, reasonable range)
 fn price_strategy() -> impl Strategy<Value = Price> {
