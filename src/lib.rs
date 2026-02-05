@@ -26,6 +26,7 @@
 
 mod book;
 mod level;
+mod matching;
 mod order;
 mod price_levels;
 mod side;
@@ -36,6 +37,7 @@ mod types;
 // Re-export public API
 pub use book::OrderBook;
 pub use level::Level;
+pub use matching::MatchResult;
 pub use order::{Order, OrderStatus};
 pub use price_levels::PriceLevels;
 pub use side::Side;
