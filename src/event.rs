@@ -6,9 +6,7 @@
 //! - Debugging and audit trails
 //! - Serialization/persistence of exchange state
 
-use crate::{
-    result::SubmitResult, Exchange, OrderId, Price, Quantity, Side, TimeInForce, Trade,
-};
+use crate::{Exchange, OrderId, Price, Quantity, Side, TimeInForce, Trade};
 
 /// An event that can be applied to an exchange.
 ///
@@ -285,7 +283,7 @@ mod tests {
         let mut original = Exchange::new();
 
         let o1 = original.submit_limit(Side::Buy, Price(100_00), 100, TimeInForce::GTC);
-        let o2 = original.submit_limit(Side::Buy, Price(99_00), 100, TimeInForce::GTC);
+        let _o2 = original.submit_limit(Side::Buy, Price(99_00), 100, TimeInForce::GTC);
         original.cancel(o1.order_id);
 
         let events = original.events().to_vec();
