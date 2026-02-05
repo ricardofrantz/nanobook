@@ -192,7 +192,7 @@ impl PriceLevels {
     fn recompute_best_price(&mut self) {
         self.best_price = match self.side {
             Side::Buy => self.levels.keys().next_back().copied(), // Highest
-            Side::Sell => self.levels.keys().next().copied(),      // Lowest
+            Side::Sell => self.levels.keys().next().copied(),     // Lowest
         };
     }
 
@@ -204,7 +204,7 @@ impl PriceLevels {
             }
             Some(current_best) => {
                 let is_better = match self.side {
-                    Side::Buy => new_price > current_best,  // Higher is better for bids
+                    Side::Buy => new_price > current_best, // Higher is better for bids
                     Side::Sell => new_price < current_best, // Lower is better for asks
                 };
                 if is_better {

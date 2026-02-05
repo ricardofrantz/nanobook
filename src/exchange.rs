@@ -98,22 +98,20 @@ impl Exchange {
         tif: TimeInForce,
     ) -> SubmitResult {
         // FOK: Check feasibility before doing anything
-        if tif == TimeInForce::FOK {
-            if !self.book.can_fully_fill(side, price, quantity) {
-                // Reject the order. We still consume an OrderId for consistency
-                // (the caller gets a valid ID even for rejected orders).
-                // Note: This creates gaps in the OrderId sequence for rejected FOKs,
-                // and the order is not stored (get_order returns None).
-                let order = self.book.create_order(side, price, quantity, tif);
-                return SubmitResult {
-                    order_id: order.id,
-                    status: OrderStatus::Cancelled,
-                    trades: Vec::new(),
-                    filled_quantity: 0,
-                    resting_quantity: 0,
-                    cancelled_quantity: quantity,
-                };
-            }
+        if tif == TimeInForce::FOK && !self.book.can_fully_fill(side, price, quantity) {
+            // Reject the order. We still consume an OrderId for consistency
+            // (the caller gets a valid ID even for rejected orders).
+            // Note: This creates gaps in the OrderId sequence for rejected FOKs,
+            // and the order is not stored (get_order returns None).
+            let order = self.book.create_order(side, price, quantity, tif);
+            return SubmitResult {
+                order_id: order.id,
+                status: OrderStatus::Cancelled,
+                trades: Vec::new(),
+                filled_quantity: 0,
+                resting_quantity: 0,
+                cancelled_quantity: quantity,
+            };
         }
 
         // Create the order

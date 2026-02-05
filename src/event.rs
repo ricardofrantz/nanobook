@@ -24,14 +24,9 @@ pub enum Event {
         time_in_force: TimeInForce,
     },
     /// Submit a market order
-    SubmitMarket {
-        side: Side,
-        quantity: Quantity,
-    },
+    SubmitMarket { side: Side, quantity: Quantity },
     /// Cancel an order
-    Cancel {
-        order_id: OrderId,
-    },
+    Cancel { order_id: OrderId },
     /// Modify an order (cancel and replace)
     Modify {
         order_id: OrderId,
@@ -109,7 +104,8 @@ impl Exchange {
                     crate::Side::Buy => crate::Price::MAX,
                     crate::Side::Sell => crate::Price::MIN,
                 };
-                let result = self.submit_limit_internal(*side, price, *quantity, crate::TimeInForce::IOC);
+                let result =
+                    self.submit_limit_internal(*side, price, *quantity, crate::TimeInForce::IOC);
                 result.trades
             }
             Event::Cancel { order_id } => {
@@ -133,10 +129,7 @@ impl Exchange {
     ///
     /// Returns all trades that occurred.
     pub fn apply_all(&mut self, events: &[Event]) -> Vec<Trade> {
-        events
-            .iter()
-            .flat_map(|e| self.apply(e).trades)
-            .collect()
+        events.iter().flat_map(|e| self.apply(e).trades).collect()
     }
 
     /// Replay events to reconstruct exchange state.

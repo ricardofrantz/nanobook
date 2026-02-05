@@ -296,9 +296,18 @@ mod tests {
         assert!(result.is_fully_filled());
 
         // First two orders filled, third partially filled
-        assert_eq!(book.get_order(OrderId(1)).unwrap().status, OrderStatus::Filled);
-        assert_eq!(book.get_order(OrderId(2)).unwrap().status, OrderStatus::Filled);
-        assert_eq!(book.get_order(OrderId(3)).unwrap().status, OrderStatus::PartiallyFilled);
+        assert_eq!(
+            book.get_order(OrderId(1)).unwrap().status,
+            OrderStatus::Filled
+        );
+        assert_eq!(
+            book.get_order(OrderId(2)).unwrap().status,
+            OrderStatus::Filled
+        );
+        assert_eq!(
+            book.get_order(OrderId(3)).unwrap().status,
+            OrderStatus::PartiallyFilled
+        );
         assert_eq!(book.get_order(OrderId(3)).unwrap().remaining_quantity, 20);
     }
 

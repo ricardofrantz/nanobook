@@ -1,0 +1,2 @@
+# Allow our dollar.cents formatting (e.g., 100_00 = $100.00)
+allow-mixed-uninlined-format-args = true
