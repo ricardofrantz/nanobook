@@ -1,7 +1,10 @@
 use nanobook::portfolio::{CostModel, Portfolio};
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
 use crate::metrics::PyMetrics;
+use crate::multi::PyMultiExchange;
+use crate::position::PyPosition;
 use crate::types::parse_symbol;
 
 /// Transaction cost model.
@@ -69,8 +72,15 @@ impl PyCostModel {
 ///     portfolio.rebalance_simple([("AAPL", 0.6)], [("AAPL", 15000)])
 ///
 #[pyclass(name = "Portfolio")]
+#[derive(Clone)]
 pub struct PyPortfolio {
-    inner: Portfolio,
+    pub inner: Portfolio,
+}
+
+impl PyPortfolio {
+    pub fn from_portfolio(inner: Portfolio) -> Self {
+        Self { inner }
+    }
 }
 
 #[pymethods]
@@ -86,6 +96,24 @@ impl PyPortfolio {
     #[getter]
     fn cash(&self) -> i64 {
         self.inner.cash()
+    }
+
+    /// Get a position by symbol.
+    fn position(&self, symbol: &str) -> PyResult<Option<PyPosition>> {
+        let sym = parse_symbol(symbol)?;
+        Ok(self
+            .inner
+            .position(&sym)
+            .map(|p| PyPosition { inner: p.clone() }))
+    }
+
+    /// Get all positions as a dict {symbol: Position}.
+    fn positions(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new(py);
+        for (sym, pos) in self.inner.positions() {
+            dict.set_item(sym.to_string(), PyPosition { inner: pos.clone() })?;
+        }
+        Ok(dict.into())
     }
 
     /// Total equity (cash + position values) given current prices.
@@ -136,11 +164,42 @@ impl PyPortfolio {
         Ok(())
     }
 
+    /// Rebalance through LOB matching engines.
+    fn rebalance_lob(
+        &mut self,
+        targets: Vec<(String, f64)>,
+        exchanges: &mut PyMultiExchange,
+    ) -> PyResult<()> {
+        let targets = parse_target_list(&targets)?;
+        self.inner.rebalance_lob(&targets, &mut exchanges.inner);
+        Ok(())
+    }
+
     /// Record a return for the current period.
     fn record_return(&mut self, prices: Vec<(String, i64)>) -> PyResult<()> {
         let prices = parse_price_list(&prices)?;
         self.inner.record_return(&prices);
         Ok(())
+    }
+
+    /// Take a portfolio snapshot.
+    fn snapshot(&self, py: Python<'_>, prices: Vec<(String, i64)>) -> PyResult<PyObject> {
+        let prices = parse_price_list(&prices)?;
+        let snap = self.inner.snapshot(&prices);
+
+        let dict = PyDict::new(py);
+        dict.set_item("cash", snap.cash)?;
+        dict.set_item("equity", snap.equity)?;
+        dict.set_item("num_positions", snap.num_positions)?;
+        dict.set_item("total_realized_pnl", snap.total_realized_pnl)?;
+
+        let weights = PyDict::new(py);
+        for (sym, w) in snap.weights {
+            weights.set_item(sym.to_string(), w)?;
+        }
+        dict.set_item("weights", weights)?;
+
+        Ok(dict.into())
     }
 
     /// Compute metrics from the recorded return series.

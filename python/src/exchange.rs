@@ -1,9 +1,12 @@
-use nanobook::{Exchange, OrderId, Price, TrailMethod};
+use nanobook::{Event, Exchange, OrderId, Price, TrailMethod};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
+use crate::event::PyEvent;
+use crate::order::PyOrder;
 use crate::results::*;
-use crate::types::{parse_side, parse_tif, price_to_float};
+use crate::types::{parse_side, parse_tif, price_to_float, side_str};
 
 /// A limit order book exchange.
 ///
@@ -34,6 +37,15 @@ impl PyExchange {
     fn new() -> Self {
         Self {
             inner: Exchange::new(),
+        }
+    }
+
+    /// Replay events to reconstruct exchange state.
+    #[staticmethod]
+    fn replay(events: Vec<PyEvent>) -> Self {
+        let inner_events: Vec<Event> = events.into_iter().map(|e| e.inner).collect();
+        Self {
+            inner: Exchange::replay(&inner_events),
         }
     }
 
@@ -189,6 +201,30 @@ impl PyExchange {
 
     // === Queries ===
 
+    /// Get an order by ID.
+    fn get_order(&self, order_id: u64) -> Option<PyOrder> {
+        self.inner
+            .get_order(OrderId(order_id))
+            .map(|o| PyOrder { inner: o.clone() })
+    }
+
+    /// Get a stop order by ID.
+    fn get_stop_order(&self, py: Python<'_>, order_id: u64) -> PyResult<Option<PyObject>> {
+        if let Some(stop) = self.inner.get_stop_order(OrderId(order_id)) {
+            let dict = PyDict::new(py);
+            dict.set_item("id", stop.id.0)?;
+            dict.set_item("side", side_str(stop.side))?;
+            dict.set_item("stop_price", stop.stop_price.0)?;
+            dict.set_item("limit_price", stop.limit_price.map(|p| p.0))?;
+            dict.set_item("quantity", stop.quantity)?;
+            dict.set_item("status", format!("{:?}", stop.status).to_lowercase())?;
+            dict.set_item("timestamp", stop.timestamp)?;
+            Ok(Some(dict.into()))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Get the best bid and ask prices as (bid, ask) tuple.
     /// Returns None for sides with no orders.
     fn best_bid_ask(&self) -> (Option<i64>, Option<i64>) {
@@ -221,10 +257,26 @@ impl PyExchange {
         self.inner.trades().iter().cloned().map(PyTrade::from).collect()
     }
 
+    /// Get recorded events.
+    fn events(&self) -> Vec<PyEvent> {
+        self.inner
+            .events()
+            .iter()
+            .cloned()
+            .map(|e| PyEvent { inner: e })
+            .collect()
+    }
+
     /// Get a depth snapshot of the book (top N levels each side).
     #[pyo3(signature = (levels=10))]
     fn depth(&self, levels: usize) -> PyBookSnapshot {
         let snap = self.inner.depth(levels);
+        PyBookSnapshot::from_snapshot(&snap)
+    }
+
+    /// Get a full snapshot of the book.
+    fn full_book(&self) -> PyBookSnapshot {
+        let snap = self.inner.full_book();
         PyBookSnapshot::from_snapshot(&snap)
     }
 
@@ -261,7 +313,9 @@ impl PyExchange {
 
 /// Book depth snapshot.
 #[pyclass(name = "BookSnapshot")]
+#[derive(Clone)]
 pub struct PyBookSnapshot {
+    inner: nanobook::BookSnapshot,
     bids: Vec<PyLevelSnapshot>,
     asks: Vec<PyLevelSnapshot>,
 }
@@ -276,6 +330,26 @@ impl PyBookSnapshot {
     #[getter]
     fn asks(&self) -> Vec<PyLevelSnapshot> {
         self.asks.clone()
+    }
+
+    /// Book imbalance: (bid_qty - ask_qty) / (bid_qty + ask_qty).
+    fn imbalance(&self) -> Option<f64> {
+        self.inner.imbalance()
+    }
+
+    /// Volume-weighted midpoint price.
+    fn weighted_mid(&self) -> Option<f64> {
+        self.inner.weighted_mid()
+    }
+
+    /// Mid price: (best_bid + best_ask) / 2.
+    fn mid_price(&self) -> Option<f64> {
+        self.inner.mid_price()
+    }
+
+    /// Spread: best_ask - best_bid.
+    fn spread(&self) -> Option<i64> {
+        self.inner.spread()
     }
 
     fn __repr__(&self) -> String {
@@ -301,6 +375,7 @@ impl PyBookSnapshot {
         }
 
         Self {
+            inner: snap.clone(),
             bids: convert_levels(&snap.bids),
             asks: convert_levels(&snap.asks),
         }
