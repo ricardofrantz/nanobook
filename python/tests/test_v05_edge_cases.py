@@ -72,6 +72,21 @@ def test_exchange_clear_order_history_empty():
     ex = nanobook.Exchange()
     assert ex.clear_order_history() == 0
 
+def test_exchange_compact():
+    ex = nanobook.Exchange()
+    # Fill a level with many orders
+    for _ in range(100):
+        ex.submit_limit("buy", 10000, 10)
+    
+    # Cancel all of them - creates 100 tombstones
+    for i in range(1, 101):
+        ex.cancel(i)
+    
+    # Compact should clean them up
+    # We can't directly check tombstone count from Python, but we can verify it doesn't crash
+    ex.compact()
+    assert ex.best_bid() is None
+
 def test_order_timestamp_is_increasing():
     ex = nanobook.Exchange()
     o1 = ex.get_order(ex.submit_limit("buy", 10000, 100).order_id)

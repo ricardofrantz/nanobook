@@ -74,3 +74,53 @@ def test_parse_itch_replace_order():
         assert "new_quantity: 50" in repr(event)
     finally:
         os.unlink(path)
+
+def test_parse_itch_executed():
+    # ITCH 5.0 Order Executed (E)
+    # Ref: 1 (u64), Shares: 100 (u32), Match: 42 (u64)
+    payload = b'E' + struct.pack(">HH6sQIQ", 1, 0, b'\x00'*6, 1, 100, 42)
+    length = struct.pack(">H", len(payload))
+    
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+        f.write(length + payload)
+        path = f.name
+    try:
+        events = nanobook.parse_itch(path)
+        assert len(events) == 0 # internal match handles it
+    finally:
+        os.unlink(path)
+
+def test_parse_itch_delete():
+    # ITCH 5.0 Order Delete (D)
+    payload = b'D' + struct.pack(">HH6sQ", 1, 0, b'\x00'*6, 1)
+    length = struct.pack(">H", len(payload))
+    
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+        f.write(length + payload)
+        path = f.name
+    try:
+        events = nanobook.parse_itch(path)
+        assert len(events) == 1
+        assert events[0][1].kind == "cancel"
+    finally:
+        os.unlink(path)
+
+def test_parse_itch_trade():
+    # ITCH 5.0 Trade (P)
+    payload = bytearray(b'P' + b'\x00'*43)
+    payload[19] = ord('B') # Side
+    struct.pack_into(">I", payload, 20, 100) # Shares
+    payload[24:32] = b'AAPL    '
+    struct.pack_into(">I", payload, 32, 1000000) # Price
+    
+    length = struct.pack(">H", len(payload))
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+        f.write(length + payload)
+        path = f.name
+    try:
+        events = nanobook.parse_itch(path)
+        assert len(events) == 0 # P msg is off-book
+    finally:
+        os.unlink(path)
+
+
