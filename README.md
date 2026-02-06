@@ -11,6 +11,8 @@
 
 A **simulated stock exchange** that processes orders exactly like a real exchange — with proper price-time priority, partial fills, and cancellations.
 
+nanobook combines three layers: a **LOB matching engine** (v0.1–v0.2) for deterministic order matching, a **portfolio simulator** (v0.3–v0.4) for position tracking and strategy backtesting, and **Python bindings** (v0.4) for seamless integration with data science workflows. Each layer works independently or together.
+
 ### Who Should Use This?
 
 | If you're a... | Use this for... |
@@ -28,8 +30,47 @@ A **simulated stock exchange** that processes orders exactly like a real exchang
 - **Multi-symbol** — `MultiExchange` for independent per-symbol order books
 - **Portfolio engine** — Position tracking, cost modeling, rebalancing, financial metrics (Sharpe, Sortino, max drawdown)
 - **Trailing stops** — Fixed, percentage, and ATR-based adaptive trailing
-- **Python bindings** — Full API via PyO3 (`pip install nanobook`)
+- **Python bindings** — PyO3 wrappers for Exchange, Portfolio, sweep (`pip install nanobook`)
 - **Simple** — Single-threaded, in-process, minimal dependencies
+
+### Why Not Something Else?
+
+| Framework | Problem |
+|-----------|---------|
+| VectorBT | Per-asset signals, no cross-sectional ranking |
+| Zipline | Abandoned, bundle pain |
+| Backtrader | Slow (pure Python), verbose |
+| HFTBacktest | Crypto tick-level, wrong abstraction |
+| Nautilus Trader | Enterprise complexity |
+
+nanobook's niche: lightweight, factor-strategy-optimized portfolio simulator
+with an optional LOB execution layer. Lean (3 deps), fast (8M+ orders/sec),
+Python-friendly.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     Python (PyO3)                        │
+│     Factor ranking, strategy logic, Polars DataFrames    │
+├──────────────────────────┬──────────────────────────────┤
+│                          │                              │
+│  ┌───────────────────┐   │   ┌───────────────────────┐  │
+│  │  Portfolio Engine  │   │   │     LOB Exchange      │  │
+│  │                   │   │   │                       │  │
+│  │  Position (VWAP)  │   │   │  OrderBook            │  │
+│  │  CostModel (bps)  │◄──┼──►│  Matching Engine      │  │
+│  │  Strategy Trait    │   │   │  Stop / Trailing      │  │
+│  │  Parallel Sweep    │   │   │  Event Replay         │  │
+│  └───────────────────┘   │   └───────────────────────┘  │
+│                          │                              │
+│  ┌───────────────────────┴──────────────────────────┐   │
+│  │  Shared: Symbol, MultiExchange, BookSnapshot     │   │
+│  └──────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+See [DOC.md](DOC.md) for the full API reference.
 
 ## See It In Action
 
@@ -72,7 +113,7 @@ The interactive demo explains price-time priority, partial fills, IOC/FOK, and o
 - **Strategy trait**: Define `compute_weights()`, run backtests with `run_backtest()`
 - **Multi-symbol**: Independent order books per symbol via `MultiExchange`
 - **Parallel sweeps**: Rayon-based parameter grid search (optional feature)
-- **Python bindings**: Full API via PyO3 with GIL release for parallel sweeps
+- **Python bindings**: Exchange, Portfolio, sweep via PyO3 with GIL release for parallel sections
 
 ## Quick Example
 
@@ -351,6 +392,10 @@ submit_limit() ~120 ns breakdown:
 
 These add complexity. Current O(N) cancel is fine unless you have thousands of orders at a single price level (rare in practice).
 
+### Rust vs Numba
+
+Single-threaded throughput is roughly equivalent (both compile to LLVM IR). Where Rust wins: zero cold-start (vs Numba's ~300 ms JIT), true parallelism via Rayon with no GIL contention, and deterministic memory without GC pauses.
+
 ## Use Cases
 
 ### Strategy Backtesting
@@ -425,6 +470,17 @@ println!("Filled: {}, Cancelled: {}",
 | `persistence` | No | File-based event sourcing (JSON Lines) |
 | `portfolio` | No | Portfolio engine, position tracking, metrics |
 | `parallel` | No | Rayon-based parallel parameter sweeps |
+
+## Non-Goals
+
+| Temptation | Why Not |
+|-----------|---------|
+| Spearman/IC/t-stat in Rust | Use scipy/Polars — proven, mature |
+| arrow-rs dependency | 2 → 20+ deps. PyO3 handles data exchange |
+| Event-driven Strategy trait | Wrong pattern for factor strategies. Batch vectorized |
+| Replace VectorBT | VectorBT is fine for ad-hoc research. nanobook = production |
+| Networking/WebSocket | In-process only. Wrap externally if needed |
+| GUI/dashboard | Use Python (Streamlit/Jupyter) for visualization |
 
 ## Limitations
 
