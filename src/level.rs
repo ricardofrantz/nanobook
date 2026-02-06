@@ -286,6 +286,59 @@ mod tests {
     }
 
     #[test]
+    fn tombstone_marking() {
+        let mut level = Level::new(Price(100_00));
+        level.push_back(OrderId(1), 100);
+        level.push_back(OrderId(2), 200);
+        level.push_back(OrderId(3), 150);
+
+        // Mark middle as tombstone
+        level.mark_tombstone(1, 200);
+
+        assert_eq!(level.order_count(), 2);
+        assert_eq!(level.total_quantity(), 250);
+        assert_eq!(level.tombstone_count(), 1);
+
+        // Iterator should skip it
+        let ids: Vec<_> = level.iter().collect();
+        assert_eq!(ids, vec![OrderId(1), OrderId(3)]);
+    }
+
+    #[test]
+    fn tombstone_compaction() {
+        let mut level = Level::new(Price(100_00));
+        level.push_back(OrderId(1), 100);
+        level.push_back(OrderId(2), 200);
+        level.push_back(OrderId(3), 150);
+
+        level.mark_tombstone(0, 100);
+        level.mark_tombstone(2, 150);
+
+        assert_eq!(level.orders.len(), 3);
+        assert_eq!(level.tombstone_count(), 2);
+
+        level.compact();
+
+        assert_eq!(level.orders.len(), 1);
+        assert_eq!(level.tombstone_count(), 0);
+        assert_eq!(level.orders[0], OrderId(2));
+    }
+
+    #[test]
+    fn front_skips_tombstones() {
+        let mut level = Level::new(Price(100_00));
+        level.push_back(OrderId(1), 100);
+        level.push_back(OrderId(2), 200);
+
+        level.mark_tombstone(0, 100);
+
+        // front() should return OrderId(2) and remove the tombstone from the front
+        assert_eq!(level.front(), Some(OrderId(2)));
+        assert_eq!(level.orders.len(), 1);
+        assert_eq!(level.tombstone_count(), 0);
+    }
+
+    #[test]
     fn quantity_saturates_on_underflow() {
         let mut level = Level::new(Price(100_00));
         level.push_back(OrderId(1), 100);

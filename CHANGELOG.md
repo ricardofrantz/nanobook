@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-02-06
+
+### Added
+
+- **O(1) order cancellation**: Tombstone-based cancellation in `Level` and `OrderBook`
+  - ~350x speedup for deep level cancels (170 ns vs ~60 μs)
+  - `Exchange::compact()` — manual compaction to reclaim tombstone memory
+- **NASDAQ ITCH 5.0 parser** (feature: `itch`):
+  - `ItchParser` — streaming binary parser for ITCH 5.0 protocol
+  - Handles Add, Replace, Execute, Delete, Trade, and StockDirectory messages
+  - `parse_itch()` exposed to Python
+- **Expanded benchmarks**: Modify, event apply, multi-symbol throughput
+  - Dedicated `stops.rs` benchmark for trigger cascades and trailing updates
+  - CI regression detection against v0.5 baseline
+
+### Changed
+
+- `sweep_equal_weight` renamed to cleaner API name
+- Python type stubs updated for new methods
+
+## [0.5.0] - 2026-02-06
+
+### Added
+
+- **Complete Python bindings** (`pip install nanobook` via maturin):
+  - `Order`, `Position`, `Event` classes
+  - `Exchange`: `events()`, `replay()`, `full_book()`, stop order queries
+  - `Portfolio`: position tracking, LOB rebalancing, snapshots
+  - `MultiExchange`: method forwarding, `best_prices()`
+  - `Strategy`: custom Python callback support in `run_backtest()`
+- **Type stubs** (`nanobook.pyi`) for IDE support
+- **Automated wheel builds** for Linux, macOS, Windows in CI
+- 80 Python tests
+
+### Changed
+
+- Modernized to Rust 2024 edition (MSRV 1.85)
+- Requires Python >= 3.11
+
 ## [0.4.0] - 2026-02-06
 
 ### Added
