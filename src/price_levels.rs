@@ -103,9 +103,30 @@ impl PriceLevels {
     /// Add an order at the given price.
     ///
     /// Creates the level if it doesn't exist.
-    pub fn insert_order(&mut self, price: Price, order_id: OrderId, quantity: Quantity) {
+    /// Returns the position index within the level.
+    pub fn insert_order(&mut self, price: Price, order_id: OrderId, quantity: Quantity) -> usize {
         let level = self.get_or_create_level(price);
+        // Actually, VecDeque index is just the length before push.
+        let actual_index = level.orders.len(); 
         level.push_back(order_id, quantity);
+        actual_index
+    }
+
+    /// Mark an order as a tombstone.
+    pub fn mark_tombstone(&mut self, price: Price, index: usize, quantity: Quantity) {
+        if let Some(level) = self.levels.get_mut(&price) {
+            level.mark_tombstone(index, quantity);
+            if level.is_empty() {
+                self.remove_level(price);
+            }
+        }
+    }
+
+    /// Remove all tombstones from all levels.
+    pub fn compact(&mut self) {
+        for level in self.levels.values_mut() {
+            level.compact();
+        }
     }
 
     /// Remove an order from the given price level.

@@ -156,6 +156,8 @@ mod level;
 mod matching;
 pub mod multi_exchange;
 mod order;
+#[cfg(feature = "itch")]
+pub mod itch;
 #[cfg(feature = "persistence")]
 pub mod persistence;
 #[cfg(feature = "portfolio")]

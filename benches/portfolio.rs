@@ -132,12 +132,50 @@ fn bench_sweep(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark: rebalance_lob vs rebalance_simple
+fn bench_lob_rebalance(c: &mut Criterion) {
+    let mut group = c.benchmark_group("portfolio/rebalance");
+
+    let symbols = ["AAPL", "GOOG", "MSFT", "AMZN", "META"];
+    let targets: Vec<(Symbol, f64)> = symbols.iter().map(|s| (sym(s), 0.2)).collect();
+    let prices: Vec<(Symbol, i64)> = symbols.iter().map(|s| (sym(s), 150_00)).collect();
+
+    group.bench_function("simple", |b| {
+        b.iter_batched(
+            || nanobook::portfolio::Portfolio::new(1_000_000_00, CostModel::zero()),
+            |mut p| black_box(p.rebalance_simple(&targets, &prices)),
+            criterion::BatchSize::SmallInput,
+        );
+    });
+
+    group.bench_function("lob", |b| {
+        b.iter_batched(
+            || {
+                let p = nanobook::portfolio::Portfolio::new(1_000_000_00, CostModel::zero());
+                let mut multi = nanobook::MultiExchange::new();
+                for (s, price) in &prices {
+                    // Build deep books for realistic rebalance
+                    for i in 0..10 {
+                        multi.get_or_create(s).submit_limit(nanobook::Side::Sell, Price(price.0 + i * 10), 1000, nanobook::TimeInForce::GTC);
+                    }
+                }
+                (p, multi)
+            },
+            |(mut p, mut multi)| black_box(p.rebalance_lob(&targets, &mut multi)),
+            criterion::BatchSize::SmallInput,
+        );
+    });
+
+    group.finish();
+}
+
 #[cfg(feature = "parallel")]
 criterion_group!(
     benches,
     bench_single_backtest,
     bench_compute_metrics,
     bench_sweep,
+    bench_lob_rebalance,
 );
 
 #[cfg(not(feature = "parallel"))]
@@ -145,6 +183,7 @@ criterion_group!(
     benches,
     bench_single_backtest,
     bench_compute_metrics,
+    bench_lob_rebalance,
 );
 
 criterion_main!(benches);

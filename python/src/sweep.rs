@@ -31,6 +31,7 @@ use crate::types::parse_symbol;
 ///     )
 ///
 #[pyfunction]
+#[pyo3(name = "sweep_equal_weight")]
 #[pyo3(signature = (n_params, price_series, initial_cash, periods_per_year=12.0, risk_free=0.0))]
 pub fn py_sweep_equal_weight(
     py: Python<'_>,

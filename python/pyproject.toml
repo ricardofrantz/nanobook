@@ -29,6 +29,6 @@ Documentation = "https://docs.rs/nanobook"
 Issues = "https://github.com/ricardofrantz/nanobook/issues"
 
 [tool.maturin]
-features = ["pyo3/extension-module"]
+features = ["pyo3/extension-module", "itch"]
 module-name = "nanobook"
 include = ["nanobook.pyi"]

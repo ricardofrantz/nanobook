@@ -9,7 +9,7 @@ def test_sweep_basic():
         [("AAPL", 155_00)],
         [("AAPL", 160_00)],
     ]
-    results = nanobook.py_sweep_equal_weight(
+    results = nanobook.sweep_equal_weight(
         n_params=5,
         price_series=prices,
         initial_cash=1_000_000_00,
@@ -27,7 +27,7 @@ def test_sweep_empty():
         [("AAPL", 150_00)],
         [("AAPL", 155_00)],
     ]
-    results = nanobook.py_sweep_equal_weight(
+    results = nanobook.sweep_equal_weight(
         n_params=0,
         price_series=prices,
         initial_cash=1_000_000_00,
@@ -41,7 +41,7 @@ def test_sweep_multi_stock():
         [("AAPL", 155_00), ("MSFT", 310_00)],
         [("AAPL", 160_00), ("MSFT", 320_00)],
     ]
-    results = nanobook.py_sweep_equal_weight(
+    results = nanobook.sweep_equal_weight(
         n_params=10,
         price_series=prices,
         initial_cash=1_000_000_00,

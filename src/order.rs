@@ -53,6 +53,8 @@ pub struct Order {
     pub time_in_force: TimeInForce,
     /// Current lifecycle status
     pub status: OrderStatus,
+    /// Position index within the price level queue (for O(1) cancel)
+    pub(crate) position_in_level: usize,
 }
 
 impl Order {
@@ -78,6 +80,7 @@ impl Order {
             timestamp,
             time_in_force,
             status: OrderStatus::New,
+            position_in_level: 0,
         }
     }
 

@@ -612,6 +612,11 @@ impl Exchange {
         &self.book
     }
 
+    /// Get mutable access to the underlying order book.
+    pub fn book_mut(&mut self) -> &mut OrderBook {
+        &mut self.book
+    }
+
     /// Get a stop order by ID.
     pub fn get_stop_order(&self, order_id: OrderId) -> Option<&StopOrder> {
         self.stop_book.get(order_id)
@@ -648,6 +653,14 @@ impl Exchange {
     pub fn clear_order_history(&mut self) -> usize {
         self.stop_book.clear_history();
         self.book.clear_history()
+    }
+
+    /// Remove all tombstones from the order book.
+    ///
+    /// Useful after heavy cancellation activity to reclaim memory and
+    /// maintain iteration performance.
+    pub fn compact(&mut self) {
+        self.book.compact();
     }
 }
 

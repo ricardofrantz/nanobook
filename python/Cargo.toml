@@ -8,6 +8,9 @@ publish = false
 name = "nanobook"
 crate-type = ["cdylib"]
 
+[features]
+itch = ["nanobook/itch"]
+
 [dependencies]
 nanobook = { path = "..", features = ["event-log", "serde", "persistence", "portfolio", "parallel"] }
 pyo3 = { version = "0.23", features = ["extension-module"] }

@@ -1,5 +1,7 @@
 mod exchange;
 mod event;
+#[cfg(feature = "itch")]
+mod itch;
 mod metrics;
 mod multi;
 mod order;
@@ -44,6 +46,8 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(metrics::py_compute_metrics, m)?)?;
     m.add_function(wrap_pyfunction!(sweep::py_sweep_equal_weight, m)?)?;
     m.add_function(wrap_pyfunction!(strategy::py_run_backtest, m)?)?;
+    #[cfg(feature = "itch")]
+    m.add_function(wrap_pyfunction!(itch::parse_itch, m)?)?;
 
     Ok(())
 }

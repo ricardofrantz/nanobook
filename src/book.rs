@@ -194,7 +194,7 @@ impl OrderBook {
     /// # Panics
     ///
     /// Panics if an order with the same ID already exists.
-    pub fn add_order(&mut self, order: Order) {
+    pub fn add_order(&mut self, mut order: Order) {
         assert!(
             !self.orders.contains_key(&order.id),
             "order {} already exists",
@@ -206,20 +206,18 @@ impl OrderBook {
         let quantity = order.remaining_quantity;
         let order_id = order.id;
 
+        // Add to appropriate price level and get its index
+        let index = self.side_mut(side).insert_order(price, order_id, quantity);
+        order.position_in_level = index;
+
         // Store in central index
         self.orders.insert(order_id, order);
-
-        // Add to appropriate price level
-        self.side_mut(side).insert_order(price, order_id, quantity);
     }
 
     /// Remove an order from the book (for cancellation).
     ///
-    /// Updates the order's status to Cancelled and removes it from
-    /// the price level queue. The order remains in the central index
-    /// for historical queries.
-    ///
-    /// Returns the cancelled quantity, or None if order not found or not active.
+    /// Updates the order's status to Cancelled and marks it as a tombstone
+    /// in the price level queue for O(1) performance.
     pub fn cancel_order(&mut self, order_id: OrderId) -> Option<Quantity> {
         let order = self.orders.get_mut(&order_id)?;
 
@@ -230,12 +228,13 @@ impl OrderBook {
         let side = order.side;
         let price = order.price;
         let remaining = order.remaining_quantity;
+        let index = order.position_in_level;
 
         // Cancel the order (updates status)
         order.cancel();
 
-        // Remove from price level
-        self.side_mut(side).remove_order(price, order_id, remaining);
+        // Mark as tombstone in price level (O(1))
+        self.side_mut(side).mark_tombstone(price, index, remaining);
 
         Some(remaining)
     }
@@ -271,6 +270,12 @@ impl OrderBook {
         let before = self.orders.len();
         self.orders.retain(|_, order| order.is_active());
         before - self.orders.len()
+    }
+
+    /// Remove all tombstones from the book.
+    pub fn compact(&mut self) {
+        self.bids.compact();
+        self.asks.compact();
     }
 }
 

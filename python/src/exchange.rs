@@ -297,6 +297,11 @@ impl PyExchange {
         self.inner.clear_order_history()
     }
 
+    /// Remove tombstones from the order book.
+    fn compact(&mut self) {
+        self.inner.compact();
+    }
+
     fn __repr__(&self) -> String {
         let (bid, ask) = self.inner.best_bid_ask();
         let fmt_price = |p: nanobook::Price| format!("${:.2}", price_to_float(p));

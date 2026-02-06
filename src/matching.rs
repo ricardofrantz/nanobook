@@ -90,11 +90,11 @@ impl OrderBook {
     fn match_at_price(&mut self, incoming: &mut Order, price: Price, result: &mut MatchResult) {
         // Process orders at this price level until exhausted or incoming filled
         while incoming.remaining_quantity > 0 {
-            // Get the front order at this price
-            let opposite = self.opposite_side(incoming.side);
-            let resting_id = match opposite.best_level().and_then(|l| l.front()) {
-                Some(id) if opposite.best_price() == Some(price) => id,
-                _ => break, // Level exhausted or price changed
+            // Get the front order at this price (skips tombstones)
+            let opposite = self.opposite_side_mut(incoming.side);
+            let resting_id = match opposite.get_level_mut(price).and_then(|l| l.front()) {
+                Some(id) => id,
+                _ => break, // Level exhausted or only tombstones left
             };
 
             // Get the resting order's remaining quantity

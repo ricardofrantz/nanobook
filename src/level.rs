@@ -16,9 +16,11 @@ pub struct Level {
     /// The price for all orders in this level
     price: Price,
     /// Order IDs in FIFO order
-    orders: VecDeque<OrderId>,
+    pub(crate) orders: VecDeque<OrderId>,
     /// Sum of remaining quantities (cached for O(1) access)
     total_quantity: Quantity,
+    /// Number of tombstones (cancelled orders still in the queue)
+    tombstone_count: usize,
 }
 
 impl Level {
@@ -28,6 +30,7 @@ impl Level {
             price,
             orders: VecDeque::new(),
             total_quantity: 0,
+            tombstone_count: 0,
         }
     }
 
@@ -37,16 +40,16 @@ impl Level {
         self.price
     }
 
-    /// Returns true if there are no orders at this level.
+    /// Returns true if there are no active orders at this level.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.orders.is_empty()
+        self.total_quantity == 0
     }
 
-    /// Returns the number of orders at this level.
+    /// Returns the number of orders at this level (including tombstones).
     #[inline]
     pub fn order_count(&self) -> usize {
-        self.orders.len()
+        self.orders.len() - self.tombstone_count
     }
 
     /// Returns the total quantity across all orders at this level.
@@ -55,16 +58,32 @@ impl Level {
         self.total_quantity
     }
 
-    /// Returns the OrderId at the front of the queue (next to fill).
+    /// Returns the number of tombstones in the queue.
     #[inline]
-    pub fn front(&self) -> Option<OrderId> {
-        self.orders.front().copied()
+    pub fn tombstone_count(&self) -> usize {
+        self.tombstone_count
+    }
+
+    /// Returns the OrderId at the front of the queue (next to fill).
+    /// Skips tombstones.
+    pub fn front(&mut self) -> Option<OrderId> {
+        while let Some(&id) = self.orders.front() {
+            if id.0 == 0 {
+                // It's a tombstone
+                self.orders.pop_front();
+                self.tombstone_count -= 1;
+            } else {
+                return Some(id);
+            }
+        }
+        None
     }
 
     /// Add an order to the back of the queue.
     ///
     /// The quantity is added to the level's total (saturating on overflow).
     pub fn push_back(&mut self, order_id: OrderId, quantity: Quantity) {
+        assert!(order_id.0 != 0, "OrderId(0) reserved for tombstones");
         self.orders.push_back(order_id);
         self.total_quantity = self.total_quantity.saturating_add(quantity);
     }
@@ -76,9 +95,30 @@ impl Level {
     ///
     /// Returns `None` if the level is empty.
     pub fn pop_front(&mut self, quantity: Quantity) -> Option<OrderId> {
-        let order_id = self.orders.pop_front()?;
-        self.total_quantity = self.total_quantity.saturating_sub(quantity);
-        Some(order_id)
+        while let Some(id) = self.orders.pop_front() {
+            if id.0 == 0 {
+                self.tombstone_count -= 1;
+                continue;
+            }
+            self.total_quantity = self.total_quantity.saturating_sub(quantity);
+            return Some(id);
+        }
+        None
+    }
+
+    /// Mark an order as a tombstone.
+    ///
+    /// This is O(1) if you know the position, but here we still don't.
+    /// Wait, the plan said: "HashMap<OrderId, (Price, Side, usize)> stores position index".
+    /// That means I need to store the index in OrderBook.
+    pub fn mark_tombstone(&mut self, index: usize, quantity: Quantity) {
+        if let Some(id_ref) = self.orders.get_mut(index) {
+            if id_ref.0 != 0 {
+                id_ref.0 = 0; // Set to tombstone ID
+                self.total_quantity = self.total_quantity.saturating_sub(quantity);
+                self.tombstone_count += 1;
+            }
+        }
     }
 
     /// Remove a specific order from anywhere in the queue (for cancellation).
@@ -87,7 +127,7 @@ impl Level {
     /// The provided quantity is subtracted from the level's total.
     ///
     /// Note: This is O(n) where n is the number of orders at this price level.
-    /// For O(1) cancel, consider a tombstone approach or intrusive linked list.
+    /// For O(1) cancel, we now use `mark_tombstone` called from OrderBook.
     pub fn remove(&mut self, order_id: OrderId, quantity: Quantity) -> bool {
         if let Some(pos) = self.orders.iter().position(|&id| id == order_id) {
             self.orders.remove(pos);
@@ -98,6 +138,15 @@ impl Level {
         }
     }
 
+    /// Remove all tombstones from the queue.
+    pub fn compact(&mut self) {
+        if self.tombstone_count == 0 {
+            return;
+        }
+        self.orders.retain(|id| id.0 != 0);
+        self.tombstone_count = 0;
+    }
+
     /// Decrease the total quantity (e.g., after a partial fill).
     ///
     /// Use this when an order is partially filled but remains in the queue.
@@ -105,9 +154,9 @@ impl Level {
         self.total_quantity = self.total_quantity.saturating_sub(amount);
     }
 
-    /// Returns an iterator over the order IDs in FIFO order.
+    /// Returns an iterator over the active order IDs in FIFO order.
     pub fn iter(&self) -> impl Iterator<Item = OrderId> + '_ {
-        self.orders.iter().copied()
+        self.orders.iter().copied().filter(|id| id.0 != 0)
     }
 }
 
@@ -117,7 +166,7 @@ mod tests {
 
     #[test]
     fn new_level_is_empty() {
-        let level = Level::new(Price(100_00));
+        let mut level = Level::new(Price(100_00));
 
         assert!(level.is_empty());
         assert_eq!(level.order_count(), 0);

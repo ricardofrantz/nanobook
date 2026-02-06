@@ -72,5 +72,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Run benchmarks
-        run: cargo bench --no-run
+      - name: Run benchmarks and compare
+        run: |
+          cargo bench --all-features -- --baseline v0.5 || echo "No v0.5 baseline found, running fresh"
+          cargo bench --all-features
