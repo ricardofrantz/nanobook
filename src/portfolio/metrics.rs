@@ -6,6 +6,7 @@
 /// Annualization uses the `periods_per_year` parameter
 /// (e.g., 252 for daily, 12 for monthly, 52 for weekly).
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Metrics {
     /// Total cumulative return (e.g., 0.15 = 15%)
     pub total_return: f64,

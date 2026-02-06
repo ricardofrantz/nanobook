@@ -30,8 +30,11 @@
 - [Performance](#performance)
 - [Input Validation](#input-validation)
 - [Stop Orders](#stop-orders)
+- [Trailing Stops](#trailing-stops)
+- [Strategy Trait](#strategy-trait)
 - [Persistence](#persistence)
 - [Serde Support](#serde-support)
+- [Python Bindings](#python-bindings)
 - [Common Patterns](#common-patterns)
 - [Limitations](#limitations)
 
@@ -43,7 +46,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-nanobook = "0.3"
+nanobook = "0.4"
 ```
 
 Minimal working example:
@@ -669,7 +672,7 @@ For maximum performance, disable the feature:
 
 ```toml
 [dependencies]
-nanobook = { version = "0.3", default-features = false }
+nanobook = { version = "0.4", default-features = false }
 ```
 
 This removes `apply`, `apply_all`, `replay`, `events`, and `clear_events` from the API.
@@ -744,7 +747,7 @@ for (sym, bid, ask) in multi.best_prices() {
 
 ```toml
 [dependencies]
-nanobook = { version = "0.3", features = ["portfolio"] }
+nanobook = { version = "0.4", features = ["portfolio"] }
 ```
 
 ### Portfolio
@@ -877,7 +880,7 @@ println!("{metrics}"); // Formatted output:
 
 ```toml
 [dependencies]
-nanobook = { version = "0.3", features = ["parallel"] }
+nanobook = { version = "0.4", features = ["parallel"] }
 ```
 
 Run strategy variants in parallel using rayon:
@@ -1196,13 +1199,188 @@ exchange.stop_book();                 // &StopBook
 
 ---
 
+## Trailing Stops
+
+Trailing stops automatically adjust their trigger price as the market moves favorably. Three trailing methods are supported.
+
+### Fixed Trailing
+
+The stop price trails by a fixed offset in cents:
+
+```rust
+use nanobook::{Exchange, Side, Price, TrailMethod};
+
+let mut exchange = Exchange::new();
+
+// Sell trailing stop: triggers if price drops $2.00 from peak
+let stop = exchange.submit_trailing_stop_market(
+    Side::Sell,
+    Price(98_00),       // initial stop price
+    100,                // quantity
+    TrailMethod::Fixed(200), // trail by $2.00
+);
+```
+
+### Percentage Trailing
+
+The stop price trails by a percentage of the watermark:
+
+```rust
+// Trail by 5% from the peak
+let stop = exchange.submit_trailing_stop_market(
+    Side::Sell,
+    Price(95_00),
+    100,
+    TrailMethod::Percentage(0.05),
+);
+```
+
+### ATR-Based Trailing
+
+Adaptive trailing using Average True Range computed from trade prices:
+
+```rust
+// Trail by 2x ATR over 14-period window
+let stop = exchange.submit_trailing_stop_market(
+    Side::Sell,
+    Price(95_00),
+    100,
+    TrailMethod::Atr { multiplier: 2.0, period: 14 },
+);
+```
+
+ATR is computed internally from absolute price changes between consecutive trades (adapted for tick-level data where OHLC bars are not available).
+
+### Trailing Stop-Limit
+
+```rust
+use nanobook::TimeInForce;
+
+// Trailing stop that triggers a limit order instead of a market order
+let stop = exchange.submit_trailing_stop_limit(
+    Side::Sell,
+    Price(95_00),       // initial stop price
+    Price(94_50),       // limit price
+    100,
+    TimeInForce::GTC,
+    TrailMethod::Fixed(200),
+);
+```
+
+### Behavior
+
+- **Sell trailing**: watermark tracks market highs; stop price = watermark - offset
+- **Buy trailing**: watermark tracks market lows; stop price = watermark + offset
+- Stop price only moves in the favorable direction (never worsens)
+- Watermark and stop price update automatically when trades occur
+- Cancel with `exchange.cancel(stop_id)` like any other stop order
+
+---
+
+## Strategy Trait
+
+**Feature flag:** `portfolio`
+
+The `Strategy` trait provides a batch-oriented interface for backtesting. Implement `compute_weights()` and use `run_backtest()` to run the full loop.
+
+### Implementing a Strategy
+
+```rust
+use nanobook::portfolio::strategy::{Strategy, run_backtest, BacktestResult};
+use nanobook::portfolio::{Portfolio, CostModel};
+use nanobook::Symbol;
+
+struct MomentumStrategy {
+    lookback: usize,
+}
+
+impl Strategy for MomentumStrategy {
+    fn compute_weights(
+        &self,
+        bar_index: usize,
+        prices: &[(Symbol, i64)],
+        _portfolio: &Portfolio,
+    ) -> Vec<(Symbol, f64)> {
+        // Equal-weight all symbols after lookback period
+        if bar_index < self.lookback {
+            return vec![];
+        }
+        let w = 1.0 / prices.len() as f64;
+        prices.iter().map(|(sym, _)| (*sym, w)).collect()
+    }
+}
+```
+
+### Running a Backtest
+
+```rust
+let strategy = MomentumStrategy { lookback: 3 };
+let aapl = Symbol::new("AAPL");
+
+let price_series = vec![
+    vec![(aapl, 150_00)],
+    vec![(aapl, 155_00)],
+    vec![(aapl, 160_00)],
+    vec![(aapl, 158_00)],
+];
+
+let result = run_backtest(
+    &strategy,
+    &price_series,
+    1_000_000_00,       // initial cash
+    CostModel::zero(),
+    12.0,               // periods per year
+    0.0,                // risk-free rate
+);
+
+if let Some(metrics) = &result.metrics {
+    println!("{metrics}");
+}
+```
+
+### Built-in EqualWeight
+
+```rust
+use nanobook::portfolio::strategy::EqualWeight;
+
+let result = run_backtest(
+    &EqualWeight,
+    &price_series,
+    1_000_000_00,
+    CostModel::zero(),
+    12.0,
+    0.0,
+);
+```
+
+### Parallel Strategy Sweep
+
+**Feature flag:** `parallel`
+
+```rust
+use nanobook::portfolio::sweep::sweep_strategy;
+
+let params = vec![1, 3, 5, 10, 20]; // lookback periods
+let results = sweep_strategy(
+    &params,
+    &price_series,
+    1_000_000_00,
+    CostModel::zero(),
+    12.0,
+    0.0,
+    |&lookback| MomentumStrategy { lookback },
+);
+```
+
+---
+
 ## Persistence
 
 **Feature flag:** `persistence` (includes `serde` and `event-log`)
 
 ```toml
 [dependencies]
-nanobook = { version = "0.3", features = ["persistence"] }
+nanobook = { version = "0.4", features = ["persistence"] }
 ```
 
 Save and load exchange state via JSON Lines event sourcing:
@@ -1251,7 +1429,7 @@ One JSON object per line (`.jsonl`). Human-readable, streamable:
 
 ```toml
 [dependencies]
-nanobook = { version = "0.3", features = ["serde"] }
+nanobook = { version = "0.4", features = ["serde"] }
 ```
 
 All public types derive `Serialize` and `Deserialize` when the `serde` feature is enabled:
@@ -1260,6 +1438,119 @@ All public types derive `Serialize` and `Deserialize` when the `serde` feature i
 `Event`, `ApplyResult`, `SubmitResult`, `CancelResult`, `CancelError`, `ModifyResult`,
 `ModifyError`, `BookSnapshot`, `LevelSnapshot`, `MatchResult`, `StopOrder`, `StopStatus`,
 `StopSubmitResult`, `ValidationError`, `Position`, `CostModel`.
+
+### Portfolio Persistence
+
+**Feature flag:** `persistence`
+
+Save and load portfolio state as JSON:
+
+```rust
+use nanobook::portfolio::{Portfolio, CostModel};
+use std::path::Path;
+
+let mut portfolio = Portfolio::new(1_000_000_00, CostModel::zero());
+// ... rebalance, record returns ...
+
+portfolio.save_json(Path::new("portfolio.json")).unwrap();
+let loaded = Portfolio::load_json(Path::new("portfolio.json")).unwrap();
+assert_eq!(portfolio.cash, loaded.cash);
+```
+
+---
+
+## Python Bindings
+
+Install via maturin (from the `python/` directory):
+
+```bash
+cd python && maturin develop --release
+```
+
+### Exchange
+
+```python
+import nanobook
+
+ex = nanobook.Exchange()
+
+# Limit orders — strings for side/tif, ints for price (cents) and quantity
+result = ex.submit_limit("buy", 10050, 100, "gtc")
+print(result.order_id, result.status)  # 1 New
+
+# Market orders
+result = ex.submit_market("sell", 50)
+
+# Cancel and modify
+ex.cancel(result.order_id)
+ex.modify(order_id, 10100, 200)
+
+# Queries
+bid, ask = ex.best_bid_ask()
+spread = ex.spread()
+snap = ex.depth(10)
+trades = ex.trades()
+```
+
+### Stop Orders
+
+```python
+# Stop-market
+ex.submit_stop_market("sell", 9500, 100)
+
+# Stop-limit
+ex.submit_stop_limit("buy", 10500, 10600, 100, "gtc")
+
+# Trailing stops
+ex.submit_trailing_stop_market("sell", 9500, 100, "fixed", 200)
+ex.submit_trailing_stop_market("sell", 9500, 100, "percentage", 0.05)
+ex.submit_trailing_stop_market("sell", 9500, 100, "atr", 2.0, atr_period=14)
+```
+
+### Portfolio
+
+```python
+cost = nanobook.CostModel(commission_bps=10, slippage_bps=5)
+p = nanobook.Portfolio(1_000_000_00, cost)
+
+# Rebalance to target weights
+p.rebalance_simple([("AAPL", 0.6)], [("AAPL", 150_00)])
+
+# Record returns and compute metrics
+p.record_return([("AAPL", 155_00)])
+m = p.compute_metrics(12.0, 0.0)
+print(f"Sharpe: {m.sharpe:.2f}, Total return: {m.total_return:.2%}")
+
+# Save/load (requires persistence feature)
+p.save_json("portfolio.json")
+loaded = nanobook.Portfolio.load_json("portfolio.json")
+```
+
+### Parallel Sweep
+
+```python
+# GIL released for Rayon parallelism
+results = nanobook.py_sweep_equal_weight(
+    n_params=100,
+    price_series=[
+        [("AAPL", 150_00), ("MSFT", 300_00)],
+        [("AAPL", 155_00), ("MSFT", 310_00)],
+    ],
+    initial_cash=1_000_000_00,
+    periods_per_year=252.0,
+    risk_free=0.0,
+)
+for m in results:
+    if m is not None:
+        print(f"Sharpe={m.sharpe:.2f}")
+```
+
+### Standalone Metrics
+
+```python
+m = nanobook.py_compute_metrics([0.01, -0.005, 0.02], 252.0, 0.0)
+print(f"Total return: {m.total_return:.2%}, Sharpe: {m.sharpe:.2f}")
+```
 
 ---
 
@@ -1392,5 +1683,5 @@ nanobook is an **educational and testing tool**, not a production exchange:
 |------------|-------------|
 | **No networking** | In-process only; no TCP/UDP/WebSocket server |
 | **No compliance** | No self-trade prevention, circuit breakers, or regulatory controls |
-| **No complex orders** | No iceberg, pegged, or trailing stop orders |
+| **No complex orders** | No iceberg or pegged orders |
 | **Single-threaded** | No concurrent access; wrap in `Mutex` if needed |

@@ -8,6 +8,11 @@ Cargo.lock
 *.swp
 *.swo
 
+# Python
+__pycache__/
+*.pyc
+*.so
+
 # OS
 .DS_Store
 Thumbs.db

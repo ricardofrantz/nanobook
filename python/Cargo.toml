@@ -1,0 +1,13 @@
+[package]
+name = "nanobook-python"
+version = "0.4.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "nanobook"
+crate-type = ["cdylib"]
+
+[dependencies]
+nanobook = { path = "..", features = ["event-log", "serde", "persistence", "portfolio", "parallel"] }
+pyo3 = { version = "0.23", features = ["extension-module"] }

@@ -184,7 +184,7 @@ pub use result::{
 };
 pub use side::Side;
 pub use snapshot::{BookSnapshot, LevelSnapshot};
-pub use stop::{StopBook, StopOrder, StopStatus};
+pub use stop::{StopBook, StopOrder, StopStatus, TrailMethod};
 pub use tif::TimeInForce;
 pub use trade::Trade;
 pub use types::{OrderId, Price, Quantity, Symbol, Timestamp, TradeId};

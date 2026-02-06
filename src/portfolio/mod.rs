@@ -23,24 +23,54 @@
 pub mod cost_model;
 pub mod metrics;
 pub mod position;
+pub mod strategy;
 #[cfg(feature = "parallel")]
 pub mod sweep;
 
 pub use cost_model::CostModel;
 pub use metrics::{compute_metrics, Metrics};
 pub use position::Position;
+pub use strategy::{BacktestResult, EqualWeight, Strategy, run_backtest};
 
 use crate::types::Symbol;
 use rustc_hash::FxHashMap;
+
+/// Serde helper for `FxHashMap<Symbol, Position>` — serializes as `Vec<(Symbol, Position)>`.
+#[cfg(feature = "serde")]
+mod serde_positions {
+    use super::{FxHashMap, Position, Symbol};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        map: &FxHashMap<Symbol, Position>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut vec: Vec<(&Symbol, &Position)> = map.iter().collect();
+        vec.sort_by_key(|(sym, _)| *sym);
+        vec.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<FxHashMap<Symbol, Position>, D::Error> {
+        let vec: Vec<(Symbol, Position)> = Vec::deserialize(deserializer)?;
+        Ok(vec.into_iter().collect())
+    }
+}
 
 /// A portfolio tracking cash, positions, returns, and equity.
 ///
 /// All monetary values (cash, equity) are in the smallest currency unit (cents).
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Portfolio {
     /// Cash balance (cents)
     cash: i64,
     /// Positions indexed by symbol
+    #[cfg_attr(
+        feature = "serde",
+        serde(serialize_with = "serde_positions::serialize", deserialize_with = "serde_positions::deserialize")
+    )]
     positions: FxHashMap<Symbol, Position>,
     /// Cost model applied to each trade
     cost_model: CostModel,
@@ -337,6 +367,24 @@ impl Portfolio {
         }
     }
 
+    // === Persistence ===
+
+    /// Save the portfolio to a JSON file.
+    #[cfg(feature = "persistence")]
+    pub fn save_json(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        std::fs::write(path, json)
+    }
+
+    /// Load a portfolio from a JSON file.
+    #[cfg(feature = "persistence")]
+    pub fn load_json(path: &std::path::Path) -> std::io::Result<Self> {
+        let json = std::fs::read_to_string(path)?;
+        serde_json::from_str(&json)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
+
     // === Internal ===
 
     /// Execute a fill: update position, deduct cost, adjust cash.
@@ -356,13 +404,13 @@ impl Portfolio {
         pos.apply_fill(qty, price);
 
         // Adjust cash: buying decreases cash, selling increases it
-        self.cash -= qty * price;
-        self.cash -= cost;
+        self.cash -= qty * price + cost;
     }
 }
 
 /// A point-in-time snapshot of portfolio state.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PortfolioSnapshot {
     /// Cash balance (cents)
     pub cash: i64,
@@ -495,5 +543,66 @@ mod tests {
         assert_eq!(weights.len(), 1);
         // Weight should be approximately 0.5
         assert!((weights[0].1 - 0.5).abs() < 0.01);
+    }
+}
+
+#[cfg(all(test, feature = "persistence"))]
+mod persistence_tests {
+    use super::*;
+
+    fn aapl() -> Symbol {
+        Symbol::new("AAPL")
+    }
+
+    #[test]
+    fn portfolio_json_roundtrip() {
+        let mut portfolio = Portfolio::new(1_000_000_00, CostModel::zero());
+        let prices = [(aapl(), 150_00)];
+        portfolio.rebalance_simple(&[(aapl(), 0.5)], &prices);
+        portfolio.record_return(&prices);
+
+        let json = serde_json::to_string(&portfolio).unwrap();
+        let restored: Portfolio = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.cash(), portfolio.cash());
+        assert_eq!(restored.returns().len(), portfolio.returns().len());
+        assert_eq!(
+            restored.position(&aapl()).unwrap().quantity,
+            portfolio.position(&aapl()).unwrap().quantity
+        );
+    }
+
+    #[test]
+    fn portfolio_save_load_file() {
+        let mut portfolio = Portfolio::new(500_000_00, CostModel::zero());
+        let prices = [(aapl(), 100_00)];
+        portfolio.rebalance_simple(&[(aapl(), 1.0)], &prices);
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("nanobook_test_portfolio.json");
+
+        portfolio.save_json(&path).unwrap();
+        let loaded = Portfolio::load_json(&path).unwrap();
+
+        assert_eq!(loaded.cash(), portfolio.cash());
+        assert_eq!(
+            loaded.position(&aapl()).unwrap().quantity,
+            portfolio.position(&aapl()).unwrap().quantity
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn metrics_serde() {
+        let returns = vec![0.01, -0.005, 0.02];
+        let m = compute_metrics(&returns, 252.0, 0.0).unwrap();
+
+        let json = serde_json::to_string(&m).unwrap();
+        let restored: Metrics = serde_json::from_str(&json).unwrap();
+
+        assert!((restored.total_return - m.total_return).abs() < 1e-10);
+        assert!((restored.sharpe - m.sharpe).abs() < 1e-10);
     }
 }

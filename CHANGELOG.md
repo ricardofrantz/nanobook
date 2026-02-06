@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-06
+
+### Added
+
+- **Trailing stops**: Multi-method trailing stop orders
+  - `submit_trailing_stop_market()` — trailing stop with market trigger
+  - `submit_trailing_stop_limit()` — trailing stop with limit trigger
+  - `TrailMethod::Fixed(offset)` — fixed-offset trailing
+  - `TrailMethod::Percentage(pct)` — percentage-based trailing
+  - `TrailMethod::Atr { multiplier, period }` — ATR-based adaptive trailing
+  - Watermark tracking: sell trailing tracks highs, buy trailing tracks lows
+  - Stop price re-indexes automatically when watermark updates
+  - Internal ATR computation from tick-level price changes
+- **Strategy trait** (feature: `portfolio`):
+  - `Strategy` trait — `compute_weights(bar_index, prices, portfolio) -> Vec<(Symbol, f64)>`
+  - `run_backtest()` — orchestrates rebalance-record loop
+  - `EqualWeight` — built-in equal-weight strategy implementation
+  - `BacktestResult` — portfolio + optional metrics
+  - `sweep_strategy()` — parallel parameter sweep over strategy instances
+- **Portfolio persistence** (feature: `persistence`):
+  - `Portfolio::save_json()` / `Portfolio::load_json()` — JSON serialization
+  - `FxHashMap<Symbol, Position>` serde via ordered vec conversion
+  - `Metrics` serde support
+- **Python bindings** (`pip install nanobook` via maturin):
+  - `nanobook.Exchange` — full exchange API with string-based enums
+  - `nanobook.Portfolio` — portfolio management and rebalancing
+  - `nanobook.CostModel` — transaction cost modeling
+  - `nanobook.py_compute_metrics()` — financial metrics from return series
+  - `nanobook.py_sweep_equal_weight()` — parallel sweep with GIL release
+  - Stop orders, trailing stops, and all query methods
+  - 39 Python tests covering exchange, portfolio, and sweep
+- **Portfolio benchmarks**: Criterion benchmarks for backtest and sweep performance
+
+### Changed
+
+- `CostModel` now derives `Copy` (was `Clone` only)
+- `Event` enum no longer derives `Eq` (only `PartialEq`) due to `f64` in `TrailMethod`
+- Workspace layout: `python/` added as workspace member
+
 ## [0.3.0] - 2026-02-06
 
 ### Added
@@ -99,7 +138,8 @@ Initial release of nanobook - a deterministic limit order book and matching engi
 - Fixed-point price representation (avoids floating-point errors)
 - Deterministic via monotonic timestamps (not system clock)
 
-[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ricardofrantz/nanobook/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ricardofrantz/nanobook/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ricardofrantz/nanobook/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ricardofrantz/nanobook/releases/tag/v0.1.0
