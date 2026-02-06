@@ -27,6 +27,8 @@ A **simulated stock exchange** that processes orders exactly like a real exchang
 - **Complete** — GTC/IOC/FOK, partial fills, modify, cancel, L1/L2/L3 snapshots
 - **Multi-symbol** — `MultiExchange` for independent per-symbol order books
 - **Portfolio engine** — Position tracking, cost modeling, rebalancing, financial metrics (Sharpe, Sortino, max drawdown)
+- **Trailing stops** — Fixed, percentage, and ATR-based adaptive trailing
+- **Python bindings** — Full API via PyO3 (`pip install nanobook`)
 - **Simple** — Single-threaded, in-process, minimal dependencies
 
 ## See It In Action
@@ -59,6 +61,7 @@ The interactive demo explains price-time priority, partial fills, IOC/FOK, and o
 
 - **Order types**: Limit, Market, Cancel, Modify
 - **Time-in-force**: GTC, IOC, FOK
+- **Stop orders**: Stop-market, stop-limit, trailing stops (fixed/percentage/ATR)
 - **Price-time priority**: FIFO matching at each price level
 - **Nanosecond timestamps**: Monotonic counter (not system clock)
 - **Deterministic**: Same inputs → same outputs (essential for backtesting)
@@ -66,8 +69,10 @@ The interactive demo explains price-time priority, partial fills, IOC/FOK, and o
 - **Book snapshots**: L1 (BBO), L2 (depth), L3 (full book), imbalance, weighted mid
 - **Event replay**: Complete audit trail for deterministic replay
 - **Portfolio**: Position tracking, VWAP entry, cost model, Sharpe/Sortino/drawdown metrics
+- **Strategy trait**: Define `compute_weights()`, run backtests with `run_backtest()`
 - **Multi-symbol**: Independent order books per symbol via `MultiExchange`
 - **Parallel sweeps**: Rayon-based parameter grid search (optional feature)
+- **Python bindings**: Full API via PyO3 with GIL release for parallel sweeps
 
 ## Quick Example
 
@@ -99,11 +104,19 @@ fn main() {
 
 ## Installation
 
+### Rust
+
 Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-nanobook = "0.3"
+nanobook = "0.4"
+```
+
+### Python
+
+```bash
+pip install nanobook
 ```
 
 Or build from source:
@@ -114,6 +127,48 @@ cd nanobook
 cargo build --release
 cargo test
 cargo bench
+
+# Python bindings
+cd python && maturin develop --release
+```
+
+## Python Quick Start
+
+```python
+import nanobook
+
+# Create an exchange
+ex = nanobook.Exchange()
+
+# Submit orders (strings for enums, ints for prices in cents)
+ex.submit_limit("sell", 10050, 100, "gtc")   # sell 100 @ $100.50
+result = ex.submit_limit("buy", 10050, 100, "gtc")
+assert result.status == "Filled"
+assert result.trades[0].price == 10050
+
+# Market orders, stops, trailing stops
+ex.submit_market("buy", 50)
+ex.submit_stop_market("sell", 9500, 100)
+ex.submit_trailing_stop_market("sell", 9500, 100, "percentage", 0.05)
+
+# Book queries
+bid, ask = ex.best_bid_ask()
+snap = ex.depth(10)
+
+# Portfolio management
+portfolio = nanobook.Portfolio(1_000_000_00, nanobook.CostModel.zero())
+portfolio.rebalance_simple([("AAPL", 0.5)], [("AAPL", 150_00)])
+portfolio.record_return([("AAPL", 155_00)])
+metrics = portfolio.compute_metrics(12.0, 0.0)
+print(f"Sharpe: {metrics.sharpe:.2f}")
+
+# Parallel parameter sweep (GIL released for Rayon)
+results = nanobook.py_sweep_equal_weight(
+    n_params=100,
+    price_series=[[("AAPL", p)] for p in range(150_00, 160_00)],
+    initial_cash=1_000_000_00,
+    periods_per_year=252.0,
+)
 ```
 
 ## API Overview
@@ -377,7 +432,7 @@ This is an **educational/testing tool**, not a production exchange:
 
 - **No networking**: In-process only
 - **No compliance**: Self-trade prevention, circuit breakers
-- **No complex orders**: Iceberg, pegged, trailing stops
+- **No complex orders**: Iceberg, pegged orders
 
 See SPECS.md for the complete specification.
 

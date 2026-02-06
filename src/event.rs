@@ -8,13 +8,14 @@
 
 #[cfg(feature = "event-log")]
 use crate::Exchange;
+use crate::stop::TrailMethod;
 use crate::{OrderId, Price, Quantity, Side, TimeInForce, Trade};
 
 /// An event that can be applied to an exchange.
 ///
 /// Events capture all inputs (not outputs like trades).
 /// Replaying the same events produces identical state.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Event {
     /// Submit a limit order
@@ -47,6 +48,22 @@ pub enum Event {
         limit_price: Price,
         quantity: Quantity,
         time_in_force: TimeInForce,
+    },
+    /// Submit a trailing stop-market order
+    SubmitTrailingStopMarket {
+        side: Side,
+        stop_price: Price,
+        quantity: Quantity,
+        trail_method: TrailMethod,
+    },
+    /// Submit a trailing stop-limit order
+    SubmitTrailingStopLimit {
+        side: Side,
+        stop_price: Price,
+        limit_price: Price,
+        quantity: Quantity,
+        time_in_force: TimeInForce,
+        trail_method: TrailMethod,
     },
 }
 
@@ -110,6 +127,40 @@ impl Event {
             time_in_force,
         }
     }
+
+    /// Create a SubmitTrailingStopMarket event.
+    pub fn submit_trailing_stop_market(
+        side: Side,
+        stop_price: Price,
+        quantity: Quantity,
+        trail_method: TrailMethod,
+    ) -> Self {
+        Event::SubmitTrailingStopMarket {
+            side,
+            stop_price,
+            quantity,
+            trail_method,
+        }
+    }
+
+    /// Create a SubmitTrailingStopLimit event.
+    pub fn submit_trailing_stop_limit(
+        side: Side,
+        stop_price: Price,
+        limit_price: Price,
+        quantity: Quantity,
+        time_in_force: TimeInForce,
+        trail_method: TrailMethod,
+    ) -> Self {
+        Event::SubmitTrailingStopLimit {
+            side,
+            stop_price,
+            limit_price,
+            quantity,
+            time_in_force,
+            trail_method,
+        }
+    }
 }
 
 /// Result of applying an event.
@@ -130,7 +181,9 @@ impl Exchange {
         // Record the event
         self.events.push(event.clone());
 
-        // Apply using internal methods (no double recording)
+        // Apply using internal methods (no double recording).
+        // For SubmitLimit/SubmitMarket/Modify, we must also update last_trade_price
+        // and process stop triggers — matching what the public methods do.
         let trades = match event {
             Event::SubmitLimit {
                 side,
@@ -139,15 +192,22 @@ impl Exchange {
                 time_in_force,
             } => {
                 let result = self.submit_limit_internal(*side, *price, *quantity, *time_in_force);
+                if !result.trades.is_empty() {
+                    self.last_trade_price = Some(result.trades.last().unwrap().price);
+                    self.process_trade_triggers();
+                }
                 result.trades
             }
             Event::SubmitMarket { side, quantity } => {
                 let price = match side {
-                    crate::Side::Buy => crate::Price::MAX,
-                    crate::Side::Sell => crate::Price::MIN,
+                    Side::Buy => Price::MAX,
+                    Side::Sell => Price::MIN,
                 };
-                let result =
-                    self.submit_limit_internal(*side, price, *quantity, crate::TimeInForce::IOC);
+                let result = self.submit_limit_internal(*side, price, *quantity, TimeInForce::IOC);
+                if !result.trades.is_empty() {
+                    self.last_trade_price = Some(result.trades.last().unwrap().price);
+                    self.process_trade_triggers();
+                }
                 result.trades
             }
             Event::Cancel { order_id } => {
@@ -160,6 +220,10 @@ impl Exchange {
                 new_quantity,
             } => {
                 let result = self.modify_internal(*order_id, *new_price, *new_quantity);
+                if !result.trades.is_empty() {
+                    self.last_trade_price = Some(result.trades.last().unwrap().price);
+                    self.process_trade_triggers();
+                }
                 result.trades
             }
             Event::SubmitStopMarket {
@@ -183,6 +247,40 @@ impl Exchange {
                     Some(*limit_price),
                     *quantity,
                     *time_in_force,
+                );
+                Vec::new()
+            }
+            Event::SubmitTrailingStopMarket {
+                side,
+                stop_price,
+                quantity,
+                trail_method,
+            } => {
+                self.submit_trailing_stop_internal(
+                    *side,
+                    *stop_price,
+                    None,
+                    *quantity,
+                    TimeInForce::GTC,
+                    trail_method.clone(),
+                );
+                Vec::new()
+            }
+            Event::SubmitTrailingStopLimit {
+                side,
+                stop_price,
+                limit_price,
+                quantity,
+                time_in_force,
+                trail_method,
+            } => {
+                self.submit_trailing_stop_internal(
+                    *side,
+                    *stop_price,
+                    Some(*limit_price),
+                    *quantity,
+                    *time_in_force,
+                    trail_method.clone(),
                 );
                 Vec::new()
             }
@@ -415,6 +513,34 @@ mod tests {
 
         // State is preserved
         assert_eq!(exchange.best_bid(), Some(Price(100_00)));
+    }
+
+    #[test]
+    fn replay_with_stop_orders() {
+        let mut original = Exchange::new();
+
+        // Build book: asks at 100, 105
+        original.submit_limit(Side::Sell, Price(100_00), 50, TimeInForce::GTC);
+        original.submit_limit(Side::Sell, Price(105_00), 100, TimeInForce::GTC);
+
+        // Buy stop at 100: triggers when trade price >= 100
+        original.submit_stop_market(Side::Buy, Price(100_00), 50);
+
+        // This buy crosses the ask at 100, producing a trade at 100,
+        // which should trigger the buy stop
+        original.submit_limit(Side::Buy, Price(100_00), 50, TimeInForce::GTC);
+
+        // Original should have triggered the stop
+        assert_eq!(original.pending_stop_count(), 0);
+        let orig_trades = original.trades().len();
+
+        // Replay should produce identical state
+        let events = original.events().to_vec();
+        let replayed = Exchange::replay(&events);
+
+        assert_eq!(replayed.pending_stop_count(), 0);
+        assert_eq!(replayed.trades().len(), orig_trades);
+        assert_eq!(replayed.last_trade_price(), original.last_trade_price());
     }
 
     #[test]

@@ -1,6 +1,10 @@
+[workspace]
+members = [".", "python"]
+resolver = "2"
+
 [package]
 name = "nanobook"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.70"
 description = "Deterministic limit order book and matching engine for testing trading algorithms"
@@ -39,3 +43,8 @@ path = "src/bin/lob.rs"
 [[bench]]
 name = "throughput"
 harness = false
+
+[[bench]]
+name = "portfolio"
+harness = false
+required-features = ["portfolio"]

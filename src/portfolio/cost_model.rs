@@ -12,7 +12,7 @@
 /// // 15 bps on $10,000 notional = $1.50, but min fee is $1.00, so result = $1.50
 /// assert_eq!(model.compute_cost(1_000_000), 1500);
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CostModel {
     /// Commission in basis points (1 bps = 0.01%)

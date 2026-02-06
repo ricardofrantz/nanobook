@@ -10,7 +10,7 @@ use crate::{
     error::ValidationError,
     result::{CancelError, CancelResult, ModifyError, ModifyResult, StopSubmitResult, SubmitResult},
     snapshot::BookSnapshot,
-    stop::{StopBook, StopOrder, StopStatus},
+    stop::{StopBook, StopOrder, StopStatus, TrailMethod},
     Order, OrderBook, OrderId, OrderStatus, Price, Quantity, Side, TimeInForce, Trade,
 };
 
@@ -364,6 +364,84 @@ impl Exchange {
         self.submit_stop_internal(side, stop_price, Some(limit_price), quantity, tif)
     }
 
+    /// Submit a trailing stop-market order.
+    ///
+    /// The stop price adjusts as the market moves favorably:
+    /// - Sell trailing: stop follows the market UP (protects long positions)
+    /// - Buy trailing: stop follows the market DOWN (protects short positions)
+    ///
+    /// `initial_stop_price` is the starting stop price before any trailing.
+    pub fn submit_trailing_stop_market(
+        &mut self,
+        side: Side,
+        initial_stop_price: Price,
+        quantity: Quantity,
+        trail_method: TrailMethod,
+    ) -> StopSubmitResult {
+        #[cfg(feature = "event-log")]
+        self.events.push(Event::SubmitTrailingStopMarket {
+            side,
+            stop_price: initial_stop_price,
+            quantity,
+            trail_method: trail_method.clone(),
+        });
+
+        self.submit_trailing_stop_internal(
+            side,
+            initial_stop_price,
+            None,
+            quantity,
+            TimeInForce::GTC,
+            trail_method,
+        )
+    }
+
+    /// Submit a trailing stop-limit order.
+    ///
+    /// Like a trailing stop-market, but when triggered becomes a limit order
+    /// at `limit_price`.
+    pub fn submit_trailing_stop_limit(
+        &mut self,
+        side: Side,
+        initial_stop_price: Price,
+        limit_price: Price,
+        quantity: Quantity,
+        tif: TimeInForce,
+        trail_method: TrailMethod,
+    ) -> StopSubmitResult {
+        #[cfg(feature = "event-log")]
+        self.events.push(Event::SubmitTrailingStopLimit {
+            side,
+            stop_price: initial_stop_price,
+            limit_price,
+            quantity,
+            time_in_force: tif,
+            trail_method: trail_method.clone(),
+        });
+
+        self.submit_trailing_stop_internal(
+            side,
+            initial_stop_price,
+            Some(limit_price),
+            quantity,
+            tif,
+            trail_method,
+        )
+    }
+
+    /// Internal: submit trailing stop order.
+    pub(crate) fn submit_trailing_stop_internal(
+        &mut self,
+        side: Side,
+        stop_price: Price,
+        limit_price: Option<Price>,
+        quantity: Quantity,
+        tif: TimeInForce,
+        trail_method: TrailMethod,
+    ) -> StopSubmitResult {
+        self.insert_stop_order(side, stop_price, limit_price, quantity, tif, Some(trail_method))
+    }
+
     /// Internal: submit stop order without recording event.
     pub(crate) fn submit_stop_internal(
         &mut self,
@@ -373,8 +451,22 @@ impl Exchange {
         quantity: Quantity,
         tif: TimeInForce,
     ) -> StopSubmitResult {
+        self.insert_stop_order(side, stop_price, limit_price, quantity, tif, None)
+    }
+
+    /// Shared logic for inserting stop/trailing-stop orders.
+    fn insert_stop_order(
+        &mut self,
+        side: Side,
+        stop_price: Price,
+        limit_price: Option<Price>,
+        quantity: Quantity,
+        tif: TimeInForce,
+        trail_method: Option<TrailMethod>,
+    ) -> StopSubmitResult {
         let id = self.book.next_order_id();
         let timestamp = self.book.next_timestamp();
+        let is_trailing = trail_method.is_some();
 
         let order = StopOrder {
             id,
@@ -385,28 +477,34 @@ impl Exchange {
             time_in_force: tif,
             timestamp,
             status: StopStatus::Pending,
+            trail_method,
+            watermark: None,
         };
 
         self.stop_book.insert(order);
 
-        // Check for immediate trigger
-        if let Some(last_price) = self.last_trade_price {
-            let should_trigger = match side {
-                Side::Buy => last_price >= stop_price,
-                Side::Sell => last_price <= stop_price,
-            };
-            if should_trigger {
-                self.process_trade_triggers();
-                // After trigger, check the updated status
-                let status = self
-                    .stop_book
-                    .get(id)
-                    .map(|o| o.status)
-                    .unwrap_or(StopStatus::Triggered);
-                return StopSubmitResult {
-                    order_id: id,
-                    status,
+        // Trailing stops don't trigger immediately — they need price movement to
+        // establish the watermark first. update_trailing_stops() will adjust the
+        // stop price relative to the watermark, so the raw stop_price check would
+        // be misleading.
+        if !is_trailing {
+            if let Some(last_price) = self.last_trade_price {
+                let should_trigger = match side {
+                    Side::Buy => last_price >= stop_price,
+                    Side::Sell => last_price <= stop_price,
                 };
+                if should_trigger {
+                    self.process_trade_triggers();
+                    let status = self
+                        .stop_book
+                        .get(id)
+                        .map(|o| o.status)
+                        .unwrap_or(StopStatus::Triggered);
+                    return StopSubmitResult {
+                        order_id: id,
+                        status,
+                    };
+                }
             }
         }
 
@@ -418,14 +516,20 @@ impl Exchange {
 
     /// Process stop order triggers after trades occur.
     ///
+    /// Trailing stops are updated BEFORE checking triggers, so their
+    /// stop prices reflect the latest market move.
+    ///
     /// Triggered stops may produce trades that trigger more stops (cascade).
     /// Limited to `MAX_CASCADE_DEPTH` iterations to prevent infinite loops.
-    fn process_trade_triggers(&mut self) {
+    pub(crate) fn process_trade_triggers(&mut self) {
         for _ in 0..Self::MAX_CASCADE_DEPTH {
             let trade_price = match self.last_trade_price {
                 Some(p) => p,
                 None => return,
             };
+
+            // Update trailing stops before checking triggers
+            self.stop_book.update_trailing_stops(trade_price);
 
             let triggered = self.stop_book.collect_triggered(trade_price);
             if triggered.is_empty() {
@@ -1038,5 +1142,126 @@ mod tests {
         assert_eq!(snap.asks.len(), 1);
         assert_eq!(snap.best_bid(), Some(Price(100_00)));
         assert_eq!(snap.best_ask(), Some(Price(101_00)));
+    }
+
+    // === Trailing Stop Orders ===
+
+    #[test]
+    fn trailing_stop_market_sell() {
+        let mut exchange = Exchange::new();
+
+        // Set up order book: asks at 100 and bids at 90 for the triggered sell
+        exchange.submit_limit(Side::Sell, Price(100_00), 100, TimeInForce::GTC);
+        exchange.submit_limit(Side::Buy, Price(90_00), 200, TimeInForce::GTC);
+
+        // Place trailing sell stop: initial stop at 95, trail by $3
+        let result = exchange.submit_trailing_stop_market(
+            Side::Sell,
+            Price(95_00),
+            100,
+            TrailMethod::Fixed(3_00),
+        );
+        assert_eq!(result.status, StopStatus::Pending);
+
+        // Trade at 100 (buy crosses the ask) — watermark should move up
+        exchange.submit_limit(Side::Buy, Price(100_00), 100, TimeInForce::GTC);
+
+        // The trailing stop should have adjusted: watermark=100, stop=97
+        // It should not have triggered (price 100 > stop 97 for sell)
+        let stop = exchange.get_stop_order(result.order_id).unwrap();
+        assert_eq!(stop.watermark, Some(Price(100_00)));
+        assert_eq!(stop.stop_price, Price(97_00));
+    }
+
+    #[test]
+    fn trailing_stop_triggers_on_reversal() {
+        let mut exchange = Exchange::new();
+
+        // Build book: asks and bids for trading
+        exchange.submit_limit(Side::Sell, Price(100_00), 50, TimeInForce::GTC);
+        exchange.submit_limit(Side::Sell, Price(105_00), 50, TimeInForce::GTC);
+        exchange.submit_limit(Side::Buy, Price(90_00), 200, TimeInForce::GTC);
+
+        // Place trailing sell stop: initial stop at 98, trail by $2
+        exchange.submit_trailing_stop_market(
+            Side::Sell,
+            Price(98_00),
+            50,
+            TrailMethod::Fixed(2_00),
+        );
+
+        // Trade at 100 — trailing updates to stop=98, watermark=100
+        exchange.submit_limit(Side::Buy, Price(100_00), 50, TimeInForce::GTC);
+        assert_eq!(exchange.pending_stop_count(), 1);
+
+        // Trade at 105 — trailing updates to stop=103, watermark=105
+        exchange.submit_limit(Side::Buy, Price(105_00), 50, TimeInForce::GTC);
+
+        // Now set up a sell at 103 and buy at 90 to drop the price
+        exchange.submit_limit(Side::Buy, Price(103_00), 50, TimeInForce::GTC);
+        exchange.submit_limit(Side::Sell, Price(103_00), 50, TimeInForce::GTC);
+        // Trade at 103 should trigger the trailing stop (stop_price=103)
+        assert_eq!(exchange.pending_stop_count(), 0);
+    }
+
+    #[test]
+    fn trailing_stop_percentage_method() {
+        let mut exchange = Exchange::new();
+
+        exchange.submit_limit(Side::Sell, Price(100_00), 100, TimeInForce::GTC);
+        exchange.submit_limit(Side::Buy, Price(80_00), 200, TimeInForce::GTC);
+
+        // Trailing sell stop: 5% trailing distance
+        let result = exchange.submit_trailing_stop_market(
+            Side::Sell,
+            Price(90_00),
+            50,
+            TrailMethod::Percentage(0.05),
+        );
+        assert_eq!(result.status, StopStatus::Pending);
+
+        // Trade at 100 — watermark=100, offset=5% of 100 = $5, stop=95
+        exchange.submit_limit(Side::Buy, Price(100_00), 100, TimeInForce::GTC);
+
+        let stop = exchange.get_stop_order(result.order_id).unwrap();
+        assert_eq!(stop.watermark, Some(Price(100_00)));
+        assert_eq!(stop.stop_price, Price(95_00));
+    }
+
+    #[test]
+    fn trailing_stop_does_not_trigger_immediately() {
+        let mut exchange = Exchange::new();
+
+        // Establish last_trade_price at 90 via a trade
+        exchange.submit_limit(Side::Sell, Price(90_00), 50, TimeInForce::GTC);
+        exchange.submit_limit(Side::Buy, Price(90_00), 50, TimeInForce::GTC);
+        assert_eq!(exchange.last_trade_price(), Some(Price(90_00)));
+
+        // Submit trailing sell stop with stop_price=95 — although 90 <= 95,
+        // trailing stops wait for price movement to establish the watermark first
+        let result = exchange.submit_trailing_stop_market(
+            Side::Sell,
+            Price(95_00),
+            50,
+            TrailMethod::Fixed(3_00),
+        );
+        assert_eq!(result.status, StopStatus::Pending);
+        assert_eq!(exchange.pending_stop_count(), 1);
+    }
+
+    #[test]
+    fn cancel_trailing_stop() {
+        let mut exchange = Exchange::new();
+
+        let result = exchange.submit_trailing_stop_market(
+            Side::Sell,
+            Price(95_00),
+            100,
+            TrailMethod::Fixed(3_00),
+        );
+
+        let cancel = exchange.cancel(result.order_id);
+        assert!(cancel.success);
+        assert_eq!(exchange.pending_stop_count(), 0);
     }
 }

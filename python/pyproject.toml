@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "nanobook"
+version = "0.4.0"
+requires-python = ">=3.9"
+description = "Python bindings for nanobook: deterministic limit order book and matching engine"
+license = "MIT"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "nanobook"
