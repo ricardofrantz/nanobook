@@ -18,7 +18,7 @@ pub struct Position {
     /// Cumulative realized PnL (cents)
     pub realized_pnl: i64,
     /// Cumulative cost of entry (quantity * avg_entry_price), used for VWAP tracking
-    total_cost: i64,
+    pub total_cost: i64,
 }
 
 impl Position {

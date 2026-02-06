@@ -26,39 +26,27 @@ GitHub Actions will automatically:
 - Build binaries for 6 platforms (Linux, macOS, Windows)
 - Create GitHub Release with downloadable binaries
 - Publish to crates.io
+- Build and publish Python wheels to PyPI
 
-## Platforms Built
+## Benchmark Baselines
 
-| Target | OS | Architecture |
-|--------|-----|--------------|
-| `x86_64-unknown-linux-gnu` | Linux | x86_64 |
-| `x86_64-unknown-linux-musl` | Linux | x86_64 (static) |
-| `aarch64-unknown-linux-gnu` | Linux | ARM64 |
-| `x86_64-apple-darwin` | macOS | Intel |
-| `aarch64-apple-darwin` | macOS | Apple Silicon |
-| `x86_64-pc-windows-msvc` | Windows | x86_64 |
-
-## Manual Release (if needed)
+To maintain performance across releases, capture a baseline for major versions:
 
 ```bash
-# Publish to crates.io manually
-cargo publish
-
-# Build release binary locally
-cargo build --release --bin lob
+# Capture v0.5 baseline
+cargo bench --save-baseline v0.5
 ```
+
+CI will store these baselines as artifacts to compare performance in future PRs.
 
 ## Installation Methods
 
 After release, users can install via:
 
 ```bash
-# From crates.io (compiles from source)
+# Python (PyPI)
+pip install nanobook
+
+# Rust (crates.io - compiles from source)
 cargo install nanobook
-
-# From crates.io (pre-built binary, faster)
-cargo binstall nanobook
-
-# From GitHub releases (direct download)
-# Download from https://github.com/ricardofrantz/nanobook/releases
 ```

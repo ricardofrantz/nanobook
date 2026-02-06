@@ -1,6 +1,37 @@
+use crate::metrics::PyMetrics;
+use crate::portfolio::PyPortfolio;
+use crate::types::{price_to_float, side_str};
 use pyo3::prelude::*;
 
-use crate::types::{price_to_float, side_str};
+/// Result of a backtest run.
+#[pyclass(name = "BacktestResult")]
+#[derive(Clone)]
+pub struct PyBacktestResult {
+    #[pyo3(get)]
+    pub portfolio: PyPortfolio,
+    #[pyo3(get)]
+    pub metrics: Option<PyMetrics>,
+}
+
+#[pymethods]
+impl PyBacktestResult {
+    fn __repr__(&self) -> String {
+        format!(
+            "BacktestResult(returns={}, sharpe={:?})",
+            self.portfolio.inner.returns().len(),
+            self.metrics.as_ref().map(|m| m.sharpe)
+        )
+    }
+}
+
+impl From<nanobook::portfolio::BacktestResult> for PyBacktestResult {
+    fn from(r: nanobook::portfolio::BacktestResult) -> Self {
+        Self {
+            portfolio: PyPortfolio::from_portfolio(r.portfolio),
+            metrics: r.metrics.map(PyMetrics::from),
+        }
+    }
+}
 
 /// Result of submitting an order.
 #[pyclass(name = "SubmitResult")]

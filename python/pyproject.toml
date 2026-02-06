@@ -4,11 +4,31 @@ build-backend = "maturin"
 
 [project]
 name = "nanobook"
-version = "0.4.0"
-requires-python = ">=3.9"
-description = "Python bindings for nanobook: deterministic limit order book and matching engine"
+version = "0.5.0"
+requires-python = ">=3.11"
+description = "Deterministic limit order book, portfolio simulator, and matching engine"
 license = "MIT"
+authors = [{ name = "Ricardo Frantz" }]
+readme = "README.md"
+keywords = ["orderbook", "trading", "matching-engine", "backtesting", "finance"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Rust",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+[project.urls]
+Homepage = "https://github.com/ricardofrantz/nanobook"
+Repository = "https://github.com/ricardofrantz/nanobook"
+Documentation = "https://docs.rs/nanobook"
+Issues = "https://github.com/ricardofrantz/nanobook/issues"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "nanobook"
+include = ["nanobook.pyi"]
