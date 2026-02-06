@@ -237,9 +237,7 @@ impl PyPortfolio {
 }
 
 /// Parse Python list of (str, i64) into Vec<(Symbol, i64)>.
-fn parse_price_list(
-    prices: &[(String, i64)],
-) -> PyResult<Vec<(nanobook::Symbol, i64)>> {
+fn parse_price_list(prices: &[(String, i64)]) -> PyResult<Vec<(nanobook::Symbol, i64)>> {
     prices
         .iter()
         .map(|(s, p)| Ok((parse_symbol(s)?, *p)))
@@ -247,9 +245,7 @@ fn parse_price_list(
 }
 
 /// Parse Python list of (str, f64) into Vec<(Symbol, f64)>.
-fn parse_target_list(
-    targets: &[(String, f64)],
-) -> PyResult<Vec<(nanobook::Symbol, f64)>> {
+fn parse_target_list(targets: &[(String, f64)]) -> PyResult<Vec<(nanobook::Symbol, f64)>> {
     targets
         .iter()
         .map(|(s, w)| Ok((parse_symbol(s)?, *w)))

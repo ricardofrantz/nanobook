@@ -91,7 +91,10 @@ mod tests {
             slippage_bps: 0,
             min_trade_fee: 0,
         };
-        assert_eq!(model.compute_cost(-1_000_000), model.compute_cost(1_000_000));
+        assert_eq!(
+            model.compute_cost(-1_000_000),
+            model.compute_cost(1_000_000)
+        );
     }
 
     #[test]

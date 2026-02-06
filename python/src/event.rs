@@ -1,6 +1,6 @@
 use nanobook::Event;
-use pyo3::prelude::*;
 use pyo3::IntoPyObjectExt;
+use pyo3::prelude::*;
 
 #[pyclass(name = "Event")]
 #[derive(Clone)]

@@ -39,7 +39,10 @@ impl PyMultiExchange {
 
     /// List all symbols that have exchanges.
     fn symbols(&self) -> Vec<String> {
-        self.inner.symbols().map(|s| s.as_str().to_string()).collect()
+        self.inner
+            .symbols()
+            .map(|s| s.as_str().to_string())
+            .collect()
     }
 
     /// Get best bid/ask prices for all symbols.
@@ -48,7 +51,11 @@ impl PyMultiExchange {
         self.inner
             .symbols()
             .map(|sym| {
-                let (bid, ask) = self.inner.get(sym).map(|ex| ex.best_bid_ask()).unwrap_or((None, None));
+                let (bid, ask) = self
+                    .inner
+                    .get(sym)
+                    .map(|ex| ex.best_bid_ask())
+                    .unwrap_or((None, None));
                 (sym.to_string(), bid.map(|p| p.0), ask.map(|p| p.0))
             })
             .collect()
@@ -72,7 +79,12 @@ impl PyMultiExchange {
         Ok(ex.submit_limit(side, Price(price), quantity, tif).into())
     }
 
-    fn submit_market(&mut self, symbol: &str, side: &str, quantity: u64) -> PyResult<PySubmitResult> {
+    fn submit_market(
+        &mut self,
+        symbol: &str,
+        side: &str,
+        quantity: u64,
+    ) -> PyResult<PySubmitResult> {
         let sym = parse_symbol(symbol)?;
         let side = parse_side(side)?;
         let ex = self.inner.get_or_create(&sym);
@@ -94,7 +106,9 @@ impl PyMultiExchange {
     ) -> PyResult<PyModifyResult> {
         let sym = parse_symbol(symbol)?;
         let ex = self.inner.get_or_create(&sym);
-        Ok(ex.modify(OrderId(order_id), Price(new_price), new_quantity).into())
+        Ok(ex
+            .modify(OrderId(order_id), Price(new_price), new_quantity)
+            .into())
     }
 
     /// Number of symbols.

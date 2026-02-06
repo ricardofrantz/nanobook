@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn close_long_with_profit() {
         let mut pos = Position::new(sym());
-        pos.apply_fill(100, 50_00);  // buy 100 @ $50
+        pos.apply_fill(100, 50_00); // buy 100 @ $50
         pos.apply_fill(-100, 60_00); // sell 100 @ $60
         assert!(pos.is_flat());
         assert_eq!(pos.realized_pnl, 100 * 10_00); // $10 * 100 shares
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn close_long_with_loss() {
         let mut pos = Position::new(sym());
-        pos.apply_fill(100, 50_00);  // buy 100 @ $50
+        pos.apply_fill(100, 50_00); // buy 100 @ $50
         pos.apply_fill(-100, 45_00); // sell 100 @ $45
         assert!(pos.is_flat());
         assert_eq!(pos.realized_pnl, -100 * 5_00); // -$5 * 100 shares
@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn flip_long_to_short() {
         let mut pos = Position::new(sym());
-        pos.apply_fill(100, 50_00);  // long 100 @ $50
+        pos.apply_fill(100, 50_00); // long 100 @ $50
         pos.apply_fill(-150, 60_00); // sell 150 — close 100, open short 50
         assert_eq!(pos.quantity, -50);
         assert_eq!(pos.avg_entry_price, 60_00);
@@ -198,7 +198,7 @@ mod tests {
     fn close_short_with_profit() {
         let mut pos = Position::new(sym());
         pos.apply_fill(-100, 50_00); // short @ $50
-        pos.apply_fill(100, 40_00);  // cover @ $40
+        pos.apply_fill(100, 40_00); // cover @ $40
         assert!(pos.is_flat());
         assert_eq!(pos.realized_pnl, 100 * 10_00); // $10 * 100
     }

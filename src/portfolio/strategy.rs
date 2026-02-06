@@ -86,7 +86,8 @@ pub fn run_backtest<S: Strategy>(
         portfolio.record_return(prices);
     }
 
-    let metrics = crate::portfolio::compute_metrics(portfolio.returns(), periods_per_year, risk_free);
+    let metrics =
+        crate::portfolio::compute_metrics(portfolio.returns(), periods_per_year, risk_free);
 
     BacktestResult { portfolio, metrics }
 }
@@ -127,7 +128,14 @@ mod tests {
             vec![(sym("AAPL"), 160_00)],
         ];
 
-        let result = run_backtest(&EqualWeight, &prices, 1_000_000_00, CostModel::zero(), 12.0, 0.0);
+        let result = run_backtest(
+            &EqualWeight,
+            &prices,
+            1_000_000_00,
+            CostModel::zero(),
+            12.0,
+            0.0,
+        );
 
         assert!(result.portfolio.returns().len() == 3);
         assert!(result.metrics.is_some());
@@ -143,7 +151,14 @@ mod tests {
             vec![(sym("AAPL"), 145_00), (sym("MSFT"), 320_00)],
         ];
 
-        let result = run_backtest(&EqualWeight, &prices, 1_000_000_00, CostModel::zero(), 12.0, 0.0);
+        let result = run_backtest(
+            &EqualWeight,
+            &prices,
+            1_000_000_00,
+            CostModel::zero(),
+            12.0,
+            0.0,
+        );
 
         assert_eq!(result.portfolio.returns().len(), 3);
         assert!(result.metrics.is_some());
@@ -152,7 +167,14 @@ mod tests {
     #[test]
     fn empty_price_series() {
         let prices: Vec<Vec<(Symbol, i64)>> = vec![];
-        let result = run_backtest(&EqualWeight, &prices, 1_000_000_00, CostModel::zero(), 12.0, 0.0);
+        let result = run_backtest(
+            &EqualWeight,
+            &prices,
+            1_000_000_00,
+            CostModel::zero(),
+            12.0,
+            0.0,
+        );
 
         assert!(result.portfolio.returns().is_empty());
         assert!(result.metrics.is_none());
@@ -183,7 +205,14 @@ mod tests {
             vec![(sym("AAPL"), 120_00)],
         ];
 
-        let result = run_backtest(&DelayedBuy, &prices, 100_000_00, CostModel::zero(), 12.0, 0.0);
+        let result = run_backtest(
+            &DelayedBuy,
+            &prices,
+            100_000_00,
+            CostModel::zero(),
+            12.0,
+            0.0,
+        );
 
         // First bar: no position, return ≈ 0
         // Second bar: bought at 110, position exists

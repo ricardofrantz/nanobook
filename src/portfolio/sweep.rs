@@ -1,6 +1,6 @@
 //! Parallel parameter sweep over strategy configurations.
 
-use super::metrics::{compute_metrics, Metrics};
+use super::metrics::{Metrics, compute_metrics};
 use super::strategy::{BacktestResult, Strategy, run_backtest};
 
 /// Run a parameter sweep in parallel, computing metrics for each configuration.
@@ -27,7 +27,12 @@ use super::strategy::{BacktestResult, Strategy, run_backtest};
 /// });
 /// ```
 #[cfg(feature = "parallel")]
-pub fn sweep<F, P>(params: &[P], periods_per_year: f64, risk_free: f64, run_fn: F) -> Vec<Option<Metrics>>
+pub fn sweep<F, P>(
+    params: &[P],
+    periods_per_year: f64,
+    risk_free: f64,
+    run_fn: F,
+) -> Vec<Option<Metrics>>
 where
     F: Fn(&P) -> Vec<f64> + Sync,
     P: Sync,
@@ -79,7 +84,14 @@ where
         .par_iter()
         .map(|p| {
             let strategy = make_strategy(p);
-            run_backtest(&strategy, price_series, initial_cash, cost_model, periods_per_year, risk_free)
+            run_backtest(
+                &strategy,
+                price_series,
+                initial_cash,
+                cost_model,
+                periods_per_year,
+                risk_free,
+            )
         })
         .collect()
 }
@@ -118,8 +130,8 @@ mod tests {
 
     #[test]
     fn sweep_strategy_basic() {
-        use crate::portfolio::{CostModel, EqualWeight};
         use crate::Symbol;
+        use crate::portfolio::{CostModel, EqualWeight};
 
         fn sym(s: &str) -> Symbol {
             Symbol::new(s)

@@ -1,6 +1,6 @@
+use crate::types::side_str;
 use nanobook::Order;
 use pyo3::prelude::*;
-use crate::types::side_str;
 
 #[pyclass(name = "Order")]
 #[derive(Clone)]

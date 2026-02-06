@@ -185,8 +185,24 @@ mod tests {
     #[test]
     fn vwap_multiple_trades() {
         let trades = vec![
-            Trade::new(TradeId(1), Price(100_00), 50, OrderId(1), OrderId(2), Side::Buy, 1),
-            Trade::new(TradeId(2), Price(102_00), 150, OrderId(3), OrderId(4), Side::Buy, 2),
+            Trade::new(
+                TradeId(1),
+                Price(100_00),
+                50,
+                OrderId(1),
+                OrderId(2),
+                Side::Buy,
+                1,
+            ),
+            Trade::new(
+                TradeId(2),
+                Price(102_00),
+                150,
+                OrderId(3),
+                OrderId(4),
+                Side::Buy,
+                2,
+            ),
         ];
         // (100_00 * 50 + 102_00 * 150) / 200 = (5_000_00 + 15_300_00) / 200 = 101_50
         assert_eq!(Trade::vwap(&trades), Some(Price(101_50)));

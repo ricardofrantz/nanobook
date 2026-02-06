@@ -360,10 +360,7 @@ fn handle_status(exchange: &Exchange, args: &[&str]) {
     if let Some(stop) = exchange.get_stop_order(OrderId(id)) {
         println!("Stop order #{}:", id);
         println!("  Side:       {:?}", stop.side);
-        println!(
-            "  Stop price: ${:.2}",
-            stop.stop_price.0 as f64 / 100.0
-        );
+        println!("  Stop price: ${:.2}", stop.stop_price.0 as f64 / 100.0);
         if let Some(lp) = stop.limit_price {
             println!("  Limit price: ${:.2}", lp.0 as f64 / 100.0);
         }

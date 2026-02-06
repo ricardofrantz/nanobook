@@ -1,5 +1,5 @@
-mod exchange;
 mod event;
+mod exchange;
 #[cfg(feature = "itch")]
 mod itch;
 mod metrics;

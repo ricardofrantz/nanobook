@@ -3,9 +3,9 @@
 
 //! Portfolio benchmarks: backtest, sweep, and metrics computation.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use nanobook::portfolio::{compute_metrics, run_backtest, CostModel, EqualWeight};
-use nanobook::Symbol;
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use nanobook::portfolio::{CostModel, EqualWeight, compute_metrics, run_backtest};
+use nanobook::{Price, Symbol};
 
 fn sym(s: &str) -> Symbol {
     Symbol::new(s)
@@ -15,9 +15,7 @@ fn sym(s: &str) -> Symbol {
 ///
 /// Prices start at $100 and drift randomly using a simple deterministic RNG.
 fn generate_price_series(n_bars: usize, n_stocks: usize) -> Vec<Vec<(Symbol, i64)>> {
-    let symbols: Vec<Symbol> = (0..n_stocks)
-        .map(|i| sym(&format!("S{i:03}")))
-        .collect();
+    let symbols: Vec<Symbol> = (0..n_stocks).map(|i| sym(&format!("S{i:03}"))).collect();
 
     let mut prices = vec![100_00i64; n_stocks];
     let mut series = Vec::with_capacity(n_bars);
@@ -85,13 +83,9 @@ fn bench_compute_metrics(c: &mut Criterion) {
             })
             .collect();
 
-        group.bench_with_input(
-            BenchmarkId::from_parameter(n),
-            &returns,
-            |b, returns| {
-                b.iter(|| black_box(compute_metrics(returns, 252.0, 0.0)));
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(n), &returns, |b, returns| {
+            b.iter(|| black_box(compute_metrics(returns, 252.0, 0.0)));
+        });
     }
 
     group.finish();
@@ -143,7 +137,10 @@ fn bench_lob_rebalance(c: &mut Criterion) {
     group.bench_function("simple", |b| {
         b.iter_batched(
             || nanobook::portfolio::Portfolio::new(1_000_000_00, CostModel::zero()),
-            |mut p| black_box(p.rebalance_simple(&targets, &prices)),
+            |mut p| {
+                p.rebalance_simple(&targets, &prices);
+                black_box(())
+            },
             criterion::BatchSize::SmallInput,
         );
     });
@@ -156,12 +153,20 @@ fn bench_lob_rebalance(c: &mut Criterion) {
                 for (s, price) in &prices {
                     // Build deep books for realistic rebalance
                     for i in 0..10 {
-                        multi.get_or_create(s).submit_limit(nanobook::Side::Sell, Price(price.0 + i * 10), 1000, nanobook::TimeInForce::GTC);
+                        multi.get_or_create(s).submit_limit(
+                            nanobook::Side::Sell,
+                            Price(*price + i * 10),
+                            1000,
+                            nanobook::TimeInForce::GTC,
+                        );
                     }
                 }
                 (p, multi)
             },
-            |(mut p, mut multi)| black_box(p.rebalance_lob(&targets, &mut multi)),
+            |(mut p, mut multi)| {
+                p.rebalance_lob(&targets, &mut multi);
+                black_box(())
+            },
             criterion::BatchSize::SmallInput,
         );
     });

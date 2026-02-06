@@ -65,9 +65,10 @@ fn main() {
     }
 
     // Limit buy MSFT — crosses spread
-    let result = multi
-        .get_or_create(&msft)
-        .submit_limit(Side::Buy, Price(302_00), 100, TimeInForce::GTC);
+    let result =
+        multi
+            .get_or_create(&msft)
+            .submit_limit(Side::Buy, Price(302_00), 100, TimeInForce::GTC);
     println!("\nMSFT limit buy 100 @ $302:");
     println!(
         "  Filled: {}, Resting: {}",

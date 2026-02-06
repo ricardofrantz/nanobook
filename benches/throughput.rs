@@ -9,7 +9,7 @@
 //! - Market order execution
 //! - Book queries (BBO, depth)
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use nanobook::{Exchange, OrderId, Price, Side, TimeInForce};
 
 /// Build an exchange with N price levels on each side.
@@ -96,10 +96,17 @@ fn bench_cancel(c: &mut Criterion) {
                 b.iter_batched(
                     || {
                         let mut exchange = build_book(levels, 10);
-                        let order_id = exchange.book_mut().bids_mut().best_level_mut().and_then(|l| l.front()).unwrap();
+                        let order_id = exchange
+                            .book_mut()
+                            .bids_mut()
+                            .best_level_mut()
+                            .and_then(|l| l.front())
+                            .unwrap();
                         (exchange, order_id)
                     },
-                    |(mut exchange, order_id): (Exchange, OrderId)| black_box(exchange.cancel(order_id)),
+                    |(mut exchange, order_id): (Exchange, OrderId)| {
+                        black_box(exchange.cancel(order_id))
+                    },
                     criterion::BatchSize::SmallInput,
                 );
             },
@@ -124,7 +131,9 @@ fn bench_cancel(c: &mut Criterion) {
                         let order_id = OrderId(num_orders as u64 / 2);
                         (exchange, order_id)
                     },
-                    |(mut exchange, order_id): (Exchange, OrderId)| black_box(exchange.cancel(order_id)),
+                    |(mut exchange, order_id): (Exchange, OrderId)| {
+                        black_box(exchange.cancel(order_id))
+                    },
                     criterion::BatchSize::SmallInput,
                 );
             },
@@ -237,7 +246,9 @@ fn bench_modify(c: &mut Criterion) {
                 b.iter_batched(
                     || {
                         let mut exchange = build_book(levels, 1);
-                        let order_id = exchange.submit_limit(Side::Buy, Price(99_00), 100, TimeInForce::GTC).order_id;
+                        let order_id = exchange
+                            .submit_limit(Side::Buy, Price(99_00), 100, TimeInForce::GTC)
+                            .order_id;
                         (exchange, order_id)
                     },
                     |(mut exchange, order_id)| {
@@ -261,7 +272,7 @@ fn bench_event_apply(c: &mut Criterion) {
 
     group.bench_function("apply_limit", |b| {
         b.iter_batched(
-            || Exchange::new(),
+            Exchange::new,
             |mut exchange| black_box(exchange.apply(&event)),
             criterion::BatchSize::SmallInput,
         );
@@ -283,12 +294,17 @@ fn bench_multi_symbol(c: &mut Criterion) {
                 let symbols: Vec<nanobook::Symbol> = (0..num_symbols)
                     .map(|i| nanobook::Symbol::try_new(&format!("S{:05}", i)).unwrap())
                     .collect();
-                
+
                 let mut i = 0;
                 b.iter(|| {
                     let sym = &symbols[i % num_symbols];
                     i += 1;
-                    black_box(multi.get_or_create(sym).submit_limit(Side::Buy, Price(100_00), 100, TimeInForce::GTC))
+                    black_box(multi.get_or_create(sym).submit_limit(
+                        Side::Buy,
+                        Price(100_00),
+                        100,
+                        TimeInForce::GTC,
+                    ))
                 });
             },
         );

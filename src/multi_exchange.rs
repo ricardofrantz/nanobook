@@ -96,10 +96,7 @@ mod tests {
             .get_or_create(&aapl())
             .submit_limit(Side::Sell, Price(150_00), 100, TimeInForce::GTC);
 
-        assert_eq!(
-            multi.get(&aapl()).unwrap().best_ask(),
-            Some(Price(150_00))
-        );
+        assert_eq!(multi.get(&aapl()).unwrap().best_ask(), Some(Price(150_00)));
         assert!(multi.get(&msft()).is_none());
     }
 

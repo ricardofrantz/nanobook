@@ -28,7 +28,7 @@ pub mod strategy;
 pub mod sweep;
 
 pub use cost_model::CostModel;
-pub use metrics::{compute_metrics, Metrics};
+pub use metrics::{Metrics, compute_metrics};
 pub use position::Position;
 pub use strategy::{BacktestResult, EqualWeight, Strategy, run_backtest};
 
@@ -69,7 +69,10 @@ pub struct Portfolio {
     /// Positions indexed by symbol
     #[cfg_attr(
         feature = "serde",
-        serde(serialize_with = "serde_positions::serialize", deserialize_with = "serde_positions::deserialize")
+        serde(
+            serialize_with = "serde_positions::serialize",
+            deserialize_with = "serde_positions::deserialize"
+        )
     )]
     positions: FxHashMap<Symbol, Position>,
     /// Cost model applied to each trade
@@ -372,8 +375,7 @@ impl Portfolio {
     /// Save the portfolio to a JSON file.
     #[cfg(feature = "persistence")]
     pub fn save_json(&self, path: &std::path::Path) -> std::io::Result<()> {
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
         std::fs::write(path, json)
     }
 
@@ -381,8 +383,7 @@ impl Portfolio {
     #[cfg(feature = "persistence")]
     pub fn load_json(path: &std::path::Path) -> std::io::Result<Self> {
         let json = std::fs::read_to_string(path)?;
-        serde_json::from_str(&json)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        serde_json::from_str(&json).map_err(std::io::Error::other)
     }
 
     // === Internal ===

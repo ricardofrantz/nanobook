@@ -107,7 +107,7 @@ impl PriceLevels {
     pub fn insert_order(&mut self, price: Price, order_id: OrderId, quantity: Quantity) -> usize {
         let level = self.get_or_create_level(price);
         // Actually, VecDeque index is just the length before push.
-        let actual_index = level.orders.len(); 
+        let actual_index = level.orders.len();
         level.push_back(order_id, quantity);
         actual_index
     }

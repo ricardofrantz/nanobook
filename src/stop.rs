@@ -22,10 +22,7 @@ pub enum TrailMethod {
     ///
     /// ATR is computed internally from trade price changes.
     /// `period` is the lookback window size for the moving average.
-    Atr {
-        multiplier: f64,
-        period: usize,
-    },
+    Atr { multiplier: f64, period: usize },
 }
 
 /// Status of a stop order.
@@ -199,8 +196,11 @@ impl StopBook {
 
         // Prune triggered IDs from trailing index to avoid scanning them
         if !triggered.is_empty() {
-            self.trailing_ids
-                .retain(|id| self.orders.get(id).is_some_and(|o| o.status == StopStatus::Pending));
+            self.trailing_ids.retain(|id| {
+                self.orders
+                    .get(id)
+                    .is_some_and(|o| o.status == StopStatus::Pending)
+            });
         }
 
         triggered
@@ -334,8 +334,7 @@ impl StopBook {
     pub fn clear_history(&mut self) {
         self.orders
             .retain(|_, order| order.status == StopStatus::Pending);
-        self.trailing_ids
-            .retain(|id| self.orders.contains_key(id));
+        self.trailing_ids.retain(|id| self.orders.contains_key(id));
     }
 
     /// Check if a stop order exists (pending only).

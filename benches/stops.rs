@@ -3,7 +3,7 @@
 
 //! Stop order benchmarks: triggers, cascades, and trailing updates.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use nanobook::{Exchange, Price, Side, TimeInForce, TrailMethod};
 
 fn bench_stop_trigger(c: &mut Criterion) {
@@ -20,7 +20,12 @@ fn bench_stop_trigger(c: &mut Criterion) {
                         let mut exchange = Exchange::new();
                         // Build book levels for the triggered stops to execute against
                         for i in 0..depth {
-                            exchange.submit_limit(Side::Sell, Price(100_00 + (i as i64 + 1) * 10), 100, TimeInForce::GTC);
+                            exchange.submit_limit(
+                                Side::Sell,
+                                Price(100_00 + (i as i64 + 1) * 10),
+                                100,
+                                TimeInForce::GTC,
+                            );
                         }
                         // Add cascading stop orders
                         for i in 0..depth {
@@ -34,7 +39,12 @@ fn bench_stop_trigger(c: &mut Criterion) {
                     |mut exchange| {
                         // This buy order produces a trade at 100.00, triggering the first stop,
                         // which trades at 100.10, triggering the second stop, and so on.
-                        black_box(exchange.submit_limit(Side::Buy, Price(100_00), 100, TimeInForce::GTC))
+                        black_box(exchange.submit_limit(
+                            Side::Buy,
+                            Price(100_00),
+                            100,
+                            TimeInForce::GTC,
+                        ))
                     },
                     criterion::BatchSize::SmallInput,
                 );
@@ -51,7 +61,12 @@ fn bench_trailing_update(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let mut exchange = Exchange::new();
-                exchange.submit_trailing_stop_market(Side::Sell, Price(95_00), 100, TrailMethod::Fixed(100));
+                exchange.submit_trailing_stop_market(
+                    Side::Sell,
+                    Price(95_00),
+                    100,
+                    TrailMethod::Fixed(100),
+                );
                 exchange
             },
             |mut exchange| {
@@ -67,7 +82,12 @@ fn bench_trailing_update(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let mut exchange = Exchange::new();
-                exchange.submit_trailing_stop_market(Side::Sell, Price(95_00), 100, TrailMethod::Percentage(0.01));
+                exchange.submit_trailing_stop_market(
+                    Side::Sell,
+                    Price(95_00),
+                    100,
+                    TrailMethod::Percentage(0.01),
+                );
                 exchange
             },
             |mut exchange| {

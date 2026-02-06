@@ -19,8 +19,8 @@
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 
-use crate::event::Event;
 use crate::Exchange;
+use crate::event::Event;
 
 /// Save events to a file in JSON Lines format.
 ///
@@ -30,7 +30,7 @@ pub fn save_events(events: &[Event], path: &Path) -> io::Result<()> {
     let mut writer = io::BufWriter::new(file);
 
     for event in events {
-        let json = serde_json::to_string(event).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let json = serde_json::to_string(event).map_err(io::Error::other)?;
         writeln!(writer, "{}", json)?;
     }
 
@@ -176,10 +176,7 @@ mod tests {
         let loaded = Exchange::load(&path).unwrap();
 
         assert_eq!(exchange.best_bid_ask(), loaded.best_bid_ask());
-        assert_eq!(
-            exchange.pending_stop_count(),
-            loaded.pending_stop_count()
-        );
+        assert_eq!(exchange.pending_stop_count(), loaded.pending_stop_count());
 
         // Cleanup
         let _ = std::fs::remove_file(&path);
