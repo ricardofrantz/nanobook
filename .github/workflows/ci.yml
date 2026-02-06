@@ -23,7 +23,9 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Run tests
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run tests (all features)
         run: cargo test --all-features
 
       - name: Run tests (no default features)
@@ -33,18 +35,39 @@ jobs:
     name: Python (${{ matrix.os }}, ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.11", "3.12", "3.13", "3.14"]
+        # All Python versions on Linux; latest only on Mac/Windows
+        include:
+          - { os: ubuntu-latest,  python: "3.11" }
+          - { os: ubuntu-latest,  python: "3.12" }
+          - { os: ubuntu-latest,  python: "3.13" }
+          - { os: ubuntu-latest,  python: "3.14" }
+          - { os: macos-latest,   python: "3.13" }
+          - { os: windows-latest, python: "3.13" }
+    env:
+      PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+
       - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: python-${{ matrix.python }}
+
       - run: pip install maturin pytest
-      - run: cd python && maturin develop --release
-      - run: pytest python/tests/
+
+      - name: Build Python extension
+        working-directory: python
+        run: maturin develop --release
+
+      - name: Run Python tests
+        run: pytest python/tests/ -v
 
   lint:
     name: Lint
@@ -56,6 +79,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -72,7 +97,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Run benchmarks and compare
-        run: |
-          cargo bench --all-features -- --baseline v0.5 || echo "No v0.5 baseline found, running fresh"
-          cargo bench --all-features
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run benchmarks
+        run: cargo bench --all-features
