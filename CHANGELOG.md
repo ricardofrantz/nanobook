@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-06
+
+### Added
+
+- **Symbol type**: Fixed-size `Symbol([u8; 8], u8)` — `Copy`, no heap allocation, max 8 ASCII bytes
+  - `Symbol::new()`, `try_new()`, `Display`, `Debug`, `AsRef<str>`
+  - Custom serde support (serializes as string)
+- **MultiExchange**: Multi-symbol LOB — one `Exchange` per `Symbol`
+  - `get_or_create(symbol)`, `get(symbol)`, `best_prices()`, `symbols()`
+- **Portfolio engine** (feature: `portfolio`):
+  - `Portfolio` — cash + positions + cost model + equity tracking
+  - `Position` — per-symbol tracking with VWAP entry, realized/unrealized PnL
+  - `CostModel` — commission + slippage in basis points, minimum fee
+  - `rebalance_simple()` — instant execution for fast parameter sweeps
+  - `rebalance_lob()` — route through real LOB matching engines
+  - `record_return()`, `snapshot()`, `current_weights()`, `equity_curve()`
+- **Financial metrics** (feature: `portfolio`):
+  - `compute_metrics()` — Sharpe, Sortino, CAGR, max drawdown, Calmar, volatility
+  - `Metrics` struct with `Display` for formatted output
+- **Parallel sweep** (feature: `parallel`):
+  - `sweep()` — rayon-based parallel parameter sweep over strategy configurations
+- **Book analytics**:
+  - `BookSnapshot::imbalance()` — order book imbalance ratio
+  - `BookSnapshot::weighted_mid()` — volume-weighted midpoint price
+  - `Trade::vwap()` — volume-weighted average price across trades
+- **Examples**: `portfolio_backtest`, `multi_symbol_lob`
+- **Tests**: `portfolio_invariants` integration test suite
+
+### Changed
+
+- `Symbol` added to core types (not feature-gated)
+- `MultiExchange` added to public API (not feature-gated)
+
 ## [0.2.0] - 2026-02-05
 
 ### Added
@@ -66,6 +99,7 @@ Initial release of nanobook - a deterministic limit order book and matching engi
 - Fixed-point price representation (avoids floating-point errors)
 - Deterministic via monotonic timestamps (not system clock)
 
-[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ricardofrantz/nanobook/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ricardofrantz/nanobook/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ricardofrantz/nanobook/releases/tag/v0.1.0

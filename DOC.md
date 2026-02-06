@@ -21,6 +21,10 @@
   - [Snapshots](#snapshots)
   - [Advanced Types](#advanced-types)
   - [Event Replay](#event-replay)
+- [Symbol](#symbol)
+- [MultiExchange](#multiexchange)
+- [Portfolio Engine](#portfolio-engine)
+- [Book Analytics](#book-analytics)
 - [Time-in-Force Semantics](#time-in-force-semantics)
 - [CLI Reference](#cli-reference)
 - [Performance](#performance)
@@ -39,7 +43,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-nanobook = "0.2"
+nanobook = "0.3"
 ```
 
 Minimal working example:
@@ -665,10 +669,268 @@ For maximum performance, disable the feature:
 
 ```toml
 [dependencies]
-nanobook = { version = "0.2", default-features = false }
+nanobook = { version = "0.3", default-features = false }
 ```
 
 This removes `apply`, `apply_all`, `replay`, `events`, and `clear_events` from the API.
+
+---
+
+## Symbol
+
+A fixed-size instrument identifier. Stored as `[u8; 8]` inline — `Copy`, no heap allocation, max 8 ASCII bytes.
+
+```rust
+use nanobook::Symbol;
+
+let sym = Symbol::new("AAPL");
+assert_eq!(sym.as_str(), "AAPL");
+assert_eq!(format!("{sym}"), "AAPL");
+
+// Try fallible construction
+assert!(Symbol::try_new("TOOLONGNAME").is_none());
+
+// Works as HashMap key (implements Hash, Eq, Ord)
+use std::collections::HashMap;
+let mut map = HashMap::new();
+map.insert(Symbol::new("MSFT"), 42);
+```
+
+Implements: `Clone`, `Copy`, `PartialEq`, `Eq`, `Hash`, `PartialOrd`, `Ord`, `Display`, `Debug`, `AsRef<str>`.
+
+With `serde` feature: serializes as a string.
+
+---
+
+## MultiExchange
+
+A collection of per-symbol `Exchange` instances. Each symbol gets an independent order book.
+
+```rust
+use nanobook::{MultiExchange, Symbol, Side, Price, TimeInForce};
+
+let mut multi = MultiExchange::new();
+let aapl = Symbol::new("AAPL");
+let msft = Symbol::new("MSFT");
+
+// Orders route to per-symbol books
+multi.get_or_create(&aapl).submit_limit(Side::Sell, Price(150_00), 100, TimeInForce::GTC);
+multi.get_or_create(&msft).submit_limit(Side::Sell, Price(300_00), 200, TimeInForce::GTC);
+
+// Query
+assert_eq!(multi.get(&aapl).unwrap().best_ask(), Some(Price(150_00)));
+assert!(multi.get(&Symbol::new("GOOG")).is_none());
+
+// Iterate all symbols
+for (sym, bid, ask) in multi.best_prices() {
+    println!("{sym}: bid={bid:?} ask={ask:?}");
+}
+```
+
+| Method | Description |
+|--------|-------------|
+| `get_or_create(&Symbol)` | Get or create exchange for symbol |
+| `get(&Symbol)` | Read-only access (returns `Option`) |
+| `get_mut(&Symbol)` | Mutable access (returns `Option`) |
+| `symbols()` | Iterator over all symbols |
+| `best_prices()` | Vec of `(Symbol, Option<Price>, Option<Price>)` |
+| `len()` / `is_empty()` | Number of symbols |
+
+---
+
+## Portfolio Engine
+
+**Feature flag:** `portfolio`
+
+```toml
+[dependencies]
+nanobook = { version = "0.3", features = ["portfolio"] }
+```
+
+### Portfolio
+
+Tracks cash, positions, costs, returns, and equity over time.
+
+```rust
+use nanobook::portfolio::{Portfolio, CostModel};
+use nanobook::Symbol;
+
+let cost = CostModel { commission_bps: 5, slippage_bps: 3, min_trade_fee: 1_00 };
+let mut portfolio = Portfolio::new(1_000_000_00, cost); // $1,000,000
+
+let aapl = Symbol::new("AAPL");
+let prices = [(aapl, 150_00)];
+
+// Rebalance to 60% AAPL
+portfolio.rebalance_simple(&[(aapl, 0.6)], &prices);
+
+// Record period return
+portfolio.record_return(&prices);
+
+// Query state
+let equity = portfolio.total_equity(&prices);
+let weights = portfolio.current_weights(&prices);
+let snap = portfolio.snapshot(&prices);
+```
+
+#### Execution Modes
+
+**SimpleFill** — instant execution at bar prices. Fast, no microstructure:
+
+```rust
+portfolio.rebalance_simple(&[(aapl, 0.6)], &prices);
+```
+
+**LOBFill** — route through real `Exchange` matching engines:
+
+```rust
+use nanobook::MultiExchange;
+
+let mut exchanges = MultiExchange::new();
+// ... populate LOBs with orders ...
+portfolio.rebalance_lob(&[(aapl, 0.6)], &mut exchanges);
+```
+
+| Method | Description |
+|--------|-------------|
+| `new(cash, cost_model)` | Create portfolio with initial cash |
+| `rebalance_simple(targets, prices)` | Rebalance at given prices |
+| `rebalance_lob(targets, exchanges)` | Rebalance through LOB |
+| `record_return(prices)` | Record a period return |
+| `total_equity(prices)` | Cash + position values |
+| `current_weights(prices)` | Position weights as fractions |
+| `snapshot(prices)` | Point-in-time snapshot |
+| `cash()` | Current cash balance |
+| `position(symbol)` | Get position by symbol |
+| `positions()` | Iterator over all positions |
+| `returns()` | Accumulated return series |
+| `equity_curve()` | Equity at each snapshot |
+
+### Position
+
+Per-symbol position tracking with VWAP entry price and realized PnL.
+
+```rust
+use nanobook::portfolio::Position;
+use nanobook::Symbol;
+
+let mut pos = Position::new(Symbol::new("AAPL"));
+
+pos.apply_fill(100, 150_00);   // buy 100 @ $150
+pos.apply_fill(-50, 160_00);   // sell 50 @ $160
+
+assert_eq!(pos.quantity, 50);
+assert_eq!(pos.avg_entry_price, 150_00);
+assert_eq!(pos.realized_pnl, 50 * 10_00);  // $500 profit
+assert_eq!(pos.unrealized_pnl(155_00), 50 * 5_00); // $250
+```
+
+### CostModel
+
+```rust
+use nanobook::portfolio::CostModel;
+
+let model = CostModel {
+    commission_bps: 10,  // 0.10%
+    slippage_bps: 5,     // 0.05%
+    min_trade_fee: 1_00, // $1.00 minimum
+};
+
+let cost = model.compute_cost(1_000_000); // 15 bps on $10,000 = $15
+assert_eq!(cost, 1500);
+
+let zero = CostModel::zero(); // no fees
+```
+
+### Financial Metrics
+
+```rust
+use nanobook::portfolio::compute_metrics;
+
+let returns = vec![0.01, -0.005, 0.02, 0.015, -0.01, 0.008];
+let metrics = compute_metrics(&returns, 252.0, 0.04/252.0).unwrap();
+
+println!("{metrics}"); // Formatted output:
+// Performance Metrics
+//   Total return:       3.82%
+//   CAGR:              ...
+//   Sharpe:            ...
+//   Max drawdown:      ...
+```
+
+| Field | Description |
+|-------|-------------|
+| `total_return` | Cumulative return (e.g., 0.15 = 15%) |
+| `cagr` | Compound annual growth rate |
+| `volatility` | Annualized standard deviation |
+| `sharpe` | Annualized Sharpe ratio |
+| `sortino` | Annualized Sortino ratio |
+| `max_drawdown` | Peak-to-trough (e.g., 0.20 = 20%) |
+| `calmar` | CAGR / max_drawdown |
+| `num_periods` | Number of return periods |
+| `winning_periods` | Periods with positive return |
+| `losing_periods` | Periods with negative return |
+
+### Parallel Sweep
+
+**Feature flag:** `parallel` (implies `portfolio`)
+
+```toml
+[dependencies]
+nanobook = { version = "0.3", features = ["parallel"] }
+```
+
+Run strategy variants in parallel using rayon:
+
+```rust
+use nanobook::portfolio::sweep::sweep;
+
+let params = vec![0.5_f64, 1.0, 1.5, 2.0]; // e.g., leverage levels
+let results = sweep(&params, 12.0, 0.0, |&leverage| {
+    // Each invocation creates its own portfolio
+    vec![0.01 * leverage, -0.005 * leverage, 0.02 * leverage]
+});
+
+for (i, metrics) in results.iter().enumerate() {
+    if let Some(m) = metrics {
+        println!("Leverage {:.1}: Sharpe={:.2}", params[i], m.sharpe);
+    }
+}
+```
+
+---
+
+## Book Analytics
+
+### Order Book Imbalance
+
+```rust
+let snap = exchange.depth(10);
+if let Some(imb) = snap.imbalance() {
+    // Range [-1.0, 1.0]: positive = buy pressure, negative = sell pressure
+    println!("Imbalance: {imb:.4}");
+}
+```
+
+### Weighted Midpoint
+
+```rust
+if let Some(wmid) = snap.weighted_mid() {
+    // Leans toward the side with less liquidity
+    println!("Weighted mid: {wmid:.2}");
+}
+```
+
+### VWAP
+
+```rust
+use nanobook::Trade;
+
+let trades = exchange.trades();
+if let Some(vwap) = Trade::vwap(trades) {
+    println!("VWAP: {vwap}");
+}
+```
 
 ---
 
@@ -940,7 +1202,7 @@ exchange.stop_book();                 // &StopBook
 
 ```toml
 [dependencies]
-nanobook = { version = "0.2", features = ["persistence"] }
+nanobook = { version = "0.3", features = ["persistence"] }
 ```
 
 Save and load exchange state via JSON Lines event sourcing:
@@ -989,15 +1251,15 @@ One JSON object per line (`.jsonl`). Human-readable, streamable:
 
 ```toml
 [dependencies]
-nanobook = { version = "0.2", features = ["serde"] }
+nanobook = { version = "0.3", features = ["serde"] }
 ```
 
 All public types derive `Serialize` and `Deserialize` when the `serde` feature is enabled:
 
-`Price`, `OrderId`, `TradeId`, `Side`, `TimeInForce`, `OrderStatus`, `Order`, `Trade`,
+`Price`, `OrderId`, `TradeId`, `Symbol`, `Side`, `TimeInForce`, `OrderStatus`, `Order`, `Trade`,
 `Event`, `ApplyResult`, `SubmitResult`, `CancelResult`, `CancelError`, `ModifyResult`,
 `ModifyError`, `BookSnapshot`, `LevelSnapshot`, `MatchResult`, `StopOrder`, `StopStatus`,
-`StopSubmitResult`, `ValidationError`.
+`StopSubmitResult`, `ValidationError`, `Position`, `CostModel`.
 
 ---
 
@@ -1131,5 +1393,4 @@ nanobook is an **educational and testing tool**, not a production exchange:
 | **No networking** | In-process only; no TCP/UDP/WebSocket server |
 | **No compliance** | No self-trade prevention, circuit breakers, or regulatory controls |
 | **No complex orders** | No iceberg, pegged, or trailing stop orders |
-| **Single symbol** | One order book per `Exchange` instance |
 | **Single-threaded** | No concurrent access; wrap in `Mutex` if needed |

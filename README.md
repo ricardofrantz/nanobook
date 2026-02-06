@@ -25,7 +25,9 @@ A **simulated stock exchange** that processes orders exactly like a real exchang
 - **Deterministic** — Same inputs always produce same outputs (essential for reproducible backtests)
 - **Fast** — 8M+ orders/sec single-threaded, sub-microsecond latency
 - **Complete** — GTC/IOC/FOK, partial fills, modify, cancel, L1/L2/L3 snapshots
-- **Simple** — Single-threaded, in-process, zero dependencies beyond `thiserror`
+- **Multi-symbol** — `MultiExchange` for independent per-symbol order books
+- **Portfolio engine** — Position tracking, cost modeling, rebalancing, financial metrics (Sharpe, Sortino, max drawdown)
+- **Simple** — Single-threaded, in-process, minimal dependencies
 
 ## See It In Action
 
@@ -61,8 +63,11 @@ The interactive demo explains price-time priority, partial fills, IOC/FOK, and o
 - **Nanosecond timestamps**: Monotonic counter (not system clock)
 - **Deterministic**: Same inputs → same outputs (essential for backtesting)
 - **Fast**: 8M+ orders/second single-threaded (see Performance)
-- **Book snapshots**: L1 (BBO), L2 (depth), L3 (full book)
+- **Book snapshots**: L1 (BBO), L2 (depth), L3 (full book), imbalance, weighted mid
 - **Event replay**: Complete audit trail for deterministic replay
+- **Portfolio**: Position tracking, VWAP entry, cost model, Sharpe/Sortino/drawdown metrics
+- **Multi-symbol**: Independent order books per symbol via `MultiExchange`
+- **Parallel sweeps**: Rayon-based parameter grid search (optional feature)
 
 ## Quick Example
 
@@ -98,7 +103,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-nanobook = "0.1"
+nanobook = "0.3"
 ```
 
 Or build from source:
@@ -356,15 +361,23 @@ println!("Filled: {}, Cancelled: {}",
 - **limitbook**: General-purpose LOB without replay requirements
 - **OrderBook-rs**: Production systems needing thread-safety and complex order types
 
+## Feature Flags
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `event-log` | Yes | Event recording for deterministic replay |
+| `serde` | No | Serialize/deserialize all public types |
+| `persistence` | No | File-based event sourcing (JSON Lines) |
+| `portfolio` | No | Portfolio engine, position tracking, metrics |
+| `parallel` | No | Rayon-based parallel parameter sweeps |
+
 ## Limitations
 
 This is an **educational/testing tool**, not a production exchange:
 
 - **No networking**: In-process only
-- **No persistence**: In-memory only
 - **No compliance**: Self-trade prevention, circuit breakers
-- **No complex orders**: Iceberg, pegged, stop-loss
-- **Single symbol**: One order book per Exchange instance
+- **No complex orders**: Iceberg, pegged, trailing stops
 
 See SPECS.md for the complete specification.
 

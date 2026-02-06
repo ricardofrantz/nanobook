@@ -154,13 +154,16 @@ mod event;
 mod exchange;
 mod level;
 mod matching;
+pub mod multi_exchange;
 mod order;
+#[cfg(feature = "persistence")]
+pub mod persistence;
+#[cfg(feature = "portfolio")]
+pub mod portfolio;
 mod price_levels;
 mod result;
 mod side;
 mod snapshot;
-#[cfg(feature = "persistence")]
-pub mod persistence;
 pub mod stop;
 mod tif;
 mod trade;
@@ -173,6 +176,7 @@ pub use event::{ApplyResult, Event};
 pub use exchange::Exchange;
 pub use level::Level;
 pub use matching::MatchResult;
+pub use multi_exchange::MultiExchange;
 pub use order::{Order, OrderStatus};
 pub use price_levels::PriceLevels;
 pub use result::{
@@ -183,4 +187,4 @@ pub use snapshot::{BookSnapshot, LevelSnapshot};
 pub use stop::{StopBook, StopOrder, StopStatus};
 pub use tif::TimeInForce;
 pub use trade::Trade;
-pub use types::{OrderId, Price, Quantity, Timestamp, TradeId};
+pub use types::{OrderId, Price, Quantity, Symbol, Timestamp, TradeId};

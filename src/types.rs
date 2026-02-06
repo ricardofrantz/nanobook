@@ -1,4 +1,4 @@
-//! Core types: Price, Quantity, Timestamp, OrderId, TradeId
+//! Core types: Price, Quantity, Timestamp, OrderId, TradeId, Symbol
 
 use std::fmt;
 
@@ -58,6 +58,84 @@ impl fmt::Display for TradeId {
     }
 }
 
+/// A fixed-size symbol identifier (e.g., "AAPL", "MSFT").
+///
+/// Stored inline as `[u8; 8]` with a length byte — no heap allocation, `Copy`,
+/// and suitable for use as a hash map key. Maximum 8 ASCII bytes.
+///
+/// ```
+/// use nanobook::Symbol;
+///
+/// let sym = Symbol::new("AAPL");
+/// assert_eq!(sym.as_str(), "AAPL");
+/// assert_eq!(format!("{sym}"), "AAPL");
+/// ```
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Symbol {
+    buf: [u8; 8],
+    len: u8,
+}
+
+impl Symbol {
+    /// Create a symbol from a string slice. Panics if longer than 8 bytes.
+    pub fn new(s: &str) -> Self {
+        Self::try_new(s).expect("Symbol must be at most 8 bytes")
+    }
+
+    /// Try to create a symbol. Returns `None` if longer than 8 bytes.
+    pub fn try_new(s: &str) -> Option<Self> {
+        if s.len() > 8 {
+            return None;
+        }
+        let mut buf = [0u8; 8];
+        buf[..s.len()].copy_from_slice(s.as_bytes());
+        Some(Self {
+            buf,
+            len: s.len() as u8,
+        })
+    }
+
+    /// Returns the symbol as a string slice.
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        // Safety: we only accept valid str input in constructors
+        unsafe { std::str::from_utf8_unchecked(&self.buf[..self.len as usize]) }
+    }
+}
+
+impl AsRef<str> for Symbol {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl fmt::Display for Symbol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl fmt::Debug for Symbol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Symbol(\"{}\")", self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for Symbol {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Symbol {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = <&str>::deserialize(deserializer)?;
+        Symbol::try_new(s).ok_or_else(|| serde::de::Error::custom("Symbol must be at most 8 bytes"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,5 +163,67 @@ mod tests {
     #[test]
     fn trade_id_display() {
         assert_eq!(format!("{}", TradeId(7)), "T7");
+    }
+
+    // === Symbol tests ===
+
+    #[test]
+    fn symbol_new() {
+        let sym = Symbol::new("AAPL");
+        assert_eq!(sym.as_str(), "AAPL");
+    }
+
+    #[test]
+    fn symbol_display() {
+        assert_eq!(format!("{}", Symbol::new("MSFT")), "MSFT");
+    }
+
+    #[test]
+    fn symbol_debug() {
+        assert_eq!(format!("{:?}", Symbol::new("GOOG")), "Symbol(\"GOOG\")");
+    }
+
+    #[test]
+    fn symbol_max_length() {
+        let sym = Symbol::new("12345678");
+        assert_eq!(sym.as_str(), "12345678");
+    }
+
+    #[test]
+    fn symbol_try_new_too_long() {
+        assert!(Symbol::try_new("123456789").is_none());
+    }
+
+    #[test]
+    fn symbol_empty() {
+        let sym = Symbol::new("");
+        assert_eq!(sym.as_str(), "");
+    }
+
+    #[test]
+    fn symbol_ordering() {
+        assert!(Symbol::new("AAPL") < Symbol::new("MSFT"));
+        assert_eq!(Symbol::new("AAPL"), Symbol::new("AAPL"));
+    }
+
+    #[test]
+    fn symbol_hash_eq() {
+        use std::collections::HashMap;
+        let mut map = HashMap::new();
+        map.insert(Symbol::new("AAPL"), 42);
+        assert_eq!(map[&Symbol::new("AAPL")], 42);
+    }
+
+    #[test]
+    fn symbol_copy() {
+        let a = Symbol::new("AAPL");
+        let b = a; // Copy
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    #[should_panic(expected = "at most 8 bytes")]
+    fn symbol_new_panics_too_long() {
+        Symbol::new("TOOLONGNAME");
     }
 }

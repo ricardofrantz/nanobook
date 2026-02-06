@@ -62,6 +62,33 @@ impl Trade {
     pub fn notional(&self) -> i64 {
         self.price.0 * self.quantity as i64
     }
+
+    /// Compute the volume-weighted average price (VWAP) of a trade series.
+    ///
+    /// Returns `None` if the slice is empty or total quantity is zero.
+    ///
+    /// ```
+    /// use nanobook::{Trade, Price, TradeId, OrderId, Side};
+    ///
+    /// let trades = vec![
+    ///     Trade::new(TradeId(1), Price(100_00), 50, OrderId(1), OrderId(2), Side::Buy, 1),
+    ///     Trade::new(TradeId(2), Price(102_00), 150, OrderId(3), OrderId(4), Side::Buy, 2),
+    /// ];
+    /// let vwap = Trade::vwap(&trades).unwrap();
+    /// // (100_00 * 50 + 102_00 * 150) / 200 = 101_50
+    /// assert_eq!(vwap, Price(101_50));
+    /// ```
+    pub fn vwap(trades: &[Trade]) -> Option<Price> {
+        if trades.is_empty() {
+            return None;
+        }
+        let total_qty: u64 = trades.iter().map(|t| t.quantity).sum();
+        if total_qty == 0 {
+            return None;
+        }
+        let total_notional: i64 = trades.iter().map(|t| t.price.0 * t.quantity as i64).sum();
+        Some(Price(total_notional / total_qty as i64))
+    }
 }
 
 impl fmt::Display for Trade {
@@ -145,5 +172,28 @@ mod tests {
         assert!(s.contains("bought"));
         assert!(s.contains("$100.50"));
         assert!(s.contains("O10"));
+    }
+
+    // === VWAP tests ===
+
+    #[test]
+    fn vwap_single_trade() {
+        let trades = vec![make_trade()]; // 100 @ $100.50
+        assert_eq!(Trade::vwap(&trades), Some(Price(100_50)));
+    }
+
+    #[test]
+    fn vwap_multiple_trades() {
+        let trades = vec![
+            Trade::new(TradeId(1), Price(100_00), 50, OrderId(1), OrderId(2), Side::Buy, 1),
+            Trade::new(TradeId(2), Price(102_00), 150, OrderId(3), OrderId(4), Side::Buy, 2),
+        ];
+        // (100_00 * 50 + 102_00 * 150) / 200 = (5_000_00 + 15_300_00) / 200 = 101_50
+        assert_eq!(Trade::vwap(&trades), Some(Price(101_50)));
+    }
+
+    #[test]
+    fn vwap_empty() {
+        assert_eq!(Trade::vwap(&[]), None);
     }
 }
