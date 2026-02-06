@@ -106,11 +106,10 @@ impl Level {
         None
     }
 
-    /// Mark an order as a tombstone.
+    /// Mark an order as a tombstone (O(1) cancellation).
     ///
-    /// This is O(1) if you know the position, but here we still don't.
-    /// Wait, the plan said: "HashMap<OrderId, (Price, Side, usize)> stores position index".
-    /// That means I need to store the index in OrderBook.
+    /// The caller provides the index into the VecDeque (tracked in OrderBook's
+    /// HashMap). The order's quantity is subtracted from the level total.
     pub fn mark_tombstone(&mut self, index: usize, quantity: Quantity) {
         if let Some(id_ref) = self.orders.get_mut(index) {
             if id_ref.0 != 0 {

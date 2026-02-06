@@ -5,7 +5,7 @@
 [![docs.rs](https://docs.rs/nanobook/badge.svg)](https://docs.rs/nanobook)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**n*10^-9** — A deterministic, nanosecond-precision limit order book and matching engine for testing trading algorithms.
+**n*10⁻⁹** — A deterministic, nanosecond-precision limit order book and matching engine for testing trading algorithms.
 
 ## What Is This?
 
@@ -209,8 +209,9 @@ print(f"Sharpe: {metrics.sharpe:.2f}")
 # Custom strategy via callback
 result = nanobook.run_backtest(
     strategy=lambda bar, prices, portfolio: [("AAPL", 0.5), ("GOOG", 0.5)],
-    price_series=[[("AAPL", 150_00), ("GOOG", 280_00)]] * 252,
+    price_series=[{"AAPL": 150_00, "GOOG": 280_00}] * 252,
     initial_cash=1_000_000_00,
+    cost_model=nanobook.CostModel.zero(),
 )
 
 # Parse NASDAQ ITCH 5.0 binary data
@@ -328,7 +329,7 @@ $99.00:  [O6]                   $102.00: [O10]->[O11]
 ```
 
 - **BTreeMap<Price, Level>** for sorted price levels
-- **VecDeque<Order>** for FIFO queue at each level (tombstones for O(1) cancel)
+- **VecDeque<OrderId>** for FIFO queue at each level (tombstones for O(1) cancel)
 - **FxHashMap<OrderId, Order>** for O(1) lookup
 - **Cached best_price** for O(1) BBO access
 
@@ -453,7 +454,7 @@ assert_eq!(my_order.filled_quantity, 0);
 ### ITCH Replay
 
 ```rust
-use nanobook::itch::ItchParser;
+use nanobook::itch::{ItchParser, ItchMessage};
 
 let file = std::fs::File::open("data/sample.itch")?;
 let mut parser = ItchParser::new(std::io::BufReader::new(file));
