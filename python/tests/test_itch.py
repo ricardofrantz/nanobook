@@ -1,4 +1,5 @@
 import nanobook
+import pytest
 import struct
 import tempfile
 import os
@@ -123,4 +124,27 @@ def test_parse_itch_trade():
     finally:
         os.unlink(path)
 
+def test_parse_itch_truncated_message():
+    # Malformed: type 'A' (AddOrder) needs 36 bytes but we only provide 5
+    payload = b'A' + b'\x00' * 4
+    length = struct.pack(">H", len(payload))
 
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+        f.write(length + payload)
+        path = f.name
+    try:
+        with pytest.raises(OSError, match="too short"):
+            nanobook.parse_itch(path)
+    finally:
+        os.unlink(path)
+
+def test_parse_itch_zero_length():
+    # Malformed: length prefix is 0
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+        f.write(struct.pack(">H", 0))
+        path = f.name
+    try:
+        with pytest.raises(OSError, match="length is 0"):
+            nanobook.parse_itch(path)
+    finally:
+        os.unlink(path)

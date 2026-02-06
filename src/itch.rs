@@ -80,12 +80,42 @@ impl<R: Read> ItchParser<R> {
             return Ok(None);
         }
         let len = u16::from_be_bytes(len_buf) as usize;
-        
+        if len == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "ITCH message length is 0",
+            ));
+        }
+
         let mut msg_buf = vec![0u8; len];
         self.reader.read_exact(&mut msg_buf)?;
-        
+
         let msg_type = msg_buf[0] as char;
         let payload = &msg_buf[1..];
+
+        // Minimum payload sizes per ITCH 5.0 spec (bytes after message type)
+        let min_payload = match msg_type {
+            'A' | 'F' => 35, // ..payload[31..35]
+            'E'        => 30, // ..payload[22..30]
+            'C'        => 35, // ..payload[31..35]
+            'X'        => 22, // ..payload[18..22]
+            'D'        => 18, // ..payload[10..18]
+            'U'        => 34, // ..payload[30..34]
+            'P'        => 43, // ..payload[35..43]
+            'R'        => 10, // ..payload[2..10]
+            _          =>  0,
+        };
+        if payload.len() < min_payload {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "ITCH '{}' message too short: {} bytes, need {}",
+                    msg_type,
+                    payload.len(),
+                    min_payload,
+                ),
+            ));
+        }
 
         match msg_type {
             'A' | 'F' => {
