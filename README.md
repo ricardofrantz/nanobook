@@ -5,13 +5,13 @@
 [![docs.rs](https://docs.rs/nanobook/badge.svg)](https://docs.rs/nanobook)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**n*10⁻⁹** — A deterministic, nanosecond-precision limit order book and matching engine for testing trading algorithms.
+**n*10^-9** — A deterministic, nanosecond-precision limit order book and matching engine for testing trading algorithms.
 
 ## What Is This?
 
 A **simulated stock exchange** that processes orders exactly like a real exchange — with proper price-time priority, partial fills, and cancellations.
 
-nanobook combines three layers: a **LOB matching engine** (v0.1–v0.2) for deterministic order matching, a **portfolio simulator** (v0.3–v0.4) for position tracking and strategy backtesting, and **Python bindings** (v0.4) for seamless integration with data science workflows. Each layer works independently or together.
+nanobook combines four layers: a **LOB matching engine** for deterministic order matching, a **portfolio simulator** for position tracking and strategy backtesting, **Python bindings** for seamless integration with data science workflows, and a **NASDAQ ITCH 5.0 parser** for replaying real market data. Each layer works independently or together.
 
 ### Who Should Use This?
 
@@ -25,13 +25,14 @@ nanobook combines three layers: a **LOB matching engine** (v0.1–v0.2) for dete
 ### Why This Library?
 
 - **Deterministic** — Same inputs always produce same outputs (essential for reproducible backtests)
-- **Fast** — 8M+ orders/sec single-threaded, sub-microsecond latency
+- **Fast** — 8M+ orders/sec single-threaded, O(1) cancel via tombstones (170 ns)
 - **Complete** — GTC/IOC/FOK, partial fills, modify, cancel, L1/L2/L3 snapshots
+- **Stop orders** — Stop-market, stop-limit, trailing stops (fixed/percentage/ATR)
 - **Multi-symbol** — `MultiExchange` for independent per-symbol order books
 - **Portfolio engine** — Position tracking, cost modeling, rebalancing, financial metrics (Sharpe, Sortino, max drawdown)
-- **Trailing stops** — Fixed, percentage, and ATR-based adaptive trailing
+- **ITCH 5.0 parser** — Replay real NASDAQ market data through the matching engine
 - **Python bindings** — PyO3 wrappers for Exchange, Portfolio, sweep (`pip install nanobook`)
-- **Simple** — Single-threaded, in-process, minimal dependencies
+- **Simple** — Single-threaded, in-process, minimal dependencies (3 core deps)
 
 ### Why Not Something Else?
 
@@ -50,24 +51,21 @@ Python-friendly.
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     Python (PyO3)                        │
-│     Factor ranking, strategy logic, Polars DataFrames    │
-├──────────────────────────┬──────────────────────────────┤
-│                          │                              │
-│  ┌───────────────────┐   │   ┌───────────────────────┐  │
-│  │  Portfolio Engine  │   │   │     LOB Exchange      │  │
-│  │                   │   │   │                       │  │
-│  │  Position (VWAP)  │   │   │  OrderBook            │  │
-│  │  CostModel (bps)  │◄──┼──►│  Matching Engine      │  │
-│  │  Strategy Trait    │   │   │  Stop / Trailing      │  │
-│  │  Parallel Sweep    │   │   │  Event Replay         │  │
-│  └───────────────────┘   │   └───────────────────────┘  │
-│                          │                              │
-│  ┌───────────────────────┴──────────────────────────┐   │
-│  │  Shared: Symbol, MultiExchange, BookSnapshot     │   │
-│  └──────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                      Python (PyO3)                           │
+│     Factor ranking, strategy logic, Polars DataFrames        │
+├────────────────┬──────────────────────┬──────────────────────┤
+│                │                      │                      │
+│  Portfolio     │   LOB Exchange       │   Market Data        │
+│  ───────────   │   ────────────       │   ───────────        │
+│  Position      │   OrderBook          │   ITCH 5.0 Parser    │
+│  CostModel  ◄─┼─► Matching Engine    │   Event Conversion   │
+│  Strategy      │   Stop / Trailing    │   Memory-Mapped I/O  │
+│  Sweep (‖)     │   Event Replay       │                      │
+│                │   O(1) Cancel        │                      │
+├────────────────┴──────────────────────┴──────────────────────┤
+│   Shared: Symbol, MultiExchange, BookSnapshot, Analytics     │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 See [DOC.md](DOC.md) for the full API reference.
@@ -103,9 +101,10 @@ The interactive demo explains price-time priority, partial fills, IOC/FOK, and o
 - **Order types**: Limit, Market, Cancel, Modify
 - **Time-in-force**: GTC, IOC, FOK
 - **Stop orders**: Stop-market, stop-limit, trailing stops (fixed/percentage/ATR)
+- **O(1) cancel**: Tombstone-based cancellation (~170 ns, 350x faster than v0.5)
 - **Price-time priority**: FIFO matching at each price level
 - **Nanosecond timestamps**: Monotonic counter (not system clock)
-- **Deterministic**: Same inputs → same outputs (essential for backtesting)
+- **Deterministic**: Same inputs -> same outputs (essential for backtesting)
 - **Fast**: 8M+ orders/second single-threaded (see Performance)
 - **Book snapshots**: L1 (BBO), L2 (depth), L3 (full book), imbalance, weighted mid
 - **Event replay**: Complete audit trail for deterministic replay
@@ -113,6 +112,7 @@ The interactive demo explains price-time priority, partial fills, IOC/FOK, and o
 - **Strategy trait**: Define `compute_weights()`, run backtests with `run_backtest()`
 - **Multi-symbol**: Independent order books per symbol via `MultiExchange`
 - **Parallel sweeps**: Rayon-based parameter grid search (optional feature)
+- **ITCH 5.0 parser**: Streaming binary parser for NASDAQ market data
 - **Python bindings**: Exchange, Portfolio, sweep via PyO3 with GIL release for parallel sections
 
 ## Quick Example
@@ -151,7 +151,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-nanobook = "0.4"
+nanobook = "0.6"
 ```
 
 ### Python
@@ -196,6 +196,9 @@ ex.submit_trailing_stop_market("sell", 9500, 100, "percentage", 0.05)
 bid, ask = ex.best_bid_ask()
 snap = ex.depth(10)
 
+# Compact tombstones after heavy cancellation
+ex.compact()
+
 # Portfolio management
 portfolio = nanobook.Portfolio(1_000_000_00, nanobook.CostModel.zero())
 portfolio.rebalance_simple([("AAPL", 0.5)], [("AAPL", 150_00)])
@@ -203,13 +206,15 @@ portfolio.record_return([("AAPL", 155_00)])
 metrics = portfolio.compute_metrics(12.0, 0.0)
 print(f"Sharpe: {metrics.sharpe:.2f}")
 
-# Parallel parameter sweep (GIL released for Rayon)
-results = nanobook.py_sweep_equal_weight(
-    n_params=100,
-    price_series=[[("AAPL", p)] for p in range(150_00, 160_00)],
+# Custom strategy via callback
+result = nanobook.run_backtest(
+    strategy=lambda bar, prices, portfolio: [("AAPL", 0.5), ("GOOG", 0.5)],
+    price_series=[[("AAPL", 150_00), ("GOOG", 280_00)]] * 252,
     initial_cash=1_000_000_00,
-    periods_per_year=252.0,
 )
+
+# Parse NASDAQ ITCH 5.0 binary data
+events = nanobook.parse_itch("data/sample.itch")
 ```
 
 ## API Overview
@@ -252,7 +257,7 @@ println!("Order ID: {:?}, Trades: {}", result.order_id, result.trades.len());
 // Submit market order (always IOC semantics)
 let result = exchange.submit_market(Side::Sell, 50);
 
-// Cancel an order
+// Cancel an order — O(1) via tombstones
 let cancel_result = exchange.cancel(order_id);
 
 // Modify an order (cancel + replace, loses time priority)
@@ -267,6 +272,25 @@ if let Some(order) = exchange.get_order(order_id) {
 let (best_bid, best_ask) = exchange.best_bid_ask();  // L1
 let depth = exchange.depth(10);                       // L2: top 10 levels
 let full = exchange.full_book();                      // L3: everything
+
+// Compact tombstones after heavy cancellation workloads
+exchange.compact();
+```
+
+### Stop Orders
+
+```rust
+// Stop-market: triggers market order when price hits stop
+exchange.submit_stop_market(Side::Sell, Price(95_00), 100);
+
+// Stop-limit: triggers limit order at limit_price when stop hits
+exchange.submit_stop_limit(Side::Sell, Price(95_00), Price(94_50), 100, TimeInForce::GTC);
+
+// Trailing stops: stop price tracks the market
+exchange.submit_trailing_stop_market(Side::Sell, Price(95_00), 100, TrailMethod::Fixed(1_00));
+exchange.submit_trailing_stop_market(Side::Sell, Price(95_00), 100, TrailMethod::Percentage(0.05));
+exchange.submit_trailing_stop_market(Side::Sell, Price(95_00), 100,
+    TrailMethod::Atr { multiplier: 2.0, period: 14 });
 ```
 
 ### Result Types
@@ -294,27 +318,34 @@ pub struct Trade {
 ### Order Book Structure
 
 ```
-BIDS (sorted high→low)          ASKS (sorted low→high)
+BIDS (sorted high->low)          ASKS (sorted low->high)
 
-$100.00: [O1]→[O2]→[O3]         $100.50: [O7]→[O8]
-$99.50:  [O4]→[O5]              $101.00: [O9]
-$99.00:  [O6]                   $102.00: [O10]→[O11]
+$100.00: [O1]->[O2]->[O3]         $100.50: [O7]->[O8]
+$99.50:  [O4]->[O5]              $101.00: [O9]
+$99.00:  [O6]                   $102.00: [O10]->[O11]
 
-        ↑ Best Bid              ↑ Best Ask
+        ^ Best Bid              ^ Best Ask
 ```
 
 - **BTreeMap<Price, Level>** for sorted price levels
-- **VecDeque<Order>** for FIFO queue at each level
-- **HashMap<OrderId, OrderRef>** for O(1) lookup/cancel
+- **VecDeque<Order>** for FIFO queue at each level (tombstones for O(1) cancel)
+- **FxHashMap<OrderId, Order>** for O(1) lookup
 - **Cached best_price** for O(1) BBO access
 
 ### Matching Algorithm
 
 1. Incoming order checks opposite side of book
-2. If prices cross (buy ≥ best ask, or sell ≤ best bid), match
+2. If prices cross (buy >= best ask, or sell <= best bid), match
 3. Fill at resting order's price (price improvement for aggressor)
 4. Continue until no more crosses or order fully filled
 5. Remaining quantity: rests (GTC), cancels (IOC/Market), or entire order cancels (FOK)
+
+### Cancellation (v0.6)
+
+Orders are cancelled by marking them as tombstones in the VecDeque rather than removing them.
+This avoids an O(N) scan and shift, reducing deep-level cancel latency from ~60 us to ~170 ns.
+Tombstones are automatically skipped during matching. Call `exchange.compact()` to reclaim memory
+after heavy cancellation workloads.
 
 ### Time-in-Force Behavior
 
@@ -341,13 +372,11 @@ Measured on AMD Ryzen / Intel Core (single-threaded):
 |-----------|------|------------|------------|
 | Submit (no match) | **120 ns** | 8.3M ops/sec | O(log P) |
 | Submit (with match) | ~200 ns | 5M ops/sec | O(log P + M) |
-| BBO query | **1 ns** | 1B ops/sec | O(1) |
-| Cancel | 660 ns† | 1.5M ops/sec | O(N) |
+| BBO query | **~1 ns** | 1B ops/sec | O(1) |
+| Cancel | **170 ns** | 5.9M ops/sec | **O(1)** |
 | L2 snapshot (10 levels) | ~500 ns | 2M ops/sec | O(D) |
 
-Where P = price levels, M = orders matched, N = orders at price level, D = depth.
-
-†Cancel is O(N) in orders at that price level. See "Future Optimizations" below.
+Where P = price levels, M = orders matched, D = depth.
 
 ```bash
 cargo bench
@@ -355,9 +384,10 @@ cargo bench
 
 ### Optimizations Applied
 
-1. **FxHash** — Non-cryptographic hash for OrderId lookups (+25% vs std HashMap)
-2. **Cached BBO** — Best bid/ask cached for O(1) access
-3. **Optional event logging** — Disable for max throughput:
+1. **O(1) cancel** — Tombstone-based cancellation, 350x faster than linear scan
+2. **FxHash** — Non-cryptographic hash for OrderId lookups (+25% vs std HashMap)
+3. **Cached BBO** — Best bid/ask cached for O(1) access
+4. **Optional event logging** — Disable for max throughput:
 
 ```bash
 # With event logging (default) - enables replay
@@ -371,26 +401,12 @@ cargo build --release --no-default-features
 
 ```
 submit_limit() ~120 ns breakdown:
-├── FxHashMap insert     ~30 ns   order storage
-├── BTreeMap insert      ~30 ns   price level (O(log P))
-├── VecDeque push        ~5 ns    FIFO queue
-├── Event recording      ~10 ns   (optional, for replay)
-└── Overhead             ~45 ns   struct creation, etc.
++-- FxHashMap insert     ~30 ns   order storage
++-- BTreeMap insert      ~30 ns   price level (O(log P))
++-- VecDeque push        ~5 ns    FIFO queue
++-- Event recording      ~10 ns   (optional, for replay)
++-- Overhead             ~45 ns   struct creation, etc.
 ```
-
-### Future Optimizations
-
-| Optimization | Potential Gain | Complexity | Tradeoff |
-|--------------|----------------|------------|----------|
-| **O(1) cancel** | 10x for deep levels | High | Intrusive linked list or tombstones |
-| **Array-indexed levels** | -30 ns | Medium | Requires bounded price range |
-| **Slab allocator** | -10 ns | Medium | More complex memory management |
-
-**O(1) Cancel**: Currently cancel scans the VecDeque to find the order. For true O(1):
-- Tombstone approach: mark cancelled, skip during matching
-- Intrusive doubly-linked list with HashMap<OrderId, NodePtr>
-
-These add complexity. Current O(N) cancel is fine unless you have thousands of orders at a single price level (rare in practice).
 
 ### Rust vs Numba
 
@@ -434,23 +450,29 @@ assert_eq!(comp_order.filled_quantity, 500);
 assert_eq!(my_order.filled_quantity, 0);
 ```
 
-### IOC for Aggressive Execution
+### ITCH Replay
 
 ```rust
-// Take liquidity without resting an order
-let result = exchange.submit_limit(Side::Buy, Price(100_50), 1000, TimeInForce::IOC);
-// Fills what's available at ≤$100.50, remainder cancelled
-println!("Filled: {}, Cancelled: {}",
-    result.trades.iter().map(|t| t.quantity).sum::<u64>(),
-    exchange.get_order(result.order_id).map(|o| o.remaining_quantity).unwrap_or(0)
-);
+use nanobook::itch::ItchParser;
+
+let file = std::fs::File::open("data/sample.itch")?;
+let mut parser = ItchParser::new(std::io::BufReader::new(file));
+
+while let Some(msg) = parser.next_message()? {
+    match msg {
+        ItchMessage::AddOrder { stock, side, shares, price, .. } => {
+            println!("{stock}: {side:?} {shares} @ {price}");
+        }
+        _ => {}
+    }
+}
 ```
 
 ## Comparison with Other Rust LOBs
 
 | Library | Throughput | Threading | Order Types | Deterministic | Use Case |
 |---------|------------|-----------|-------------|---------------|----------|
-| **nanobook** (this) | **8M ops/sec** | Single | Limit, Market, GTC/IOC/FOK | **Yes** | Backtesting, education |
+| **nanobook** (this) | **8M ops/sec** | Single | Limit, Market, GTC/IOC/FOK, Stops | **Yes** | Backtesting, education |
 | [limitbook](https://lib.rs/crates/limitbook) | 3-5M ops/sec | Single | Limit, Market | No | General purpose |
 | [lobster](https://lib.rs/crates/lobster) | ~300K ops/sec | Single | Limit, Market | No | Simple matching |
 | [OrderBook-rs](https://github.com/joaquinbejar/OrderBook-rs) | 200K ops/sec | **Multi** | Many (iceberg, peg, etc.) | No | Production HFT |
@@ -468,15 +490,16 @@ println!("Filled: {}, Cancelled: {}",
 | `event-log` | Yes | Event recording for deterministic replay |
 | `serde` | No | Serialize/deserialize all public types |
 | `persistence` | No | File-based event sourcing (JSON Lines) |
-| `portfolio` | No | Portfolio engine, position tracking, metrics |
+| `portfolio` | No | Portfolio engine, position tracking, metrics, strategy trait |
 | `parallel` | No | Rayon-based parallel parameter sweeps |
+| `itch` | No | NASDAQ ITCH 5.0 binary protocol parser |
 
 ## Non-Goals
 
 | Temptation | Why Not |
 |-----------|---------|
 | Spearman/IC/t-stat in Rust | Use scipy/Polars — proven, mature |
-| arrow-rs dependency | 2 → 20+ deps. PyO3 handles data exchange |
+| arrow-rs dependency | 2 -> 20+ deps. PyO3 handles data exchange |
 | Event-driven Strategy trait | Wrong pattern for factor strategies. Batch vectorized |
 | Replace VectorBT | VectorBT is fine for ad-hoc research. nanobook = production |
 | Networking/WebSocket | In-process only. Wrap externally if needed |
@@ -490,15 +513,13 @@ This is an **educational/testing tool**, not a production exchange:
 - **No compliance**: Self-trade prevention, circuit breakers
 - **No complex orders**: Iceberg, pegged orders
 
-See SPECS.md for the complete specification.
-
 ## License
 
 MIT
 
 ## Contributing
 
-Issues and PRs welcome. See SPECS.md for the technical specification.
+Issues and PRs welcome.
 
 ### Recording a Demo GIF
 
