@@ -9,8 +9,8 @@ use nanobook::{Exchange, OrderId, Price, Side, TimeInForce};
 
 /// A simple market maker that posts symmetric quotes around a fair value.
 struct MarketMaker {
-    fair_value: i64,   // in cents
-    half_spread: i64,  // half-spread in cents
+    fair_value: i64,  // in cents
+    half_spread: i64, // half-spread in cents
     quote_size: u64,
     bid_id: Option<OrderId>,
     ask_id: Option<OrderId>,
@@ -101,7 +101,10 @@ fn main() {
     if mm.check_fills(&mut exchange) {
         // Shift fair value up slightly after getting lifted
         mm.fair_value += 10;
-        println!("  Fair value adjusted to ${:.2}", mm.fair_value as f64 / 100.0);
+        println!(
+            "  Fair value adjusted to ${:.2}",
+            mm.fair_value as f64 / 100.0
+        );
         mm.requote(&mut exchange);
     }
 
@@ -111,7 +114,10 @@ fn main() {
     if mm.check_fills(&mut exchange) {
         // Shift fair value down after getting hit
         mm.fair_value -= 15;
-        println!("  Fair value adjusted to ${:.2}", mm.fair_value as f64 / 100.0);
+        println!(
+            "  Fair value adjusted to ${:.2}",
+            mm.fair_value as f64 / 100.0
+        );
         mm.requote(&mut exchange);
     }
 
@@ -120,7 +126,10 @@ fn main() {
     exchange.submit_market(Side::Buy, 200);
     if mm.check_fills(&mut exchange) {
         mm.fair_value += 25;
-        println!("  Fair value adjusted to ${:.2}", mm.fair_value as f64 / 100.0);
+        println!(
+            "  Fair value adjusted to ${:.2}",
+            mm.fair_value as f64 / 100.0
+        );
         mm.requote(&mut exchange);
     }
 
@@ -138,8 +147,8 @@ fn main() {
         // MM is always the passive side
         let mm_side = trade.passive_side();
         let sign = match mm_side {
-            Side::Buy => -1,  // bought = spent money
-            Side::Sell => 1,  // sold = received money
+            Side::Buy => -1, // bought = spent money
+            Side::Sell => 1, // sold = received money
         };
         pnl += sign * trade.price.0 * trade.quantity as i64;
     }

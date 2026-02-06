@@ -104,11 +104,7 @@ pub fn compute_metrics(returns: &[f64], periods_per_year: f64, risk_free: f64) -
             .iter()
             .map(|&r| {
                 let excess = r - risk_free;
-                if excess < 0.0 {
-                    excess.powi(2)
-                } else {
-                    0.0
-                }
+                if excess < 0.0 { excess.powi(2) } else { 0.0 }
             })
             .sum::<f64>()
             / (n - 1) as f64

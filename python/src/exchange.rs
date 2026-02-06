@@ -254,7 +254,12 @@ impl PyExchange {
 
     /// Get all trades.
     fn trades(&self) -> Vec<PyTrade> {
-        self.inner.trades().iter().cloned().map(PyTrade::from).collect()
+        self.inner
+            .trades()
+            .iter()
+            .cloned()
+            .map(PyTrade::from)
+            .collect()
     }
 
     /// Get recorded events.

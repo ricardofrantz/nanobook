@@ -7,11 +7,13 @@
 #[cfg(feature = "event-log")]
 use crate::event::Event;
 use crate::{
+    Order, OrderBook, OrderId, OrderStatus, Price, Quantity, Side, TimeInForce, Trade,
     error::ValidationError,
-    result::{CancelError, CancelResult, ModifyError, ModifyResult, StopSubmitResult, SubmitResult},
+    result::{
+        CancelError, CancelResult, ModifyError, ModifyResult, StopSubmitResult, SubmitResult,
+    },
     snapshot::BookSnapshot,
     stop::{StopBook, StopOrder, StopStatus, TrailMethod},
-    Order, OrderBook, OrderId, OrderStatus, Price, Quantity, Side, TimeInForce, Trade,
 };
 
 /// The exchange: processes orders and maintains the order book.
@@ -439,7 +441,14 @@ impl Exchange {
         tif: TimeInForce,
         trail_method: TrailMethod,
     ) -> StopSubmitResult {
-        self.insert_stop_order(side, stop_price, limit_price, quantity, tif, Some(trail_method))
+        self.insert_stop_order(
+            side,
+            stop_price,
+            limit_price,
+            quantity,
+            tif,
+            Some(trail_method),
+        )
     }
 
     /// Internal: submit stop order without recording event.
@@ -540,15 +549,23 @@ impl Exchange {
 
             for stop in triggered {
                 let result = match stop.limit_price {
-                    Some(limit) => {
-                        self.submit_limit_internal(stop.side, limit, stop.quantity, stop.time_in_force)
-                    }
+                    Some(limit) => self.submit_limit_internal(
+                        stop.side,
+                        limit,
+                        stop.quantity,
+                        stop.time_in_force,
+                    ),
                     None => {
                         let price = match stop.side {
                             Side::Buy => Price::MAX,
                             Side::Sell => Price::MIN,
                         };
-                        self.submit_limit_internal(stop.side, price, stop.quantity, TimeInForce::IOC)
+                        self.submit_limit_internal(
+                            stop.side,
+                            price,
+                            stop.quantity,
+                            TimeInForce::IOC,
+                        )
                     }
                 };
 

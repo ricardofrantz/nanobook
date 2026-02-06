@@ -14,12 +14,7 @@ fn main() {
 
     // Build a multi-level ask book
     println!("Building ask book:");
-    let levels = [
-        (100_00, 50),
-        (100_50, 75),
-        (101_00, 100),
-        (102_00, 200),
-    ];
+    let levels = [(100_00, 50), (100_50, 75), (101_00, 100), (102_00, 200)];
     for (price, qty) in &levels {
         exchange.submit_limit(Side::Sell, Price(*price), *qty, TimeInForce::GTC);
         println!("  ASK {} @ ${:.2}", qty, *price as f64 / 100.0);
@@ -60,7 +55,10 @@ fn main() {
     println!("  Status:    {:?}", result.status);
     println!("  Filled:    {}", result.filled_quantity);
     println!("  Cancelled: {}", result.cancelled_quantity);
-    println!("  Trades:    {} (FOK rejected — ask book untouched)", result.trades.len());
+    println!(
+        "  Trades:    {} (FOK rejected — ask book untouched)",
+        result.trades.len()
+    );
 
     // Final state
     println!("\n=== Final Book State ===");

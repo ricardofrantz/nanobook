@@ -3,8 +3,8 @@
 #![cfg(feature = "portfolio")]
 #![allow(clippy::inconsistent_digit_grouping)]
 
-use nanobook::portfolio::{compute_metrics, CostModel, Portfolio, Position};
 use nanobook::Symbol;
+use nanobook::portfolio::{CostModel, Portfolio, Position, compute_metrics};
 
 fn aapl() -> Symbol {
     Symbol::new("AAPL")
@@ -93,7 +93,7 @@ fn position_pnl_round_trip() {
 fn position_pnl_partial_close() {
     let mut pos = Position::new(aapl());
 
-    pos.apply_fill(200, 50_00);  // buy 200 @ $50
+    pos.apply_fill(200, 50_00); // buy 200 @ $50
     pos.apply_fill(-100, 60_00); // sell 100 @ $60
     pos.apply_fill(-100, 55_00); // sell 100 @ $55
 
@@ -109,7 +109,7 @@ fn position_short_pnl() {
     let mut pos = Position::new(aapl());
 
     pos.apply_fill(-100, 60_00); // short 100 @ $60
-    pos.apply_fill(100, 50_00);  // cover @ $50 → $10/share profit
+    pos.apply_fill(100, 50_00); // cover @ $50 → $10/share profit
 
     assert!(pos.is_flat());
     assert_eq!(pos.realized_pnl, 100 * 10_00);
@@ -119,7 +119,7 @@ fn position_short_pnl() {
 fn position_flip_tracks_pnl() {
     let mut pos = Position::new(aapl());
 
-    pos.apply_fill(100, 50_00);  // long 100 @ $50
+    pos.apply_fill(100, 50_00); // long 100 @ $50
     pos.apply_fill(-200, 60_00); // sell 200: close 100 (profit), open short 100
 
     assert_eq!(pos.quantity, -100);
@@ -131,7 +131,9 @@ fn position_flip_tracks_pnl() {
 
 #[test]
 fn metrics_all_positive_returns() {
-    let returns = vec![0.01, 0.02, 0.015, 0.005, 0.01, 0.02, 0.01, 0.005, 0.01, 0.02];
+    let returns = vec![
+        0.01, 0.02, 0.015, 0.005, 0.01, 0.02, 0.01, 0.005, 0.01, 0.02,
+    ];
     let m = compute_metrics(&returns, 252.0, 0.0).unwrap();
 
     assert!(m.total_return > 0.0);

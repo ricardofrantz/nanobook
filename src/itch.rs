@@ -96,14 +96,14 @@ impl<R: Read> ItchParser<R> {
         // Minimum payload sizes per ITCH 5.0 spec (bytes after message type)
         let min_payload = match msg_type {
             'A' | 'F' => 35, // ..payload[31..35]
-            'E'        => 30, // ..payload[22..30]
-            'C'        => 35, // ..payload[31..35]
-            'X'        => 22, // ..payload[18..22]
-            'D'        => 18, // ..payload[10..18]
-            'U'        => 34, // ..payload[30..34]
-            'P'        => 43, // ..payload[35..43]
-            'R'        => 10, // ..payload[2..10]
-            _          =>  0,
+            'E' => 30,       // ..payload[22..30]
+            'C' => 35,       // ..payload[31..35]
+            'X' => 22,       // ..payload[18..22]
+            'D' => 18,       // ..payload[10..18]
+            'U' => 34,       // ..payload[30..34]
+            'P' => 43,       // ..payload[35..43]
+            'R' => 10,       // ..payload[2..10]
+            _ => 0,
         };
         if payload.len() < min_payload {
             return Err(std::io::Error::new(
@@ -121,12 +121,21 @@ impl<R: Read> ItchParser<R> {
             'A' | 'F' => {
                 let timestamp = read_u48_be(&payload[4..10]);
                 let order_ref = u64::from_be_bytes(payload[10..18].try_into().unwrap());
-                let side = if payload[18] == b'B' { Side::Buy } else { Side::Sell };
+                let side = if payload[18] == b'B' {
+                    Side::Buy
+                } else {
+                    Side::Sell
+                };
                 let shares = u32::from_be_bytes(payload[19..23].try_into().unwrap());
                 let stock = String::from_utf8_lossy(&payload[23..31]).trim().to_string();
                 let price = u32::from_be_bytes(payload[31..35].try_into().unwrap());
                 Ok(Some(ItchMessage::AddOrder {
-                    timestamp, order_ref, side, shares, stock, price
+                    timestamp,
+                    order_ref,
+                    side,
+                    shares,
+                    stock,
+                    price,
                 }))
             }
             'E' => {
@@ -135,7 +144,10 @@ impl<R: Read> ItchParser<R> {
                 let shares = u32::from_be_bytes(payload[18..22].try_into().unwrap());
                 let match_number = u64::from_be_bytes(payload[22..30].try_into().unwrap());
                 Ok(Some(ItchMessage::OrderExecuted {
-                    timestamp, order_ref, shares, match_number
+                    timestamp,
+                    order_ref,
+                    shares,
+                    match_number,
                 }))
             }
             'C' => {
@@ -146,7 +158,12 @@ impl<R: Read> ItchParser<R> {
                 let printable = payload[30] == b'Y';
                 let price = u32::from_be_bytes(payload[31..35].try_into().unwrap());
                 Ok(Some(ItchMessage::OrderExecutedWithPrice {
-                    timestamp, order_ref, shares, match_number, printable, price
+                    timestamp,
+                    order_ref,
+                    shares,
+                    match_number,
+                    printable,
+                    price,
                 }))
             }
             'X' => {
@@ -154,14 +171,17 @@ impl<R: Read> ItchParser<R> {
                 let order_ref = u64::from_be_bytes(payload[10..18].try_into().unwrap());
                 let shares = u32::from_be_bytes(payload[18..22].try_into().unwrap());
                 Ok(Some(ItchMessage::OrderCancel {
-                    timestamp, order_ref, shares
+                    timestamp,
+                    order_ref,
+                    shares,
                 }))
             }
             'D' => {
                 let timestamp = read_u48_be(&payload[4..10]);
                 let order_ref = u64::from_be_bytes(payload[10..18].try_into().unwrap());
                 Ok(Some(ItchMessage::OrderDelete {
-                    timestamp, order_ref
+                    timestamp,
+                    order_ref,
                 }))
             }
             'U' => {
@@ -171,7 +191,11 @@ impl<R: Read> ItchParser<R> {
                 let shares = u32::from_be_bytes(payload[26..30].try_into().unwrap());
                 let price = u32::from_be_bytes(payload[30..34].try_into().unwrap());
                 Ok(Some(ItchMessage::OrderReplace {
-                    timestamp, old_order_ref, new_order_ref, shares, price
+                    timestamp,
+                    old_order_ref,
+                    new_order_ref,
+                    shares,
+                    price,
                 }))
             }
             'P' => {
@@ -185,7 +209,12 @@ impl<R: Read> ItchParser<R> {
                 let price = u32::from_be_bytes(payload[31..35].try_into().unwrap());
                 let match_number = u64::from_be_bytes(payload[35..43].try_into().unwrap());
                 Ok(Some(ItchMessage::Trade {
-                    timestamp, side, shares, stock, price, match_number
+                    timestamp,
+                    side,
+                    shares,
+                    stock,
+                    price,
+                    match_number,
                 }))
             }
             'R' => {
@@ -206,36 +235,56 @@ fn read_u48_be(buf: &[u8]) -> u64 {
 }
 
 /// Convert ITCH messages to nanobook Events.
-/// 
+///
 /// Note: This only includes messages that modify the book.
 pub fn itch_to_event(msg: ItchMessage) -> Option<(String, Event)> {
     match msg {
-        ItchMessage::AddOrder { side, shares, stock, price, .. } => {
+        ItchMessage::AddOrder {
+            side,
+            shares,
+            stock,
+            price,
+            ..
+        } => {
             // ITCH price is scaled by 10,000. Nanobook Price is cents (scaled by 100).
             // NB_Price = ITCH_Price / 100
             let nb_price = (price / 100) as i64;
-            Some((stock, Event::SubmitLimit {
-                side,
-                price: Price(nb_price),
-                quantity: shares as u64,
-                time_in_force: TimeInForce::GTC,
-            }))
+            Some((
+                stock,
+                Event::SubmitLimit {
+                    side,
+                    price: Price(nb_price),
+                    quantity: shares as u64,
+                    time_in_force: TimeInForce::GTC,
+                },
+            ))
         }
         ItchMessage::OrderCancel { order_ref, .. } | ItchMessage::OrderDelete { order_ref, .. } => {
             // Note: We need a mapping from ITCH order_ref to nanobook OrderId.
             // For now, we'll assume they match or let the caller handle mapping.
             // ITCH order_refs are global and unique.
-            Some(("".to_string(), Event::Cancel {
-                order_id: OrderId(order_ref),
-            }))
+            Some((
+                "".to_string(),
+                Event::Cancel {
+                    order_id: OrderId(order_ref),
+                },
+            ))
         }
-        ItchMessage::OrderReplace { old_order_ref, shares, price, .. } => {
+        ItchMessage::OrderReplace {
+            old_order_ref,
+            shares,
+            price,
+            ..
+        } => {
             let nb_price = (price / 100) as i64;
-            Some(("".to_string(), Event::Modify {
-                order_id: OrderId(old_order_ref),
-                new_price: Price(nb_price),
-                new_quantity: shares as u64,
-            }))
+            Some((
+                "".to_string(),
+                Event::Modify {
+                    order_id: OrderId(old_order_ref),
+                    new_price: Price(nb_price),
+                    new_quantity: shares as u64,
+                },
+            ))
         }
         _ => None,
     }

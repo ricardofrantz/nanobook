@@ -7,8 +7,8 @@
 
 #[cfg(feature = "portfolio")]
 fn main() {
-    use nanobook::portfolio::{compute_metrics, CostModel, Portfolio};
     use nanobook::Symbol;
+    use nanobook::portfolio::{CostModel, Portfolio, compute_metrics};
 
     let aapl = Symbol::new("AAPL");
     let msft = Symbol::new("MSFT");
@@ -70,7 +70,10 @@ fn main() {
 
     println!("Final equity:    ${:.2}", snap.equity as f64 / 100.0);
     println!("Cash:            ${:.2}", snap.cash as f64 / 100.0);
-    println!("Realized PnL:    ${:.2}", snap.total_realized_pnl as f64 / 100.0);
+    println!(
+        "Realized PnL:    ${:.2}",
+        snap.total_realized_pnl as f64 / 100.0
+    );
 
     println!("\nWeights:");
     for (sym, w) in &snap.weights {

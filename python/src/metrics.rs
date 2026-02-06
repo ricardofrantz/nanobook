@@ -1,4 +1,4 @@
-use nanobook::portfolio::{compute_metrics, Metrics};
+use nanobook::portfolio::{Metrics, compute_metrics};
 use pyo3::prelude::*;
 
 /// Performance metrics for a return series.
