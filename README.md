@@ -11,7 +11,7 @@
 
 A **simulated stock exchange** that processes orders exactly like a real exchange — with proper price-time priority, partial fills, and cancellations.
 
-nanobook combines four layers: a **LOB matching engine** for deterministic order matching, a **portfolio simulator** for position tracking and strategy backtesting, **Python bindings** for seamless integration with data science workflows, and a **NASDAQ ITCH 5.0 parser** for replaying real market data. Each layer works independently or together.
+nanobook combines five layers: a **LOB matching engine** for deterministic order matching, a **portfolio simulator** for position tracking and strategy backtesting, a **rebalancer** that executes portfolio changes through Interactive Brokers, **Python bindings** for seamless integration with data science workflows, and a **NASDAQ ITCH 5.0 parser** for replaying real market data. Each layer works independently or together.
 
 ### Who Should Use This?
 
@@ -19,6 +19,7 @@ nanobook combines four layers: a **LOB matching engine** for deterministic order
 |----------------|-----------------|
 | **Quant developer** | Backtesting trading strategies with realistic market microstructure |
 | **Algo trader** | Testing order execution logic (slippage, queue position, fill rates) |
+| **Portfolio manager** | Automated IBKR rebalancing with risk checks and audit trail |
 | **Student** | Learning how exchanges actually work under the hood |
 | **Rust developer** | Reference implementation of a financial data structure |
 
@@ -31,6 +32,7 @@ nanobook combines four layers: a **LOB matching engine** for deterministic order
 - **Multi-symbol** — `MultiExchange` for independent per-symbol order books
 - **Portfolio engine** — Position tracking, cost modeling, rebalancing, financial metrics (Sharpe, Sortino, max drawdown)
 - **ITCH 5.0 parser** — Replay real NASDAQ market data through the matching engine
+- **IBKR rebalancer** — CLI tool to execute portfolio changes via Interactive Brokers with risk checks, rate limiting, and JSONL audit trail
 - **Python bindings** — PyO3 wrappers for Exchange, Portfolio, sweep (`pip install nanobook`)
 - **Simple** — Single-threaded, in-process, minimal dependencies (3 core deps)
 
@@ -45,8 +47,8 @@ nanobook combines four layers: a **LOB matching engine** for deterministic order
 | Nautilus Trader | Enterprise complexity |
 
 nanobook's niche: lightweight, factor-strategy-optimized portfolio simulator
-with an optional LOB execution layer. Lean (3 deps), fast (8M+ orders/sec),
-Python-friendly.
+with an optional LOB execution layer and IBKR rebalancer. Lean (3 deps),
+fast (8M+ orders/sec), Python-friendly.
 
 ## Architecture
 
@@ -65,6 +67,10 @@ Python-friendly.
 │                │   O(1) Cancel        │                      │
 ├────────────────┴──────────────────────┴──────────────────────┤
 │   Shared: Symbol, MultiExchange, BookSnapshot, Analytics     │
+├──────────────────────────────────────────────────────────────┤
+│                   Rebalancer (CLI)                            │
+│     target.json → IBKR live positions/prices → diff →        │
+│     risk checks → limit orders → audit trail (JSONL)         │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -73,8 +79,9 @@ See [DOC.md](DOC.md) for the full API reference.
 ## See It In Action
 
 ```bash
-cargo run --example demo        # Interactive walkthrough with explanations
-cargo run --example demo_quick  # Quick non-interactive demo
+cargo run --example demo                                            # Interactive walkthrough with explanations
+cargo run --example demo_quick                                      # Quick non-interactive demo
+cargo run --features portfolio,persistence --example trading_day    # Full trading day simulation
 ```
 
 ```
@@ -113,6 +120,7 @@ The interactive demo explains price-time priority, partial fills, IOC/FOK, and o
 - **Multi-symbol**: Independent order books per symbol via `MultiExchange`
 - **Parallel sweeps**: Rayon-based parameter grid search (optional feature)
 - **ITCH 5.0 parser**: Streaming binary parser for NASDAQ market data
+- **IBKR rebalancer**: CLI tool for automated portfolio rebalancing via Interactive Brokers (risk checks, rate limiting, JSONL audit)
 - **Python bindings**: Exchange, Portfolio, sweep via PyO3 with GIL release for parallel sections
 
 ## Quick Example
@@ -169,6 +177,9 @@ cargo build --release
 cargo test
 cargo bench
 
+# Rebalancer CLI
+cargo build -p nanobook-rebalancer --release
+
 # Python bindings
 cd python && maturin develop --release
 ```
@@ -217,6 +228,63 @@ result = nanobook.run_backtest(
 # Parse NASDAQ ITCH 5.0 binary data
 events = nanobook.parse_itch("data/sample.itch")
 ```
+
+## Rebalancer
+
+The `rebalancer/` crate is a CLI tool that bridges nanobook's portfolio math to [Interactive Brokers](https://www.interactivebrokers.com/) for real (or paper) order execution.
+
+```bash
+# Build
+cargo build -p nanobook-rebalancer --release
+
+# Check IBKR connection
+rebalancer status
+
+# Show current positions
+rebalancer positions
+
+# Compute diff, show plan, confirm, execute
+rebalancer run target.json
+
+# Dry run (plan only, no orders)
+rebalancer run target.json --dry-run
+
+# Skip confirmation (for cron/automation)
+rebalancer run target.json --force
+
+# Compare actual positions vs target
+rebalancer reconcile target.json
+```
+
+### How It Works
+
+1. Reads target weights from a `target.json` (output of your optimizer/bot)
+2. Connects to IBKR Gateway for live positions, prices, and account data
+3. Computes the CURRENT → TARGET diff (share quantities, limit prices)
+4. Runs pre-trade risk checks (position limits, leverage, short exposure)
+5. Shows the plan and asks for Y/N confirmation
+6. Executes limit orders with rate limiting and timeout-based cancellation
+7. Reconciles actual vs target and logs everything to a JSONL audit trail
+
+### target.json
+
+```json
+{
+  "timestamp": "2026-02-08T15:30:00Z",
+  "targets": [
+    { "symbol": "AAPL", "weight": 0.40 },
+    { "symbol": "MSFT", "weight": 0.30 },
+    { "symbol": "SPY",  "weight": -0.10 },
+    { "symbol": "QQQ",  "weight": 0.20 }
+  ],
+  "constraints": {
+    "max_position_pct": 0.40,
+    "max_leverage": 1.5
+  }
+}
+```
+
+Positive weights are long, negative are short. Symbols absent from the target but present in the account get closed. See `rebalancer/config.toml.example` for the full configuration reference.
 
 ## API Overview
 
