@@ -79,9 +79,8 @@ See [DOC.md](DOC.md) for the full API reference.
 ## See It In Action
 
 ```bash
-cargo run --example demo                                            # Interactive walkthrough with explanations
-cargo run --example demo_quick                                      # Quick non-interactive demo
-cargo run --features portfolio,persistence --example trading_day    # Full trading day simulation
+cargo run --example demo        # Interactive walkthrough with explanations
+cargo run --example demo_quick  # Quick non-interactive demo
 ```
 
 ```
