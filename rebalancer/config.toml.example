@@ -1,0 +1,32 @@
+[connection]
+host = "127.0.0.1"
+port = 4002              # 4002=Gateway paper, 4001=Gateway live
+client_id = 100
+timeout_secs = 30
+
+[account]
+id = "DU123456"          # Paper: DUxxxxxx, Live: Uxxxxxxx
+type = "margin"          # "cash" or "margin"
+
+[execution]
+order_interval_ms = 100  # Min delay between orders (rate limiting)
+limit_offset_bps = 5     # Buy at ask+5bps, sell at bid-5bps
+order_timeout_secs = 300  # Cancel unfilled orders after 5 min
+max_orders_per_run = 50
+
+[risk]
+max_position_pct = 0.25   # Max 25% in any single name
+max_leverage = 1.5         # Max gross exposure / equity
+min_trade_usd = 100.0      # Skip tiny trades
+max_trade_usd = 100000.0   # Block huge trades (require --force)
+allow_short = true
+max_short_pct = 0.30       # Max 30% total short exposure
+
+[cost]
+commission_per_share = 0.0035  # IBKR Tiered
+commission_min = 0.35
+slippage_bps = 5
+
+[logging]
+dir = "./logs"
+audit_file = "audit.jsonl"
