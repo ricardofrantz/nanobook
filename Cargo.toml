@@ -54,7 +54,3 @@ required-features = ["portfolio"]
 [[bench]]
 name = "stops"
 harness = false
-
-[[example]]
-name = "trading_day"
-required-features = ["portfolio", "persistence"]
