@@ -5,6 +5,9 @@ edition = "2024"
 rust-version = "1.85"
 description = "Portfolio rebalancer bridging nanobook to Interactive Brokers"
 license = "MIT"
+repository = "https://github.com/ricardofrantz/nanobook"
+homepage = "https://github.com/ricardofrantz/nanobook"
+documentation = "https://docs.rs/nanobook-rebalancer"
 
 [[bin]]
 name = "rebalancer"
@@ -15,8 +18,8 @@ name = "nanobook_rebalancer"
 path = "src/lib.rs"
 
 [dependencies]
-nanobook = { path = "..", features = ["portfolio", "serde"] }
-nanobook-broker = { path = "../broker", features = ["ibkr"] }
+nanobook = { version = "0.8.0", path = "..", features = ["portfolio", "serde"] }
+nanobook-broker = { version = "0.2.0", path = "../broker", features = ["ibkr"] }
 thiserror = "2.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
