@@ -336,6 +336,41 @@ fn norm_ppf(p: f64) -> f64 {
     }
 }
 
+/// Apply a function over a rolling window using O(N) running sum/sum-of-squares.
+///
+/// `compute(sum, sum_sq, k)` receives the window's running sum, sum of squares,
+/// and window size as f64. It returns the value for that window position.
+/// Positions before the first full window are filled with NaN.
+fn rolling_window(
+    values: &[f64],
+    window: usize,
+    compute: impl Fn(f64, f64, f64) -> f64,
+) -> Vec<f64> {
+    let n = values.len();
+    let mut out = vec![f64::NAN; n];
+    if n < window || window < 2 {
+        return out;
+    }
+
+    let k = window as f64;
+
+    // Seed first window
+    let mut sum: f64 = values[..window].iter().sum();
+    let mut sum_sq: f64 = values[..window].iter().map(|v| v * v).sum();
+    out[window - 1] = compute(sum, sum_sq, k);
+
+    // Slide window
+    for i in window..n {
+        let old = values[i - window];
+        let new = values[i];
+        sum += new - old;
+        sum_sq += new * new - old * old;
+        out[i] = compute(sum, sum_sq, k);
+    }
+
+    out
+}
+
 /// Rolling Sharpe ratio over a sliding window.
 ///
 /// Returns NaN for positions where the window is incomplete.
@@ -346,46 +381,16 @@ fn norm_ppf(p: f64) -> f64 {
 /// * `window` — Window size (e.g., 63 for quarterly).
 /// * `periods_per_year` — Annualization factor (e.g., 252).
 pub fn rolling_sharpe(returns: &[f64], window: usize, periods_per_year: usize) -> Vec<f64> {
-    let n = returns.len();
-    let mut out = vec![f64::NAN; n];
-    if n < window || window < 2 {
-        return out;
-    }
-
-    let ppy = periods_per_year as f64;
-    let k = window as f64;
-
-    // Seed first window
-    let mut sum: f64 = returns[..window].iter().sum();
-    let mut sum_sq: f64 = returns[..window].iter().map(|r| r * r).sum();
-
-    let mean = sum / k;
-    let var = (sum_sq - sum * sum / k) / (k - 1.0);
-    let std = var.max(0.0).sqrt();
-    out[window - 1] = if std > 0.0 {
-        mean * ppy.sqrt() / std
-    } else {
-        0.0
-    };
-
-    // Slide window
-    for i in window..n {
-        let old = returns[i - window];
-        let new = returns[i];
-        sum += new - old;
-        sum_sq += new * new - old * old;
-
+    let ppy_sqrt = (periods_per_year as f64).sqrt();
+    rolling_window(returns, window, |sum, sum_sq, k| {
         let mean = sum / k;
-        let var = (sum_sq - sum * sum / k) / (k - 1.0);
-        let std = var.max(0.0).sqrt();
-        out[i] = if std > 0.0 {
-            mean * ppy.sqrt() / std
+        let std = ((sum_sq - sum * sum / k) / (k - 1.0)).max(0.0).sqrt();
+        if std > 0.0 {
+            mean * ppy_sqrt / std
         } else {
             0.0
-        };
-    }
-
-    out
+        }
+    })
 }
 
 /// Rolling annualized volatility over a sliding window.
@@ -398,34 +403,10 @@ pub fn rolling_sharpe(returns: &[f64], window: usize, periods_per_year: usize) -
 /// * `window` — Window size (e.g., 63 for quarterly).
 /// * `periods_per_year` — Annualization factor (e.g., 252).
 pub fn rolling_volatility(returns: &[f64], window: usize, periods_per_year: usize) -> Vec<f64> {
-    let n = returns.len();
-    let mut out = vec![f64::NAN; n];
-    if n < window || window < 2 {
-        return out;
-    }
-
-    let ppy = periods_per_year as f64;
-    let k = window as f64;
-
-    // Seed first window
-    let mut sum: f64 = returns[..window].iter().sum();
-    let mut sum_sq: f64 = returns[..window].iter().map(|r| r * r).sum();
-
-    let var = (sum_sq - sum * sum / k) / (k - 1.0);
-    out[window - 1] = var.max(0.0).sqrt() * ppy.sqrt();
-
-    // Slide window
-    for i in window..n {
-        let old = returns[i - window];
-        let new = returns[i];
-        sum += new - old;
-        sum_sq += new * new - old * old;
-
-        let var = (sum_sq - sum * sum / k) / (k - 1.0);
-        out[i] = var.max(0.0).sqrt() * ppy.sqrt();
-    }
-
-    out
+    let ppy_sqrt = (periods_per_year as f64).sqrt();
+    rolling_window(returns, window, |sum, sum_sq, k| {
+        ((sum_sq - sum * sum / k) / (k - 1.0)).max(0.0).sqrt() * ppy_sqrt
+    })
 }
 
 #[cfg(test)]

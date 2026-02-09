@@ -7,6 +7,24 @@ use rustc_hash::FxHashMap;
 use crate::config::RiskConfig;
 use crate::report::{RiskCheck, RiskReport, RiskStatus};
 
+/// Returns `"<="` if the check passed, `">"` if it failed or warned.
+fn cmp_symbol(status: RiskStatus) -> &'static str {
+    if status == RiskStatus::Pass {
+        "<="
+    } else {
+        ">"
+    }
+}
+
+/// Ratio of `numerator / equity`, or `INFINITY` when equity is non-positive.
+fn ratio_or_inf(numerator: i64, equity: i64) -> f64 {
+    if equity > 0 {
+        numerator as f64 / equity as f64
+    } else {
+        f64::INFINITY
+    }
+}
+
 /// Run all risk checks for a batch of orders.
 pub fn check_batch(
     config: &RiskConfig,
@@ -42,11 +60,7 @@ pub fn check_batch(
             "{:.1}% ({}) {} {:.1}% limit",
             worst_pos * 100.0,
             worst_sym.as_str(),
-            if pos_status == RiskStatus::Pass {
-                "<="
-            } else {
-                ">"
-            },
+            cmp_symbol(pos_status),
             max_pos * 100.0,
         ),
     });
@@ -65,18 +79,22 @@ pub fn check_batch(
         price_map.insert(sym, price);
     }
 
-    let gross_exposure: i64 = post_qty
-        .iter()
-        .map(|(sym, qty)| {
-            let price = price_map.get(sym).copied().unwrap_or(0).saturating_abs();
-            qty.saturating_abs().saturating_mul(price)
-        })
-        .fold(0_i64, |acc, v| acc.saturating_add(v));
-    let leverage = if equity > 0 {
-        gross_exposure as f64 / equity as f64
-    } else {
-        f64::INFINITY
+    // Compute exposure: sum of |qty| * |price| for each position.
+    // When `filter` is None, includes all positions (gross); when Some(f),
+    // includes only positions where qty satisfies f.
+    let exposure = |filter: Option<fn(&i64) -> bool>| -> i64 {
+        post_qty
+            .iter()
+            .filter(|(_, qty)| filter.is_none_or(|f| f(qty)))
+            .map(|(sym, qty)| {
+                let price = price_map.get(sym).copied().unwrap_or(0).saturating_abs();
+                qty.saturating_abs().saturating_mul(price)
+            })
+            .fold(0_i64, |acc, v| acc.saturating_add(v))
     };
+
+    let gross_exposure = exposure(None);
+    let leverage = ratio_or_inf(gross_exposure, equity);
     let lev_status = if leverage > config.max_leverage {
         RiskStatus::Fail
     } else {
@@ -88,29 +106,14 @@ pub fn check_batch(
         detail: format!(
             "{:.2}x {} {:.2}x limit",
             leverage,
-            if lev_status == RiskStatus::Pass {
-                "<="
-            } else {
-                ">"
-            },
+            cmp_symbol(lev_status),
             config.max_leverage,
         ),
     });
 
     // 3. Short exposure check
-    let short_exposure: i64 = post_qty
-        .iter()
-        .filter(|(_, qty)| **qty < 0)
-        .map(|(sym, qty)| {
-            let price = price_map.get(sym).copied().unwrap_or(0).saturating_abs();
-            qty.saturating_abs().saturating_mul(price)
-        })
-        .fold(0_i64, |acc, v| acc.saturating_add(v));
-    let short_pct = if equity > 0 {
-        short_exposure as f64 / equity as f64
-    } else {
-        f64::INFINITY
-    };
+    let short_exposure = exposure(Some(|qty: &i64| *qty < 0));
+    let short_pct = ratio_or_inf(short_exposure, equity);
 
     let has_shorts = orders
         .iter()
@@ -135,11 +138,7 @@ pub fn check_batch(
             detail: format!(
                 "{:.1}% {} {:.1}% limit",
                 short_pct * 100.0,
-                if short_status == RiskStatus::Pass {
-                    "<="
-                } else {
-                    ">"
-                },
+                cmp_symbol(short_status),
                 config.max_short_pct * 100.0,
             ),
         });

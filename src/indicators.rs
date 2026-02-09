@@ -97,6 +97,21 @@ fn rolling_std_pop(values: &[f64], period: usize) -> Vec<f64> {
 // Public indicators
 // ---------------------------------------------------------------------------
 
+/// Compute RSI value from average gain/loss (TA-Lib convention).
+///
+/// - Both zero (flat price) returns 0.0.
+/// - Zero loss (always up) returns 100.0.
+/// - Otherwise: 100 - 100/(1 + gain/loss).
+fn rsi_from_avgs(avg_gain: f64, avg_loss: f64) -> f64 {
+    if avg_gain == 0.0 && avg_loss == 0.0 {
+        0.0
+    } else if avg_loss == 0.0 {
+        100.0
+    } else {
+        100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+    }
+}
+
 /// Relative Strength Index (Wilder's smoothing).
 ///
 /// Matches TA-Lib `ta_RSI.c` behavior:
@@ -143,14 +158,7 @@ pub fn rsi(close: &[f64], period: usize) -> Vec<f64> {
     avg_loss /= period as f64;
 
     // First RSI value
-    out[period] = if avg_gain == 0.0 && avg_loss == 0.0 {
-        0.0 // TA-Lib convention: flat price → RSI = 0
-    } else if avg_loss == 0.0 {
-        100.0
-    } else {
-        let rs = avg_gain / avg_loss;
-        100.0 - 100.0 / (1.0 + rs)
-    };
+    out[period] = rsi_from_avgs(avg_gain, avg_loss);
 
     // Subsequent values with Wilder's smoothing
     for i in (period + 1)..n {
@@ -160,14 +168,7 @@ pub fn rsi(close: &[f64], period: usize) -> Vec<f64> {
         avg_gain = (avg_gain * (period as f64 - 1.0) + gain) / period as f64;
         avg_loss = (avg_loss * (period as f64 - 1.0) + loss) / period as f64;
 
-        out[i] = if avg_gain == 0.0 && avg_loss == 0.0 {
-            0.0
-        } else if avg_loss == 0.0 {
-            100.0
-        } else {
-            let rs = avg_gain / avg_loss;
-            100.0 - 100.0 / (1.0 + rs)
-        };
+        out[i] = rsi_from_avgs(avg_gain, avg_loss);
     }
 
     out
