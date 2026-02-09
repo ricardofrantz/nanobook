@@ -411,7 +411,9 @@ impl Portfolio {
         pos.apply_fill(qty, price);
 
         // Adjust cash: buying decreases cash, selling increases it
-        self.cash = self.cash.saturating_sub(qty.saturating_mul(price).saturating_add(cost));
+        self.cash = self
+            .cash
+            .saturating_sub(qty.saturating_mul(price).saturating_add(cost));
     }
 }
 

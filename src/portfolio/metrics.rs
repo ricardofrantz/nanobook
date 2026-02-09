@@ -30,7 +30,6 @@ pub struct Metrics {
     pub losing_periods: usize,
 
     // --- v0.8 extended metrics ---
-
     /// Conditional Value at Risk at 95% confidence (mean of worst 5% returns)
     pub cvar_95: f64,
     /// Win rate: fraction of positive-return periods
@@ -363,7 +362,11 @@ pub fn rolling_sharpe(returns: &[f64], window: usize, periods_per_year: usize) -
     let mean = sum / k;
     let var = (sum_sq - sum * sum / k) / (k - 1.0);
     let std = var.max(0.0).sqrt();
-    out[window - 1] = if std > 0.0 { mean * ppy.sqrt() / std } else { 0.0 };
+    out[window - 1] = if std > 0.0 {
+        mean * ppy.sqrt() / std
+    } else {
+        0.0
+    };
 
     // Slide window
     for i in window..n {
@@ -375,7 +378,11 @@ pub fn rolling_sharpe(returns: &[f64], window: usize, periods_per_year: usize) -
         let mean = sum / k;
         let var = (sum_sq - sum * sum / k) / (k - 1.0);
         let std = var.max(0.0).sqrt();
-        out[i] = if std > 0.0 { mean * ppy.sqrt() / std } else { 0.0 };
+        out[i] = if std > 0.0 {
+            mean * ppy.sqrt() / std
+        } else {
+            0.0
+        };
     }
 
     out
@@ -597,7 +604,9 @@ mod tests {
 
     #[test]
     fn rolling_volatility_basic() {
-        let returns = vec![0.01, -0.01, 0.01, -0.01, 0.01, -0.01, 0.01, -0.01, 0.01, -0.01];
+        let returns = vec![
+            0.01, -0.01, 0.01, -0.01, 0.01, -0.01, 0.01, -0.01, 0.01, -0.01,
+        ];
         let result = rolling_volatility(&returns, 5, 252);
         assert_eq!(result.len(), 10);
         assert!(result[3].is_nan());

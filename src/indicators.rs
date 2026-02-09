@@ -363,14 +363,17 @@ mod tests {
         let result = rsi(&close, 14);
         // Flat price: TA-Lib returns 0.0
         let last = result.last().unwrap();
-        assert!(last.abs() < 1e-10, "expected 0.0 for flat price, got {last}");
+        assert!(
+            last.abs() < 1e-10,
+            "expected 0.0 for flat price, got {last}"
+        );
     }
 
     #[test]
     fn rsi_bounds() {
         let close = vec![
-            44.0, 44.25, 44.50, 43.75, 44.50, 44.25, 43.50, 44.0, 44.50, 43.25, 43.0, 43.50,
-            44.0, 44.50, 44.25, 44.0, 43.50, 43.75, 44.0, 43.25,
+            44.0, 44.25, 44.50, 43.75, 44.50, 44.25, 43.50, 44.0, 44.50, 43.25, 43.0, 43.50, 44.0,
+            44.50, 44.25, 44.0, 43.50, 43.75, 44.0, 43.25,
         ];
         let result = rsi(&close, 14);
         for (i, &v) in result.iter().enumerate() {
@@ -443,10 +446,7 @@ mod tests {
 
         // True range is always 4.0, so ATR should converge to 4.0
         let last = result.last().unwrap();
-        assert!(
-            (*last - 4.0).abs() < 0.1,
-            "expected ATR ~4.0, got {last}"
-        );
+        assert!((*last - 4.0).abs() < 0.1, "expected ATR ~4.0, got {last}");
     }
 
     #[test]

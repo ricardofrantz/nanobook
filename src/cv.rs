@@ -116,10 +116,7 @@ mod tests {
             }
             // Test should come after training
             if let (Some(&last_train), Some(&first_test)) = (train.last(), test.first()) {
-                assert!(
-                    first_test > last_train,
-                    "test must come after training"
-                );
+                assert!(first_test > last_train, "test must come after training");
             }
         }
     }

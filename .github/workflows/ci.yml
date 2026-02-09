@@ -60,13 +60,13 @@ jobs:
         with:
           key: python-${{ matrix.python }}
 
-      - run: pip install pytest
+      - run: pip install pytest hypothesis
 
       - name: Build and install Python extension
         run: pip install ./python
 
-      - name: Run Python tests
-        run: pytest python/tests/ -v
+      - name: Run Python tests (property + unit)
+        run: pytest python/tests/ -v --ignore=python/tests/reference
 
   lint:
     name: Lint

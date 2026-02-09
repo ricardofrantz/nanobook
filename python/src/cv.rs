@@ -20,9 +20,6 @@ use pyo3::prelude::*;
 ///
 #[pyfunction]
 #[pyo3(signature = (n_samples, n_splits=5))]
-pub fn py_time_series_split(
-    n_samples: usize,
-    n_splits: usize,
-) -> Vec<(Vec<usize>, Vec<usize>)> {
+pub fn py_time_series_split(n_samples: usize, n_splits: usize) -> Vec<(Vec<usize>, Vec<usize>)> {
     cv::time_series_split(n_samples, n_splits)
 }

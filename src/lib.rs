@@ -155,9 +155,9 @@ pub mod cv;
 mod error;
 mod event;
 mod exchange;
+pub mod indicators;
 #[cfg(feature = "itch")]
 pub mod itch;
-pub mod indicators;
 mod level;
 mod matching;
 pub mod multi_exchange;

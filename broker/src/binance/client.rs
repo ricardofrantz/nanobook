@@ -14,7 +14,10 @@ use crate::error::BrokerError;
 /// Rejects any value containing characters that could inject additional
 /// query parameters (e.g., `&`, `=`, `?`, `#`, space).
 fn validate_query_param(value: &str, name: &str) -> Result<(), BrokerError> {
-    if value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'.' || b == b'-') {
+    if value
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'.' || b == b'-')
+    {
         Ok(())
     } else {
         Err(BrokerError::Order(format!(

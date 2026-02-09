@@ -1,4 +1,4 @@
-use nanobook::portfolio::metrics::{compute_metrics, rolling_sharpe, rolling_volatility, Metrics};
+use nanobook::portfolio::metrics::{Metrics, compute_metrics, rolling_sharpe, rolling_volatility};
 use pyo3::prelude::*;
 
 /// Performance metrics for a return series.
