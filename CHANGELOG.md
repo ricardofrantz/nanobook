@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-02-09
+
+### Added
+
+- **Analytics module**: Technical indicators replacing ta-lib dependency
+  - `rsi()` — Relative Strength Index (14-period default)
+  - `macd()` — Moving Average Convergence Divergence with signal line
+  - `bollinger_bands()` — Bollinger Bands (mean ± 2 std)
+  - `atr()` — Average True Range for volatility measurement
+- **Statistics module**: Statistical functions replacing scipy
+  - `spearman()` — Spearman rank correlation with p-value (custom beta implementation)
+  - `quintile_spread()` — Cross-sectional quintile spread for factor analysis
+  - `rank_data()` — Fractional ranking with tie handling
+- **Time-series cross-validation**: `time_series_split()` replacing sklearn
+  - Expanding window splits with configurable train/test sizes
+  - Python bindings for sklearn-compatible usage
+- **Extended portfolio metrics**:
+  - `cvar` — Conditional Value at Risk (parametric, 95% default)
+  - `win_rate` — Percentage of positive returns
+  - `profit_factor` — Ratio of gross profits to gross losses
+  - `payoff_ratio` — Average win divided by average loss
+  - `kelly_criterion` — Optimal Kelly fraction for position sizing
+  - `rolling_sharpe()` — Rolling Sharpe ratio (252-day window default)
+  - `rolling_volatility()` — Rolling annualized volatility
+- **Python bindings**: All new functions exposed via PyO3 with NumPy integration
+- **Property tests**: Hypothesis-based tests for indicators, stats, CV (44 new tests)
+- **Reference tests**: Validation against ta-lib, scipy, sklearn
+
+### Changed
+
+- **Performance optimizations**:
+  - Rolling metrics use O(N) running sums instead of O(N×K) window iteration
+  - RSI/MACD eliminate 3 Vec allocations in hot paths
+  - CVaR computes tail mean on iterator (no intermediate Vec)
+- **Code quality**: Extracted helper functions to reduce duplication
+  - Binance client: `check_response()`, `validate_query_params()`
+  - Risk checks: `cmp_symbol()`, `ratio_or_inf()`, `exposure()`
+  - Indicators: `rsi_from_avgs()` (de-duplicated seed + loop logic)
+  - Metrics: `rolling_window()` shared by rolling Sharpe/volatility
+
+### Fixed
+
+- **Security (audit findings)**:
+  - Validated Binance query params to prevent URL parameter injection
+  - Safe `u64→i64` casts in risk checks with `try_from()` + `saturating_mul()`
+  - Used `saturating_abs()` to fix negative price bypass and `i64::MIN` panic
+  - Fail all risk checks when equity ≤ 0 (was silently passing, incorrect)
+  - Guard `CostModel` `u128→i64` cast with `try_from()`
+  - Zeroize Binance API keys on drop (prevents leak in debug/logs)
+  - Redact order params from debug logs (prevent sensitive data leak)
+- **Correctness**:
+  - CV splits now match sklearn: `test_starts = range(n - k*test_size, n, test_size)`
+  - MACD: align fast EMA start with slow EMA for correct initialization
+  - CVaR: use parametric VaR (`norm.ppf`) matching quantstats convention
+  - Spearman p-value: custom incomplete beta via Newton-Raphson `betacf` + symmetry
+- **Overflow safety**: Portfolio `execute_fill()` uses `saturating_abs/mul/sub`
+- **Clippy**: Fixed `iter_cloned_collect`, `needless_range_loop`, `excessive_precision`, `inconsistent_digit_grouping`
+
+### Removed
+
+- **ta-lib dependency**: All indicators reimplemented in pure Rust (breaking change if using C library directly)
+
 ## [0.7.0] - 2026-02-09
 
 ### Added
@@ -222,7 +284,8 @@ Initial release of nanobook - a deterministic limit order book and matching engi
 - Fixed-point price representation (avoids floating-point errors)
 - Deterministic via monotonic timestamps (not system clock)
 
-[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/ricardofrantz/nanobook/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/ricardofrantz/nanobook/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/ricardofrantz/nanobook/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ricardofrantz/nanobook/compare/v0.4.0...v0.5.0
