@@ -184,25 +184,34 @@ pub fn macd(
     let n = close.len();
     let nan_vec = || vec![f64::NAN; n];
 
-    if n < slow_period || fast_period == 0 || slow_period == 0 || signal_period == 0 {
+    if n < slow_period
+        || fast_period == 0
+        || slow_period == 0
+        || signal_period == 0
+        || fast_period >= slow_period
+    {
         return (nan_vec(), nan_vec(), nan_vec());
     }
 
-    let fast_ema = ema(close, fast_period);
+    // TA-Lib aligns both EMAs so they first produce a value at index slow_period-1.
+    // The fast EMA is seeded from close[slow_period-fast_period..slow_period],
+    // NOT from close[0..fast_period]. This ensures both EMAs start from the same bar.
+    let offset = slow_period - fast_period;
+    let fast_ema = ema(&close[offset..], fast_period);
     let slow_ema = ema(close, slow_period);
 
-    // MACD line = fast EMA - slow EMA
+    // MACD line = fast EMA - slow EMA (valid from slow_period - 1)
+    let first_valid = slow_period - 1;
     let mut macd_line = vec![f64::NAN; n];
-    for i in 0..n {
-        if !fast_ema[i].is_nan() && !slow_ema[i].is_nan() {
-            macd_line[i] = fast_ema[i] - slow_ema[i];
+    for i in first_valid..n {
+        let fi = i - offset; // index into fast_ema
+        if !fast_ema[fi].is_nan() && !slow_ema[i].is_nan() {
+            macd_line[i] = fast_ema[fi] - slow_ema[i];
         }
     }
 
-    // Signal line = EMA of MACD line (only over valid MACD values)
-    // Collect valid MACD values for signal computation
-    let first_valid = slow_period - 1; // first valid MACD index
-    let valid_macd: Vec<f64> = macd_line[first_valid..].iter().copied().collect();
+    // Signal line = EMA of valid MACD values
+    let valid_macd: Vec<f64> = macd_line[first_valid..].to_vec();
     let signal_raw = ema(&valid_macd, signal_period);
 
     let mut signal_line = vec![f64::NAN; n];
@@ -365,8 +374,8 @@ mod tests {
         let close: Vec<f64> = (1..=30).map(|x| x as f64).collect();
         let result = rsi(&close, 14);
         // First 14 elements should be NaN (indices 0..14)
-        for i in 0..14 {
-            assert!(result[i].is_nan(), "expected NaN at index {i}");
+        for (i, v) in result.iter().take(14).enumerate() {
+            assert!(v.is_nan(), "expected NaN at index {i}");
         }
         assert!(!result[14].is_nan(), "expected valid RSI at index 14");
     }
@@ -433,8 +442,8 @@ mod tests {
         let close = vec![100.0; 20];
         let result = atr(&high, &low, &close, 14);
         // First 14 elements should be NaN (indices 0..14)
-        for i in 0..14 {
-            assert!(result[i].is_nan(), "expected NaN at index {i}");
+        for (i, v) in result.iter().take(14).enumerate() {
+            assert!(v.is_nan(), "expected NaN at index {i}");
         }
         assert!(!result[14].is_nan(), "expected valid ATR at index 14");
     }

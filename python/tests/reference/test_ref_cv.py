@@ -53,11 +53,9 @@ class TestTimeSeriesSplitReference:
             assert got_test == list(ref_test), f"test mismatch at fold {i}"
 
     def test_single_split(self):
-        ref = list(TimeSeriesSplit(n_splits=1).split(range(10)))
+        # sklearn >= 1.8 requires n_splits >= 2; nanobook matches this constraint
         got = nanobook.py_time_series_split(10, 1)
-        assert len(got) == len(ref)
-        assert got[0][0] == list(ref[0][0])
-        assert got[0][1] == list(ref[0][1])
+        assert len(got) == 0, "n_splits=1 should return empty (matching sklearn constraint)"
 
     def test_expanding_window(self):
         splits = nanobook.py_time_series_split(100, 5)

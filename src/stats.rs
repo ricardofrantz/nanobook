@@ -82,10 +82,10 @@ fn pearson(x: &[f64], y: &[f64]) -> f64 {
 // t-distribution CDF (for p-value computation)
 // ---------------------------------------------------------------------------
 
-/// Regularized incomplete beta function I_x(a, b) — series expansion.
+/// Regularized incomplete beta function I_x(a, b) via continued fraction.
 ///
-/// Used to compute the t-distribution CDF for Spearman p-values.
-/// This is a simplified implementation sufficient for the p-value use case.
+/// Uses the symmetry relation I_x(a,b) = 1 - I_{1-x}(b,a) when x > a/(a+b)
+/// to ensure the continued fraction converges quickly.
 fn regularized_incomplete_beta(x: f64, a: f64, b: f64) -> f64 {
     if x <= 0.0 {
         return 0.0;
@@ -94,67 +94,81 @@ fn regularized_incomplete_beta(x: f64, a: f64, b: f64) -> f64 {
         return 1.0;
     }
 
-    // Use continued fraction expansion (Lentz's method)
+    // Use symmetry relation for convergence: when x > (a+1)/(a+b+2), flip.
+    if x > (a + 1.0) / (a + b + 2.0) {
+        return 1.0 - regularized_incomplete_beta_cf(1.0 - x, b, a);
+    }
+    regularized_incomplete_beta_cf(x, a, b)
+}
+
+/// Core evaluation of I_x(a, b) = front * betacf(a, b, x).
+fn regularized_incomplete_beta_cf(x: f64, a: f64, b: f64) -> f64 {
     let ln_beta = ln_gamma(a) + ln_gamma(b) - ln_gamma(a + b);
     let front = (x.ln() * a + (1.0 - x).ln() * b - ln_beta).exp() / a;
+    front * betacf(a, b, x)
+}
 
-    // Continued fraction via modified Lentz's method
-    let mut f = 1.0_f64;
-    let mut c = 1.0_f64;
-    let mut d;
-
+/// Continued fraction for the incomplete beta function (Numerical Recipes).
+fn betacf(a: f64, b: f64, x: f64) -> f64 {
+    let tiny = 1e-30_f64;
+    let eps = 3e-14;
     let max_iter = 200;
-    let epsilon = 1e-14;
 
-    for m in 0..max_iter {
-        let m_f64 = m as f64;
+    let qab = a + b;
+    let qap = a + 1.0;
+    let qam = a - 1.0;
+
+    let mut c = 1.0_f64;
+    let mut d = 1.0 - qab * x / qap;
+    if d.abs() < tiny {
+        d = tiny;
+    }
+    d = 1.0 / d;
+    let mut h = d;
+
+    for m in 1..=max_iter {
+        let em = m as f64;
+        let m2 = 2.0 * em;
 
         // Even step
-        let numerator_even = if m == 0 {
-            1.0
-        } else {
-            m_f64 * (b - m_f64) * x / ((a + 2.0 * m_f64 - 1.0) * (a + 2.0 * m_f64))
-        };
-
-        d = 1.0 + numerator_even / f;
-        if d.abs() < 1e-30 {
-            d = 1e-30;
+        let aa = em * (b - em) * x / ((qam + m2) * (a + m2));
+        d = 1.0 + aa * d;
+        if d.abs() < tiny {
+            d = tiny;
         }
-        c = 1.0 + numerator_even / c;
-        if c.abs() < 1e-30 {
-            c = 1e-30;
+        c = 1.0 + aa / c;
+        if c.abs() < tiny {
+            c = tiny;
         }
         d = 1.0 / d;
-        f *= c * d;
+        h *= d * c;
 
         // Odd step
-        let m1 = m_f64 + 1.0;
-        let numerator_odd =
-            -(a + m1) * (a + b + m1) * x / ((a + 2.0 * m1) * (a + 2.0 * m1 + 1.0));
-
-        d = 1.0 + numerator_odd / f;
-        if d.abs() < 1e-30 {
-            d = 1e-30;
+        let aa = -(a + em) * (qab + em) * x / ((a + m2) * (qap + m2));
+        d = 1.0 + aa * d;
+        if d.abs() < tiny {
+            d = tiny;
         }
-        c = 1.0 + numerator_odd / c;
-        if c.abs() < 1e-30 {
-            c = 1e-30;
+        c = 1.0 + aa / c;
+        if c.abs() < tiny {
+            c = tiny;
         }
         d = 1.0 / d;
-        let delta = c * d;
-        f *= delta;
+        let del = d * c;
+        h *= del;
 
-        if (delta - 1.0).abs() < epsilon {
-            break;
+        if (del - 1.0).abs() <= eps {
+            return h;
         }
     }
 
-    front * f
+    h // max iterations reached
 }
 
 /// Log-gamma function (Stirling's approximation + Lanczos).
 fn ln_gamma(x: f64) -> f64 {
-    // Lanczos approximation coefficients (g=7)
+    // Lanczos approximation coefficients (g=7) — exact values required for accuracy.
+    #[allow(clippy::excessive_precision)]
     let coefs = [
         0.999_999_999_999_809_93,
         676.520_368_121_885_1,

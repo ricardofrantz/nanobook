@@ -96,7 +96,7 @@ def test_all_negative_returns_properties(returns):
     m = nanobook.py_compute_metrics(returns, 252.0, 0.0)
     if m is not None:
         assert m.win_rate == 0.0
-        assert m.sharpe < 0.0
+        assert m.sharpe <= 0.0  # 0 when constant (zero vol), negative otherwise
 
 
 @given(
