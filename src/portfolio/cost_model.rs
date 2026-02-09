@@ -41,7 +41,8 @@ impl CostModel {
         let notional = notional.unsigned_abs() as u128;
         let total_bps = self.commission_bps as u128 + self.slippage_bps as u128;
         // notional * bps / 10_000 — use u128 to prevent overflow
-        let bps_cost = (notional * total_bps / 10_000) as i64;
+        let raw = notional * total_bps / 10_000;
+        let bps_cost = i64::try_from(raw).unwrap_or(i64::MAX);
         bps_cost.max(self.min_trade_fee)
     }
 }

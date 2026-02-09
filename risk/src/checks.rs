@@ -68,14 +68,14 @@ pub fn check_batch(
     let gross_exposure: i64 = post_qty
         .iter()
         .map(|(sym, qty)| {
-            let price = price_map.get(sym).copied().unwrap_or(0);
-            qty.abs() * price
+            let price = price_map.get(sym).copied().unwrap_or(0).saturating_abs();
+            qty.saturating_abs().saturating_mul(price)
         })
-        .sum();
+        .fold(0_i64, |acc, v| acc.saturating_add(v));
     let leverage = if equity > 0 {
         gross_exposure as f64 / equity as f64
     } else {
-        0.0
+        f64::INFINITY
     };
     let lev_status = if leverage > config.max_leverage {
         RiskStatus::Fail
@@ -102,14 +102,14 @@ pub fn check_batch(
         .iter()
         .filter(|(_, qty)| **qty < 0)
         .map(|(sym, qty)| {
-            let price = price_map.get(sym).copied().unwrap_or(0);
-            qty.abs() * price
+            let price = price_map.get(sym).copied().unwrap_or(0).saturating_abs();
+            qty.saturating_abs().saturating_mul(price)
         })
-        .sum();
+        .fold(0_i64, |acc, v| acc.saturating_add(v));
     let short_pct = if equity > 0 {
         short_exposure as f64 / equity as f64
     } else {
-        0.0
+        f64::INFINITY
     };
 
     let has_shorts = orders
@@ -149,7 +149,7 @@ pub fn check_batch(
     let max_cents = (config.max_trade_usd * 100.0) as i64;
     for &(sym, _side, qty, price) in orders {
         let qty_i64 = i64::try_from(qty).unwrap_or(i64::MAX);
-        let notional = qty_i64.saturating_mul(price);
+        let notional = qty_i64.saturating_mul(price.saturating_abs());
         if notional > max_cents {
             checks.push(RiskCheck {
                 name: "Max trade size",

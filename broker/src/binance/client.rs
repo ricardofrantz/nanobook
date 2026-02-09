@@ -9,6 +9,20 @@ use super::auth;
 use super::types::{AccountInfo, BookTicker, OrderResponse};
 use crate::error::BrokerError;
 
+/// Validate that a parameter value is safe for URL query strings.
+///
+/// Rejects any value containing characters that could inject additional
+/// query parameters (e.g., `&`, `=`, `?`, `#`, space).
+fn validate_query_param(value: &str, name: &str) -> Result<(), BrokerError> {
+    if value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'.' || b == b'-') {
+        Ok(())
+    } else {
+        Err(BrokerError::Order(format!(
+            "invalid characters in {name}: {value:?}"
+        )))
+    }
+}
+
 /// Blocking Binance REST client.
 pub struct BinanceClient {
     client: Client,
@@ -98,6 +112,17 @@ impl BinanceClient {
         price: Option<&str>,
         time_in_force: Option<&str>,
     ) -> Result<OrderResponse, BrokerError> {
+        validate_query_param(symbol, "symbol")?;
+        validate_query_param(side, "side")?;
+        validate_query_param(order_type, "order_type")?;
+        validate_query_param(quantity, "quantity")?;
+        if let Some(p) = price {
+            validate_query_param(p, "price")?;
+        }
+        if let Some(tif) = time_in_force {
+            validate_query_param(tif, "timeInForce")?;
+        }
+
         let timestamp = current_timestamp_ms();
         let mut query = format!(
             "symbol={symbol}&side={side}&type={order_type}&quantity={quantity}&timestamp={timestamp}"
@@ -137,6 +162,7 @@ impl BinanceClient {
 
     /// Get order status (GET /api/v3/order).
     pub fn order_status(&self, symbol: &str, order_id: u64) -> Result<OrderResponse, BrokerError> {
+        validate_query_param(symbol, "symbol")?;
         let timestamp = current_timestamp_ms();
         let query = format!("symbol={symbol}&orderId={order_id}&timestamp={timestamp}");
         let signature = auth::sign(&query, &self.secret_key);
@@ -166,6 +192,7 @@ impl BinanceClient {
 
     /// Cancel an order (DELETE /api/v3/order).
     pub fn cancel_order(&self, symbol: &str, order_id: u64) -> Result<(), BrokerError> {
+        validate_query_param(symbol, "symbol")?;
         let timestamp = current_timestamp_ms();
         let query = format!("symbol={symbol}&orderId={order_id}&timestamp={timestamp}");
         let signature = auth::sign(&query, &self.secret_key);
@@ -194,6 +221,7 @@ impl BinanceClient {
 
     /// Get book ticker (best bid/ask) for a symbol (GET /api/v3/ticker/bookTicker).
     pub fn book_ticker(&self, symbol: &str) -> Result<BookTicker, BrokerError> {
+        validate_query_param(symbol, "symbol")?;
         let url = format!("{}/api/v3/ticker/bookTicker?symbol={symbol}", self.base_url);
 
         let resp = self

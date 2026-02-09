@@ -255,15 +255,18 @@ fn compute_cvar(returns: &[f64], alpha: f64) -> f64 {
     let z = norm_ppf(alpha);
     let var_threshold = mu + sigma * z;
 
-    // CVaR: mean of returns strictly below VaR
-    let tail: Vec<f64> = returns.iter().copied().filter(|&r| r < var_threshold).collect();
-    if tail.is_empty() {
+    // CVaR: mean of returns strictly below VaR (computed on iterator — no allocation)
+    let (tail_sum, tail_count) = returns
+        .iter()
+        .filter(|&&r| r < var_threshold)
+        .fold((0.0_f64, 0_usize), |(sum, cnt), &r| (sum + r, cnt + 1));
+    if tail_count == 0 {
         return *returns
             .iter()
             .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(&0.0);
     }
-    tail.iter().sum::<f64>() / tail.len() as f64
+    tail_sum / tail_count as f64
 }
 
 /// Inverse of the standard normal CDF (probit function).
@@ -351,17 +354,28 @@ pub fn rolling_sharpe(returns: &[f64], window: usize, periods_per_year: usize) -
     }
 
     let ppy = periods_per_year as f64;
+    let k = window as f64;
 
-    for i in (window - 1)..n {
-        let w = &returns[i + 1 - window..=i];
-        let mean = w.iter().sum::<f64>() / window as f64;
-        let var = w.iter().map(|&r| (r - mean).powi(2)).sum::<f64>() / (window - 1) as f64;
-        let std = var.sqrt();
-        out[i] = if std > 0.0 {
-            mean * ppy.sqrt() / std
-        } else {
-            0.0
-        };
+    // Seed first window
+    let mut sum: f64 = returns[..window].iter().sum();
+    let mut sum_sq: f64 = returns[..window].iter().map(|r| r * r).sum();
+
+    let mean = sum / k;
+    let var = (sum_sq - sum * sum / k) / (k - 1.0);
+    let std = var.max(0.0).sqrt();
+    out[window - 1] = if std > 0.0 { mean * ppy.sqrt() / std } else { 0.0 };
+
+    // Slide window
+    for i in window..n {
+        let old = returns[i - window];
+        let new = returns[i];
+        sum += new - old;
+        sum_sq += new * new - old * old;
+
+        let mean = sum / k;
+        let var = (sum_sq - sum * sum / k) / (k - 1.0);
+        let std = var.max(0.0).sqrt();
+        out[i] = if std > 0.0 { mean * ppy.sqrt() / std } else { 0.0 };
     }
 
     out
@@ -384,12 +398,24 @@ pub fn rolling_volatility(returns: &[f64], window: usize, periods_per_year: usiz
     }
 
     let ppy = periods_per_year as f64;
+    let k = window as f64;
 
-    for i in (window - 1)..n {
-        let w = &returns[i + 1 - window..=i];
-        let mean = w.iter().sum::<f64>() / window as f64;
-        let var = w.iter().map(|&r| (r - mean).powi(2)).sum::<f64>() / (window - 1) as f64;
-        out[i] = var.sqrt() * ppy.sqrt();
+    // Seed first window
+    let mut sum: f64 = returns[..window].iter().sum();
+    let mut sum_sq: f64 = returns[..window].iter().map(|r| r * r).sum();
+
+    let var = (sum_sq - sum * sum / k) / (k - 1.0);
+    out[window - 1] = var.max(0.0).sqrt() * ppy.sqrt();
+
+    // Slide window
+    for i in window..n {
+        let old = returns[i - window];
+        let new = returns[i];
+        sum += new - old;
+        sum_sq += new * new - old * old;
+
+        let var = (sum_sq - sum * sum / k) / (k - 1.0);
+        out[i] = var.max(0.0).sqrt() * ppy.sqrt();
     }
 
     out

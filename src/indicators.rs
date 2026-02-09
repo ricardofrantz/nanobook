@@ -62,6 +62,7 @@ fn sma(values: &[f64], period: usize) -> Vec<f64> {
 
 /// Population standard deviation over a rolling window.
 ///
+/// Uses O(N) running sum/sum-of-squares instead of O(N*K) re-summation.
 /// Returns NaN for the lookback period.
 fn rolling_std_pop(values: &[f64], period: usize) -> Vec<f64> {
     let n = values.len();
@@ -70,11 +71,24 @@ fn rolling_std_pop(values: &[f64], period: usize) -> Vec<f64> {
         return out;
     }
 
-    for i in (period - 1)..n {
-        let window = &values[i + 1 - period..=i];
-        let mean = window.iter().sum::<f64>() / period as f64;
-        let var = window.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / period as f64;
-        out[i] = var.sqrt();
+    let k = period as f64;
+
+    // Seed: first window
+    let mut sum: f64 = values[..period].iter().sum();
+    let mut sum_sq: f64 = values[..period].iter().map(|v| v * v).sum();
+
+    let mean = sum / k;
+    out[period - 1] = (sum_sq / k - mean * mean).max(0.0).sqrt();
+
+    // Slide window: add new, remove old
+    for i in period..n {
+        let old = values[i - period];
+        let new = values[i];
+        sum += new - old;
+        sum_sq += new * new - old * old;
+
+        let mean = sum / k;
+        out[i] = (sum_sq / k - mean * mean).max(0.0).sqrt();
     }
     out
 }
@@ -114,21 +128,19 @@ pub fn rsi(close: &[f64], period: usize) -> Vec<f64> {
         return out;
     }
 
-    // Compute gains and losses
-    let mut gains = vec![0.0_f64; n];
-    let mut losses = vec![0.0_f64; n];
-    for i in 1..n {
+    // Seed with simple average over first `period` changes (indices 1..=period)
+    let mut avg_gain = 0.0_f64;
+    let mut avg_loss = 0.0_f64;
+    for i in 1..=period {
         let diff = close[i] - close[i - 1];
         if diff > 0.0 {
-            gains[i] = diff;
+            avg_gain += diff;
         } else {
-            losses[i] = -diff;
+            avg_loss -= diff;
         }
     }
-
-    // Seed with simple average over first `period` changes (indices 1..=period)
-    let mut avg_gain: f64 = gains[1..=period].iter().sum::<f64>() / period as f64;
-    let mut avg_loss: f64 = losses[1..=period].iter().sum::<f64>() / period as f64;
+    avg_gain /= period as f64;
+    avg_loss /= period as f64;
 
     // First RSI value
     out[period] = if avg_gain == 0.0 && avg_loss == 0.0 {
@@ -142,8 +154,11 @@ pub fn rsi(close: &[f64], period: usize) -> Vec<f64> {
 
     // Subsequent values with Wilder's smoothing
     for i in (period + 1)..n {
-        avg_gain = (avg_gain * (period as f64 - 1.0) + gains[i]) / period as f64;
-        avg_loss = (avg_loss * (period as f64 - 1.0) + losses[i]) / period as f64;
+        let diff = close[i] - close[i - 1];
+        let gain = if diff > 0.0 { diff } else { 0.0 };
+        let loss = if diff < 0.0 { -diff } else { 0.0 };
+        avg_gain = (avg_gain * (period as f64 - 1.0) + gain) / period as f64;
+        avg_loss = (avg_loss * (period as f64 - 1.0) + loss) / period as f64;
 
         out[i] = if avg_gain == 0.0 && avg_loss == 0.0 {
             0.0
@@ -210,9 +225,8 @@ pub fn macd(
         }
     }
 
-    // Signal line = EMA of valid MACD values
-    let valid_macd: Vec<f64> = macd_line[first_valid..].to_vec();
-    let signal_raw = ema(&valid_macd, signal_period);
+    // Signal line = EMA of valid MACD values (pass slice directly — no copy)
+    let signal_raw = ema(&macd_line[first_valid..], signal_period);
 
     let mut signal_line = vec![f64::NAN; n];
     for (j, &val) in signal_raw.iter().enumerate() {
