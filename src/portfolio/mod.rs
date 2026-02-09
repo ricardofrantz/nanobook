@@ -257,7 +257,7 @@ impl Portfolio {
                 let mid = {
                     let (bid, ask) = ex.best_bid_ask();
                     match (bid, ask) {
-                        (Some(b), Some(a)) => (b.0 + a.0) / 2,
+                        (Some(b), Some(a)) => b.0 + (a.0 - b.0) / 2,
                         (Some(b), None) => b.0,
                         (None, Some(a)) => a.0,
                         (None, None) => return None,
@@ -400,7 +400,7 @@ impl Portfolio {
             return;
         }
 
-        let notional = qty.abs() * price;
+        let notional = qty.saturating_abs().saturating_mul(price);
         let cost = self.cost_model.compute_cost(notional);
 
         // Update position
@@ -411,7 +411,7 @@ impl Portfolio {
         pos.apply_fill(qty, price);
 
         // Adjust cash: buying decreases cash, selling increases it
-        self.cash -= qty * price + cost;
+        self.cash = self.cash.saturating_sub(qty.saturating_mul(price).saturating_add(cost));
     }
 }
 

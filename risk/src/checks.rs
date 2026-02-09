@@ -60,7 +60,8 @@ pub fn check_batch(
             BrokerSide::Buy => 1_i64,
             BrokerSide::Sell => -1,
         };
-        *post_qty.entry(sym).or_insert(0) += sign * qty as i64;
+        let qty_i64 = i64::try_from(qty).unwrap_or(i64::MAX);
+        *post_qty.entry(sym).or_insert(0) += sign.saturating_mul(qty_i64);
         price_map.insert(sym, price);
     }
 
@@ -147,7 +148,8 @@ pub fn check_batch(
     // 4. Max trade size — warn if any trade > max_trade_usd
     let max_cents = (config.max_trade_usd * 100.0) as i64;
     for &(sym, _side, qty, price) in orders {
-        let notional = qty as i64 * price;
+        let qty_i64 = i64::try_from(qty).unwrap_or(i64::MAX);
+        let notional = qty_i64.saturating_mul(price);
         if notional > max_cents {
             checks.push(RiskCheck {
                 name: "Max trade size",

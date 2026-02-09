@@ -17,6 +17,13 @@ pub struct BinanceClient {
     base_url: String,
 }
 
+impl Drop for BinanceClient {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.api_key);
+        zeroize::Zeroize::zeroize(&mut self.secret_key);
+    }
+}
+
 impl BinanceClient {
     /// Create a new Binance client.
     pub fn new(api_key: &str, secret_key: &str, testnet: bool) -> Self {
@@ -105,7 +112,7 @@ impl BinanceClient {
         let signature = auth::sign(&query, &self.secret_key);
         let url = format!("{}/api/v3/order", self.base_url);
 
-        debug!("Submitting Binance order: {query}");
+        debug!("Submitting Binance order: {symbol} {side} qty={quantity}");
 
         let resp = self
             .client

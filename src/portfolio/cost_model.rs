@@ -38,9 +38,9 @@ impl CostModel {
     /// The notional should be `|quantity * price|`. Returns the cost in cents,
     /// which is always non-negative.
     pub fn compute_cost(&self, notional: i64) -> i64 {
-        let notional = notional.unsigned_abs();
-        let total_bps = self.commission_bps as u64 + self.slippage_bps as u64;
-        // notional * bps / 10_000
+        let notional = notional.unsigned_abs() as u128;
+        let total_bps = self.commission_bps as u128 + self.slippage_bps as u128;
+        // notional * bps / 10_000 — use u128 to prevent overflow
         let bps_cost = (notional * total_bps / 10_000) as i64;
         bps_cost.max(self.min_trade_fee)
     }
