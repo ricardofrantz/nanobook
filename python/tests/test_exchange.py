@@ -4,7 +4,7 @@ import nanobook
 
 
 def test_version():
-    assert nanobook.__version__ == "0.7.0"
+    assert nanobook.__version__ == "0.8.0"
 
 
 def test_exchange_repr():
