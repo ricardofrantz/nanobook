@@ -34,10 +34,7 @@ impl AuditLog {
             fs::create_dir_all(parent)?;
         }
 
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
 
         Ok(Self {
             writer: BufWriter::new(file),
@@ -65,11 +62,7 @@ impl AuditLog {
 }
 
 /// Convenience: log a run start event.
-pub fn log_run_started(
-    audit: &mut AuditLog,
-    target_file: &str,
-    account_id: &str,
-) -> Result<()> {
+pub fn log_run_started(audit: &mut AuditLog, target_file: &str, account_id: &str) -> Result<()> {
     audit.log(
         "run_started",
         serde_json::json!({
@@ -106,10 +99,7 @@ pub fn log_positions(
 }
 
 /// Convenience: log computed diff.
-pub fn log_diff(
-    audit: &mut AuditLog,
-    orders: &[crate::diff::RebalanceOrder],
-) -> Result<()> {
+pub fn log_diff(audit: &mut AuditLog, orders: &[crate::diff::RebalanceOrder]) -> Result<()> {
     let order_data: Vec<_> = orders
         .iter()
         .map(|o| {
@@ -123,17 +113,11 @@ pub fn log_diff(
         })
         .collect();
 
-    audit.log(
-        "diff_computed",
-        serde_json::json!({ "orders": order_data }),
-    )
+    audit.log("diff_computed", serde_json::json!({ "orders": order_data }))
 }
 
 /// Convenience: log risk check results.
-pub fn log_risk_check(
-    audit: &mut AuditLog,
-    report: &crate::risk::RiskReport,
-) -> Result<()> {
+pub fn log_risk_check(audit: &mut AuditLog, report: &crate::risk::RiskReport) -> Result<()> {
     let check_data: Vec<_> = report
         .checks
         .iter()
@@ -176,7 +160,7 @@ pub fn log_order_submitted(
 /// Convenience: log order fill.
 pub fn log_order_filled(
     audit: &mut AuditLog,
-    result: &crate::ibkr::orders::OrderResult,
+    result: &nanobook_broker::ibkr::orders::OrderResult,
 ) -> Result<()> {
     audit.log(
         "order_filled",

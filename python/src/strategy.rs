@@ -31,10 +31,7 @@ impl Strategy for PyStrategy {
 
             match result {
                 Ok(obj) => {
-                    let weights: Vec<(String, f64)> = match obj.extract(py) {
-                        Ok(w) => w,
-                        Err(_) => Vec::new(),
-                    };
+                    let weights: Vec<(String, f64)> = obj.extract(py).unwrap_or_default();
 
                     weights
                         .into_iter()

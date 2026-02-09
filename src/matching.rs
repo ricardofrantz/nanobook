@@ -129,7 +129,9 @@ impl OrderBook {
 
             // Update the resting order
             let resting_fully_filled = {
-                let resting = self.get_order_mut(resting_id).unwrap();
+                let resting = self
+                    .get_order_mut(resting_id)
+                    .expect("invariant: resting order exists in book");
                 resting.fill(fill_qty);
                 resting.remaining_quantity == 0
             };

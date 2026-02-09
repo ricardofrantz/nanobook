@@ -6,14 +6,15 @@ use std::time::Duration;
 
 use log::{error, info, warn};
 use nanobook::Symbol;
+use nanobook_broker::BrokerSide;
+use nanobook_broker::ibkr::client::IbkrClient;
+use nanobook_broker::ibkr::orders::{self, OrderOutcome};
 use rustc_hash::FxHashMap;
 
 use crate::audit::{self, AuditLog};
 use crate::config::Config;
-use crate::diff::{self, CurrentPosition, RebalanceOrder};
+use crate::diff::{self, Action, CurrentPosition, RebalanceOrder};
 use crate::error::{Error, Result};
-use crate::ibkr::client::IbkrClient;
-use crate::ibkr::orders::{self, OrderOutcome};
 use crate::reconcile;
 use crate::risk;
 use crate::target::TargetSpec;
@@ -25,17 +26,49 @@ pub struct RunOptions {
     pub target_file: String,
 }
 
+/// Connect to IBKR using the rebalancer config.
+fn connect_ibkr(config: &Config) -> Result<IbkrClient> {
+    IbkrClient::connect(
+        &config.connection.host,
+        config.connection.port,
+        config.connection.client_id,
+    )
+    .map_err(|e| Error::Connection(e.to_string()))
+}
+
+/// Convert broker positions to rebalancer CurrentPosition type.
+fn to_current_positions(broker_positions: &[nanobook_broker::Position]) -> Vec<CurrentPosition> {
+    broker_positions
+        .iter()
+        .map(|p| CurrentPosition {
+            symbol: p.symbol,
+            quantity: p.quantity,
+            avg_cost_cents: p.avg_cost_cents,
+        })
+        .collect()
+}
+
+/// Map a RebalanceOrder action to a BrokerSide.
+pub fn action_to_side(action: Action) -> BrokerSide {
+    match action {
+        Action::Buy | Action::BuyCover => BrokerSide::Buy,
+        Action::Sell | Action::SellShort => BrokerSide::Sell,
+    }
+}
+
 /// Execute a full rebalance run.
 pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()> {
     // 1. Connect to IBKR
-    let client = IbkrClient::connect(&config.connection)?;
+    let client = connect_ibkr(config)?;
 
     // 2. Open audit log
     let mut audit = AuditLog::open(&config.audit_path())?;
     audit::log_run_started(&mut audit, &opts.target_file, &config.account.id)?;
 
     // 3. Fetch account summary
-    let summary = client.account_summary()?;
+    let summary = client
+        .account_summary()
+        .map_err(|e| Error::Connection(e.to_string()))?;
     println!(
         "Account {} ({}): ${:.2} equity, ${:.2} cash",
         config.account.id,
@@ -44,15 +77,20 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
         summary.cash_cents as f64 / 100.0,
     );
 
-    // 4. Fetch current positions
-    let positions = client.positions()?;
+    // 4. Fetch current positions (convert from broker types to rebalancer types)
+    let broker_positions = client
+        .positions()
+        .map_err(|e| Error::Connection(e.to_string()))?;
+    let positions = to_current_positions(&broker_positions);
     audit::log_positions(&mut audit, &positions, summary.equity_cents)?;
 
     display_current_positions(&positions, summary.equity_cents);
 
     // 5. Fetch live prices for all symbols (current + target)
     let all_symbols = collect_all_symbols(&positions, target);
-    let prices = client.prices(&all_symbols)?;
+    let prices = client
+        .prices(&all_symbols)
+        .map_err(|e| Error::Connection(e.to_string()))?;
 
     // 6. Compute diff
     let targets = target.as_target_pairs();
@@ -80,10 +118,8 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     println!();
 
     // 8. Run risk checks
-    let current_qty: FxHashMap<Symbol, i64> = positions
-        .iter()
-        .map(|p| (p.symbol, p.quantity))
-        .collect();
+    let current_qty: FxHashMap<Symbol, i64> =
+        positions.iter().map(|p| (p.symbol, p.quantity)).collect();
 
     let risk_config = apply_constraint_overrides(&config.risk, target);
     let risk_report = risk::check_risk(
@@ -120,17 +156,11 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
 
         if !confirmed {
             println!("Aborted.");
-            audit.log(
-                "user_confirmed",
-                serde_json::json!({"approved": false}),
-            )?;
+            audit.log("user_confirmed", serde_json::json!({"approved": false}))?;
             return Ok(());
         }
 
-        audit.log(
-            "user_confirmed",
-            serde_json::json!({"approved": true}),
-        )?;
+        audit.log("user_confirmed", serde_json::json!({"approved": true}))?;
     }
 
     // 11. Execute orders
@@ -152,7 +182,15 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
 
         submitted += 1;
 
-        match orders::execute_order(client.inner(), order, timeout) {
+        let side = action_to_side(order.action);
+        match orders::execute_limit_order(
+            client.inner(),
+            order.symbol,
+            side,
+            order.shares,
+            order.limit_price_cents,
+            timeout,
+        ) {
             Ok(result) => {
                 audit::log_order_submitted(&mut audit, order, result.order_id)?;
                 audit::log_order_filled(&mut audit, &result)?;
@@ -208,9 +246,16 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
 
     // 13. Reconcile
     info!("Running post-execution reconciliation...");
-    let final_positions = client.positions()?;
-    let final_prices = client.prices(&all_symbols)?;
-    let final_summary = client.account_summary()?;
+    let final_broker_positions = client
+        .positions()
+        .map_err(|e| Error::Connection(e.to_string()))?;
+    let final_positions = to_current_positions(&final_broker_positions);
+    let final_prices = client
+        .prices(&all_symbols)
+        .map_err(|e| Error::Connection(e.to_string()))?;
+    let final_summary = client
+        .account_summary()
+        .map_err(|e| Error::Connection(e.to_string()))?;
 
     let report = reconcile::reconcile(
         &final_positions,
@@ -225,9 +270,14 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
 
 /// Show current IBKR positions.
 pub fn show_positions(config: &Config) -> Result<()> {
-    let client = IbkrClient::connect(&config.connection)?;
-    let summary = client.account_summary()?;
-    let positions = client.positions()?;
+    let client = connect_ibkr(config)?;
+    let summary = client
+        .account_summary()
+        .map_err(|e| Error::Connection(e.to_string()))?;
+    let broker_positions = client
+        .positions()
+        .map_err(|e| Error::Connection(e.to_string()))?;
+    let positions = to_current_positions(&broker_positions);
 
     println!(
         "Account {} ({}): ${:.2} equity, ${:.2} cash\n",
@@ -248,10 +298,12 @@ pub fn check_status(config: &Config) -> Result<()> {
         config.connection.host, config.connection.port
     );
 
-    let client = IbkrClient::connect(&config.connection)?;
+    let client = connect_ibkr(config)?;
     println!("OK");
 
-    let summary = client.account_summary()?;
+    let summary = client
+        .account_summary()
+        .map_err(|e| Error::Connection(e.to_string()))?;
     println!(
         "Account {}: ${:.2} equity",
         config.account.id,
@@ -263,12 +315,19 @@ pub fn check_status(config: &Config) -> Result<()> {
 
 /// Run reconciliation against the last target.
 pub fn run_reconcile(config: &Config, target: &TargetSpec) -> Result<()> {
-    let client = IbkrClient::connect(&config.connection)?;
-    let summary = client.account_summary()?;
-    let positions = client.positions()?;
+    let client = connect_ibkr(config)?;
+    let summary = client
+        .account_summary()
+        .map_err(|e| Error::Connection(e.to_string()))?;
+    let broker_positions = client
+        .positions()
+        .map_err(|e| Error::Connection(e.to_string()))?;
+    let positions = to_current_positions(&broker_positions);
 
     let all_symbols = collect_all_symbols(&positions, target);
-    let prices = client.prices(&all_symbols)?;
+    let prices = client
+        .prices(&all_symbols)
+        .map_err(|e| Error::Connection(e.to_string()))?;
     let targets = target.as_target_pairs();
 
     let report = reconcile::reconcile(&positions, &targets, &prices, summary.equity_cents);
@@ -279,7 +338,7 @@ pub fn run_reconcile(config: &Config, target: &TargetSpec) -> Result<()> {
 
 // === Helpers ===
 
-fn collect_all_symbols(positions: &[CurrentPosition], target: &TargetSpec) -> Vec<Symbol> {
+pub fn collect_all_symbols(positions: &[CurrentPosition], target: &TargetSpec) -> Vec<Symbol> {
     let mut symbols: Vec<Symbol> = positions.iter().map(|p| p.symbol).collect();
     for sym in target.symbols() {
         if !symbols.contains(&sym) {
@@ -343,7 +402,7 @@ fn display_plan(orders: &[RebalanceOrder], cost_config: &crate::config::CostConf
     println!("\nEst. cost: {cost}");
 }
 
-fn apply_constraint_overrides(
+pub fn apply_constraint_overrides(
     base: &crate::config::RiskConfig,
     target: &TargetSpec,
 ) -> crate::config::RiskConfig {

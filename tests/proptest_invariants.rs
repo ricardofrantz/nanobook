@@ -496,6 +496,179 @@ proptest! {
 }
 
 // ============================================================================
+// BACKTEST BRIDGE INVARIANTS
+// ============================================================================
+
+#[cfg(feature = "portfolio")]
+mod backtest_props {
+    use nanobook::backtest_bridge::backtest_weights;
+    use nanobook::Symbol;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(200))]
+
+        /// Equity never negative after any schedule
+        #[test]
+        fn equity_never_negative(
+            n_periods in 1usize..20,
+            initial_cash in 10_000_00i64..10_000_000_00,
+        ) {
+            let sym = Symbol::new("AAPL");
+            let weights: Vec<Vec<(Symbol, f64)>> = (0..n_periods)
+                .map(|_| vec![(sym, 0.5)])
+                .collect();
+            let prices: Vec<Vec<(Symbol, i64)>> = (0..n_periods)
+                .map(|i| vec![(sym, 100_00 + (i as i64 * 5_00))])
+                .collect();
+
+            let result = backtest_weights(&weights, &prices, initial_cash, 10, 252.0, 0.0);
+
+            for &eq in &result.equity_curve {
+                prop_assert!(eq >= 0, "negative equity: {}", eq);
+            }
+        }
+
+        /// Return vec length == schedule length
+        #[test]
+        fn returns_match_schedule_length(
+            n_periods in 1usize..50,
+        ) {
+            let sym = Symbol::new("AAPL");
+            let weights: Vec<Vec<(Symbol, f64)>> = (0..n_periods)
+                .map(|_| vec![(sym, 0.5)])
+                .collect();
+            let prices: Vec<Vec<(Symbol, i64)>> = (0..n_periods)
+                .map(|_| vec![(sym, 150_00)])
+                .collect();
+
+            let result = backtest_weights(&weights, &prices, 1_000_000_00, 10, 252.0, 0.0);
+            prop_assert_eq!(result.returns.len(), n_periods);
+            prop_assert_eq!(result.equity_curve.len(), n_periods + 1);
+        }
+
+        /// Mismatched schedule lengths → empty result (no panic)
+        #[test]
+        fn mismatched_lengths_no_panic(
+            w_len in 1usize..20,
+            p_len in 1usize..20,
+        ) {
+            prop_assume!(w_len != p_len);
+            let sym = Symbol::new("AAPL");
+            let weights: Vec<Vec<(Symbol, f64)>> = (0..w_len)
+                .map(|_| vec![(sym, 0.5)])
+                .collect();
+            let prices: Vec<Vec<(Symbol, i64)>> = (0..p_len)
+                .map(|_| vec![(sym, 150_00)])
+                .collect();
+
+            let result = backtest_weights(&weights, &prices, 1_000_000_00, 10, 252.0, 0.0);
+            prop_assert!(result.returns.is_empty());
+        }
+
+        /// NaN/Inf weights → empty result (no panic)
+        #[test]
+        fn nan_inf_weights_no_panic(
+            bad_weight in prop_oneof![Just(f64::NAN), Just(f64::INFINITY), Just(f64::NEG_INFINITY)],
+        ) {
+            let sym = Symbol::new("AAPL");
+            let weights = vec![vec![(sym, bad_weight)]];
+            let prices = vec![vec![(sym, 150_00)]];
+
+            let result = backtest_weights(&weights, &prices, 1_000_000_00, 10, 252.0, 0.0);
+            prop_assert!(result.returns.is_empty());
+        }
+    }
+}
+
+// ============================================================================
+// PORTFOLIO OVERFLOW INVARIANTS
+// ============================================================================
+
+#[cfg(feature = "portfolio")]
+mod portfolio_props {
+    use nanobook::portfolio::{CostModel, Portfolio};
+    use nanobook::Symbol;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(200))]
+
+        /// Cost model with max-range notional — no overflow
+        #[test]
+        fn cost_model_no_overflow(
+            commission_bps in 0u32..1000,
+            slippage_bps in 0u32..1000,
+            min_fee in 0i64..1_000_000,
+            notional in -1_000_000_000_000i64..1_000_000_000_000i64,
+        ) {
+            let model = CostModel {
+                commission_bps,
+                slippage_bps,
+                min_trade_fee: min_fee,
+            };
+            let cost = model.compute_cost(notional);
+            prop_assert!(cost >= 0, "negative cost: {}", cost);
+        }
+
+        /// Returns accumulation over many periods — bounded
+        #[test]
+        fn returns_bounded(
+            n_periods in 1usize..100,
+        ) {
+            let sym = Symbol::new("AAPL");
+            let mut portfolio = Portfolio::new(1_000_000_00, CostModel::zero());
+            let prices = [(sym, 150_00)];
+
+            portfolio.rebalance_simple(&[(sym, 0.5)], &prices);
+
+            for _ in 0..n_periods {
+                portfolio.record_return(&prices);
+            }
+
+            for &ret in portfolio.returns() {
+                prop_assert!(ret.is_finite(), "non-finite return: {}", ret);
+                // Returns should be bounded (no exponential blowup with no price change)
+                prop_assert!(ret.abs() < 10.0, "unreasonable return: {}", ret);
+            }
+        }
+    }
+}
+
+// ============================================================================
+// RISK ENGINE INVARIANTS
+// ============================================================================
+
+#[cfg(feature = "portfolio")]
+mod risk_props {
+    use nanobook::Symbol;
+    use proptest::prelude::*;
+
+    // Note: risk engine tests require nanobook-risk crate, tested separately.
+    // Here we test the portfolio interaction with risk-like scenarios.
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(200))]
+
+        /// Zero equity division safety in current_weights
+        #[test]
+        fn current_weights_no_div_by_zero(
+            n_positions in 0usize..10,
+        ) {
+            use nanobook::portfolio::{CostModel, Portfolio};
+
+            let portfolio = Portfolio::new(0, CostModel::zero());
+            let prices: Vec<(Symbol, i64)> = (0..n_positions)
+                .map(|i| (Symbol::new(&format!("S{}", i)), 100_00))
+                .collect();
+
+            let weights = portfolio.current_weights(&prices);
+            prop_assert!(weights.is_empty());
+        }
+    }
+}
+
+// ============================================================================
 // REGRESSION TESTS (from proptest failures)
 // ============================================================================
 

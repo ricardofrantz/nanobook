@@ -31,7 +31,7 @@ impl PyEvent {
     pub fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
         let json = serde_json::to_string(&self.inner)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        Ok(json.into_py_any(py)?)
+        json.into_py_any(py)
     }
 
     pub fn __setstate__(&mut self, state: Bound<'_, PyAny>) -> PyResult<()> {

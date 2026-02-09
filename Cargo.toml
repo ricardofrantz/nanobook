@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "python", "rebalancer"]
+members = [".", "python", "rebalancer", "broker", "risk"]
 resolver = "2"
 
 [package]
@@ -7,7 +7,7 @@ name = "nanobook"
 version = "0.6.0"
 edition = "2024"
 rust-version = "1.85"
-description = "Deterministic limit order book and matching engine for testing trading algorithms"
+description = "Rust execution infrastructure for automated trading: LOB engine, portfolio simulator, broker abstraction, risk engine"
 license = "MIT"
 repository = "https://github.com/ricardofrantz/nanobook"
 homepage = "https://github.com/ricardofrantz/nanobook"

@@ -242,10 +242,7 @@ pub fn check_risk(
     });
 
     // 7. Target weights sanity — sum of long weights
-    let long_sum: f64 = target_map
-        .values()
-        .filter(|w| **w > 0.0)
-        .sum();
+    let long_sum: f64 = target_map.values().filter(|w| **w > 0.0).sum();
     let short_sum: f64 = target_map
         .values()
         .filter(|w| **w < 0.0)
@@ -360,14 +357,7 @@ mod tests {
         let prices = vec![(spy(), 430_00)];
         let current = FxHashMap::default();
 
-        let report = check_risk(
-            &orders,
-            10_000_000,
-            &targets,
-            &prices,
-            &current,
-            &config,
-        );
+        let report = check_risk(&orders, 10_000_000, &targets, &prices, &current, &config);
 
         assert!(report.has_failures());
     }
@@ -403,13 +393,11 @@ mod tests {
     #[test]
     fn display_report() {
         let report = RiskReport {
-            checks: vec![
-                RiskCheck {
-                    name: "Test",
-                    status: RiskStatus::Pass,
-                    detail: "ok".into(),
-                },
-            ],
+            checks: vec![RiskCheck {
+                name: "Test",
+                status: RiskStatus::Pass,
+                detail: "ok".into(),
+            }],
         };
         let s = format!("{report}");
         assert!(s.contains("[PASS]"));

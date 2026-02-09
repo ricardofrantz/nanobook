@@ -9,7 +9,6 @@ pub mod config;
 pub mod diff;
 pub mod error;
 pub mod execution;
-pub mod ibkr;
 pub mod reconcile;
 pub mod risk;
 pub mod target;

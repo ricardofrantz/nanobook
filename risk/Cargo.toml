@@ -1,0 +1,15 @@
+[package]
+name = "nanobook-risk"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Pre-trade risk engine for nanobook"
+license = "MIT"
+
+[dependencies]
+nanobook = { path = "..", features = ["serde"] }
+nanobook-broker = { path = "../broker" }
+rustc-hash = "2.1"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]

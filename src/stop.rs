@@ -249,7 +249,10 @@ impl StopBook {
             };
 
             let side = order.side;
-            let trail_method = order.trail_method.clone().unwrap();
+            let trail_method = order
+                .trail_method
+                .clone()
+                .expect("invariant: trailing stop has trail_method");
 
             // Update watermark
             let old_watermark = order.watermark.unwrap_or(trade_price);
@@ -269,7 +272,10 @@ impl StopBook {
 
             if offset <= 0 {
                 // ATR not ready yet -- update watermark only
-                self.orders.get_mut(&id).unwrap().watermark = Some(new_watermark);
+                self.orders
+                    .get_mut(&id)
+                    .expect("invariant: trailing order exists in book")
+                    .watermark = Some(new_watermark);
                 continue;
             }
 
@@ -308,7 +314,10 @@ impl StopBook {
             }
 
             // Always update watermark and (conditionally) stop price
-            let order = self.orders.get_mut(&id).unwrap();
+            let order = self
+                .orders
+                .get_mut(&id)
+                .expect("invariant: trailing order exists in book");
             if should_update {
                 order.stop_price = new_stop;
             }

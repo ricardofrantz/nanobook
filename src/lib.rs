@@ -148,6 +148,8 @@
 //! assert_eq!(snap.spread(), Some(100));  // $1.00
 //! ```
 
+#[cfg(feature = "portfolio")]
+pub mod backtest_bridge;
 mod book;
 mod error;
 mod event;

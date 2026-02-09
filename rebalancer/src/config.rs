@@ -85,6 +85,19 @@ pub struct RiskConfig {
     pub max_short_pct: f64,
 }
 
+impl Default for RiskConfig {
+    fn default() -> Self {
+        Self {
+            max_position_pct: default_max_position(),
+            max_leverage: default_max_leverage(),
+            min_trade_usd: default_min_trade(),
+            max_trade_usd: default_max_trade(),
+            allow_short: default_true(),
+            max_short_pct: default_max_short(),
+        }
+    }
+}
+
 fn default_max_position() -> f64 {
     0.25
 }
@@ -174,9 +187,7 @@ impl Config {
             return Err(Error::Config("max_trade_usd must be > 0".into()));
         }
         if self.risk.max_short_pct < 0.0 || self.risk.max_short_pct > 1.0 {
-            return Err(Error::Config(
-                "max_short_pct must be in [0.0, 1.0]".into(),
-            ));
+            return Err(Error::Config("max_short_pct must be in [0.0, 1.0]".into()));
         }
         Ok(())
     }

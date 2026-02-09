@@ -16,7 +16,7 @@ path = "src/lib.rs"
 
 [dependencies]
 nanobook = { path = "..", features = ["portfolio", "serde"] }
-ibapi = { version = "2.7", default-features = false, features = ["sync"] }
+nanobook-broker = { path = "../broker", features = ["ibkr"] }
 thiserror = "2.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

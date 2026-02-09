@@ -1,0 +1,30 @@
+[package]
+name = "nanobook-broker"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Broker trait and implementations (IBKR, Binance) for nanobook"
+license = "MIT"
+
+[features]
+default = []
+ibkr = ["dep:ibapi", "dep:log"]
+binance = ["dep:reqwest", "dep:hmac", "dep:sha2", "dep:hex", "dep:serde", "dep:serde_json", "dep:log"]
+
+[dependencies]
+nanobook = { path = "..", features = ["serde"] }
+thiserror = "2.0"
+
+# IBKR dependencies (optional)
+ibapi = { version = "2.7", default-features = false, features = ["sync"], optional = true }
+log = { version = "0.4", optional = true }
+
+# Binance dependencies (optional)
+reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
+hmac = { version = "0.12", optional = true }
+sha2 = { version = "0.10", optional = true }
+hex = { version = "0.4", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]

@@ -249,8 +249,8 @@ mod tests {
             &[],          // no current positions
             &[(aapl(), 0.5)],
             &[(aapl(), 185_00)],
-            5,       // 5 bps offset
-            100_00,  // $100 min trade
+            5,      // 5 bps offset
+            100_00, // $100 min trade
         );
 
         assert_eq!(orders.len(), 1);
@@ -356,7 +356,7 @@ mod tests {
             &[],
             &[(aapl(), 0.5)],
             &[(aapl(), 200_00)], // $200
-            10,                   // 10 bps
+            10,                  // 10 bps
             0,
         );
 

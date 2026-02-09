@@ -60,10 +60,7 @@ impl TargetSpec {
         let mut seen = std::collections::HashSet::new();
         for t in &self.targets {
             if !seen.insert(&t.symbol) {
-                return Err(Error::Target(format!(
-                    "duplicate symbol: {}",
-                    t.symbol
-                )));
+                return Err(Error::Target(format!("duplicate symbol: {}", t.symbol)));
             }
         }
 

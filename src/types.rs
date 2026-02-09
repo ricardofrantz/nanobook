@@ -78,6 +78,7 @@ pub struct Symbol {
 
 impl Symbol {
     /// Create a symbol from a string slice. Panics if longer than 8 bytes.
+    #[track_caller]
     pub fn new(s: &str) -> Self {
         Self::try_new(s).expect("Symbol must be at most 8 bytes")
     }
@@ -93,6 +94,26 @@ impl Symbol {
             buf,
             len: s.len() as u8,
         })
+    }
+
+    /// Create a symbol, silently truncating to 8 bytes if longer.
+    ///
+    /// Useful for external input (ITCH feeds, broker APIs) where symbols
+    /// may exceed the 8-byte limit and truncation is acceptable.
+    pub fn from_str_truncated(s: &str) -> Self {
+        let len = s.len().min(8);
+        // Ensure we don't split a multi-byte UTF-8 character
+        let truncated = &s.as_bytes()[..len];
+        let valid_len = match std::str::from_utf8(truncated) {
+            Ok(_) => len,
+            Err(e) => e.valid_up_to(),
+        };
+        let mut buf = [0u8; 8];
+        buf[..valid_len].copy_from_slice(&s.as_bytes()[..valid_len]);
+        Self {
+            buf,
+            len: valid_len as u8,
+        }
     }
 
     /// Returns the symbol as a string slice.

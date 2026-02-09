@@ -1,3 +1,5 @@
+mod backtest_bridge;
+mod broker;
 mod event;
 mod exchange;
 #[cfg(feature = "itch")]
@@ -8,6 +10,7 @@ mod order;
 mod portfolio;
 mod position;
 mod results;
+mod risk;
 mod strategy;
 mod sweep;
 mod types;
@@ -18,7 +21,14 @@ use pyo3::prelude::*;
 /// and matching engine for testing trading algorithms.
 #[pymodule]
 fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add("__version__", "0.5.0")?;
+    m.add("__version__", "0.7.0")?;
+
+    // Broker types
+    m.add_class::<broker::PyIbkrBroker>()?;
+    m.add_class::<broker::PyBinanceBroker>()?;
+
+    // Risk engine
+    m.add_class::<risk::PyRiskEngine>()?;
 
     // Core exchange types
     m.add_class::<exchange::PyExchange>()?;
@@ -46,6 +56,7 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(metrics::py_compute_metrics, m)?)?;
     m.add_function(wrap_pyfunction!(sweep::py_sweep_equal_weight, m)?)?;
     m.add_function(wrap_pyfunction!(strategy::py_run_backtest, m)?)?;
+    m.add_function(wrap_pyfunction!(backtest_bridge::py_backtest_weights, m)?)?;
     #[cfg(feature = "itch")]
     m.add_function(wrap_pyfunction!(itch::parse_itch, m)?)?;
 

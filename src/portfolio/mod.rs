@@ -89,7 +89,9 @@ impl Portfolio {
     /// Create a new portfolio with initial cash and cost model.
     ///
     /// `initial_cash` is in cents (e.g., `1_000_000_00` = $1,000,000).
+    /// Negative initial cash is a programming error (use `debug_assert`).
     pub fn new(initial_cash: i64, cost_model: CostModel) -> Self {
+        debug_assert!(initial_cash >= 0, "initial_cash must be non-negative, got {initial_cash}");
         Self {
             cash: initial_cash,
             positions: FxHashMap::default(),
@@ -200,11 +202,11 @@ impl Portfolio {
 
         for sym in to_close {
             if let Some(price) = price_map.get(&sym).copied() {
-                let pos = self.positions.get(&sym).unwrap();
-                if !pos.is_flat() {
-                    let qty = -pos.quantity;
-                    self.execute_fill(sym, qty, price);
-                }
+                let qty = match self.positions.get(&sym) {
+                    Some(pos) if !pos.is_flat() => -pos.quantity,
+                    _ => continue,
+                };
+                self.execute_fill(sym, qty, price);
             }
         }
 
@@ -279,15 +281,16 @@ impl Portfolio {
             .collect();
 
         for sym in to_close {
-            let pos = self.positions.get(&sym).unwrap();
-            if pos.is_flat() {
-                continue;
-            }
-            let qty = pos.quantity.unsigned_abs();
-            let side = if pos.quantity > 0 {
-                crate::Side::Sell
-            } else {
-                crate::Side::Buy
+            let (qty, side) = match self.positions.get(&sym) {
+                Some(pos) if !pos.is_flat() => {
+                    let side = if pos.quantity > 0 {
+                        crate::Side::Sell
+                    } else {
+                        crate::Side::Buy
+                    };
+                    (pos.quantity.unsigned_abs(), side)
+                }
+                _ => continue,
             };
             let exchange = exchanges.get_or_create(&sym);
             let result = exchange.submit_market(side, qty);
