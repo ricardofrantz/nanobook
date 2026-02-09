@@ -28,6 +28,19 @@ pub struct Metrics {
     pub winning_periods: usize,
     /// Periods with negative return
     pub losing_periods: usize,
+
+    // --- v0.8 extended metrics ---
+
+    /// Conditional Value at Risk at 95% confidence (mean of worst 5% returns)
+    pub cvar_95: f64,
+    /// Win rate: fraction of positive-return periods
+    pub win_rate: f64,
+    /// Profit factor: sum(positive returns) / |sum(negative returns)|
+    pub profit_factor: f64,
+    /// Payoff ratio: mean(winning returns) / |mean(losing returns)|
+    pub payoff_ratio: f64,
+    /// Kelly criterion: win_rate - (1 - win_rate) / payoff_ratio
+    pub kelly: f64,
 }
 
 impl std::fmt::Display for Metrics {
@@ -44,7 +57,12 @@ impl std::fmt::Display for Metrics {
             f,
             "  Win/Loss/Total:  {}/{}/{}",
             self.winning_periods, self.losing_periods, self.num_periods
-        )
+        )?;
+        writeln!(f, "  CVaR (95%):      {:>8.2}%", self.cvar_95 * 100.0)?;
+        writeln!(f, "  Win rate:        {:>8.2}%", self.win_rate * 100.0)?;
+        writeln!(f, "  Profit factor:   {:>8.2}", self.profit_factor)?;
+        writeln!(f, "  Payoff ratio:    {:>8.2}", self.payoff_ratio)?;
+        write!(f, "  Kelly:           {:>8.2}%", self.kelly * 100.0)
     }
 }
 
@@ -134,6 +152,51 @@ pub fn compute_metrics(returns: &[f64], periods_per_year: f64, risk_free: f64) -
     let winning_periods = returns.iter().filter(|&&r| r > 0.0).count();
     let losing_periods = returns.iter().filter(|&&r| r < 0.0).count();
 
+    // --- v0.8 extended metrics ---
+
+    // CVaR (95%): mean of worst 5% of returns
+    let cvar_95 = compute_cvar(returns, 0.05);
+
+    // Win rate
+    let win_rate = winning_periods as f64 / n as f64;
+
+    // Profit factor: sum(positive) / |sum(negative)|
+    let sum_positive: f64 = returns.iter().filter(|&&r| r > 0.0).sum();
+    let sum_negative: f64 = returns.iter().filter(|&&r| r < 0.0).sum();
+    let profit_factor = if sum_negative != 0.0 {
+        sum_positive / sum_negative.abs()
+    } else if sum_positive > 0.0 {
+        f64::INFINITY
+    } else {
+        0.0
+    };
+
+    // Payoff ratio: mean(winning) / |mean(losing)|
+    let mean_winning = if winning_periods > 0 {
+        sum_positive / winning_periods as f64
+    } else {
+        0.0
+    };
+    let mean_losing = if losing_periods > 0 {
+        sum_negative / losing_periods as f64
+    } else {
+        0.0
+    };
+    let payoff_ratio = if mean_losing != 0.0 {
+        mean_winning / mean_losing.abs()
+    } else if mean_winning > 0.0 {
+        f64::INFINITY
+    } else {
+        0.0
+    };
+
+    // Kelly criterion: w - (1 - w) / b
+    let kelly = if payoff_ratio > 0.0 && payoff_ratio.is_finite() {
+        win_rate - (1.0 - win_rate) / payoff_ratio
+    } else {
+        0.0
+    };
+
     Some(Metrics {
         total_return,
         cagr,
@@ -145,6 +208,11 @@ pub fn compute_metrics(returns: &[f64], periods_per_year: f64, risk_free: f64) -
         num_periods: n,
         winning_periods,
         losing_periods,
+        cvar_95,
+        win_rate,
+        profit_factor,
+        payoff_ratio,
+        kelly,
     })
 }
 
@@ -166,6 +234,84 @@ fn compute_max_drawdown(returns: &[f64]) -> f64 {
     }
 
     max_dd
+}
+
+/// Conditional Value at Risk (CVaR / Expected Shortfall).
+///
+/// Mean of the worst `alpha` fraction of returns (default alpha=0.05 for 95% CVaR).
+/// Matches quantstats convention: alpha=0.05 → mean of worst 5%.
+fn compute_cvar(returns: &[f64], alpha: f64) -> f64 {
+    if returns.is_empty() || alpha <= 0.0 || alpha >= 1.0 {
+        return 0.0;
+    }
+
+    let mut sorted: Vec<f64> = returns.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let cutoff = ((returns.len() as f64 * alpha).ceil() as usize).max(1);
+    let tail = &sorted[..cutoff];
+    tail.iter().sum::<f64>() / tail.len() as f64
+}
+
+/// Rolling Sharpe ratio over a sliding window.
+///
+/// Returns NaN for positions where the window is incomplete.
+///
+/// # Arguments
+///
+/// * `returns` — Return series.
+/// * `window` — Window size (e.g., 63 for quarterly).
+/// * `periods_per_year` — Annualization factor (e.g., 252).
+pub fn rolling_sharpe(returns: &[f64], window: usize, periods_per_year: usize) -> Vec<f64> {
+    let n = returns.len();
+    let mut out = vec![f64::NAN; n];
+    if n < window || window < 2 {
+        return out;
+    }
+
+    let ppy = periods_per_year as f64;
+
+    for i in (window - 1)..n {
+        let w = &returns[i + 1 - window..=i];
+        let mean = w.iter().sum::<f64>() / window as f64;
+        let var = w.iter().map(|&r| (r - mean).powi(2)).sum::<f64>() / (window - 1) as f64;
+        let std = var.sqrt();
+        out[i] = if std > 0.0 {
+            mean * ppy.sqrt() / std
+        } else {
+            0.0
+        };
+    }
+
+    out
+}
+
+/// Rolling annualized volatility over a sliding window.
+///
+/// Returns NaN for positions where the window is incomplete.
+///
+/// # Arguments
+///
+/// * `returns` — Return series.
+/// * `window` — Window size (e.g., 63 for quarterly).
+/// * `periods_per_year` — Annualization factor (e.g., 252).
+pub fn rolling_volatility(returns: &[f64], window: usize, periods_per_year: usize) -> Vec<f64> {
+    let n = returns.len();
+    let mut out = vec![f64::NAN; n];
+    if n < window || window < 2 {
+        return out;
+    }
+
+    let ppy = periods_per_year as f64;
+
+    for i in (window - 1)..n {
+        let w = &returns[i + 1 - window..=i];
+        let mean = w.iter().sum::<f64>() / window as f64;
+        let var = w.iter().map(|&r| (r - mean).powi(2)).sum::<f64>() / (window - 1) as f64;
+        out[i] = var.sqrt() * ppy.sqrt();
+    }
+
+    out
 }
 
 #[cfg(test)]
@@ -262,5 +408,93 @@ mod tests {
         assert!(s.contains("Total return:"));
         assert!(s.contains("Sharpe:"));
         assert!(s.contains("Max drawdown:"));
+        assert!(s.contains("CVaR"));
+        assert!(s.contains("Win rate:"));
+        assert!(s.contains("Kelly:"));
+    }
+
+    // --- v0.8 extended metrics tests ---
+
+    #[test]
+    fn win_rate_all_positive() {
+        let returns = vec![0.01, 0.02, 0.03];
+        let m = compute_metrics(&returns, 252.0, 0.0).unwrap();
+        assert!((m.win_rate - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn win_rate_half() {
+        let returns = vec![0.01, -0.01, 0.01, -0.01];
+        let m = compute_metrics(&returns, 252.0, 0.0).unwrap();
+        assert!((m.win_rate - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn profit_factor_positive() {
+        let returns = vec![0.02, -0.01, 0.03, -0.005];
+        let m = compute_metrics(&returns, 252.0, 0.0).unwrap();
+        // sum_positive = 0.05, sum_negative = 0.015
+        assert!(m.profit_factor > 1.0);
+        assert!((m.profit_factor - 0.05 / 0.015).abs() < 1e-10);
+    }
+
+    #[test]
+    fn profit_factor_all_positive() {
+        let returns = vec![0.01, 0.02, 0.03];
+        let m = compute_metrics(&returns, 252.0, 0.0).unwrap();
+        assert!(m.profit_factor.is_infinite());
+    }
+
+    #[test]
+    fn payoff_ratio() {
+        let returns = vec![0.02, -0.01, 0.04, -0.02];
+        let m = compute_metrics(&returns, 252.0, 0.0).unwrap();
+        // mean_winning = (0.02 + 0.04) / 2 = 0.03
+        // mean_losing = (-0.01 + -0.02) / 2 = -0.015
+        // payoff_ratio = 0.03 / 0.015 = 2.0
+        assert!((m.payoff_ratio - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn kelly_criterion() {
+        let returns = vec![0.02, -0.01, 0.04, -0.02];
+        let m = compute_metrics(&returns, 252.0, 0.0).unwrap();
+        // win_rate = 0.5, payoff_ratio = 2.0
+        // kelly = 0.5 - (1-0.5)/2.0 = 0.5 - 0.25 = 0.25
+        assert!((m.kelly - 0.25).abs() < 1e-10);
+    }
+
+    #[test]
+    fn cvar_negative_tail() {
+        // Returns with known negative tail
+        let mut returns: Vec<f64> = vec![0.01; 95];
+        returns.extend(vec![-0.10; 5]); // 5% worst = -10%
+        let m = compute_metrics(&returns, 252.0, 0.0).unwrap();
+        assert!(m.cvar_95 < 0.0, "CVaR should be negative");
+        // CVaR should be approximately -0.10
+        assert!((m.cvar_95 - (-0.10)).abs() < 0.01);
+    }
+
+    #[test]
+    fn rolling_sharpe_basic() {
+        let returns = vec![0.01; 100];
+        let result = rolling_sharpe(&returns, 20, 252);
+        assert_eq!(result.len(), 100);
+        // First 19 should be NaN
+        for i in 0..19 {
+            assert!(result[i].is_nan());
+        }
+        // Constant returns → zero std → Sharpe = 0
+        assert!(!result[19].is_nan());
+    }
+
+    #[test]
+    fn rolling_volatility_basic() {
+        let returns = vec![0.01, -0.01, 0.01, -0.01, 0.01, -0.01, 0.01, -0.01, 0.01, -0.01];
+        let result = rolling_volatility(&returns, 5, 252);
+        assert_eq!(result.len(), 10);
+        assert!(result[3].is_nan());
+        assert!(!result[4].is_nan());
+        assert!(result[4] > 0.0);
     }
 }

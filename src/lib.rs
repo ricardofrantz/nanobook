@@ -151,11 +151,13 @@
 #[cfg(feature = "portfolio")]
 pub mod backtest_bridge;
 mod book;
+pub mod cv;
 mod error;
 mod event;
 mod exchange;
 #[cfg(feature = "itch")]
 pub mod itch;
+pub mod indicators;
 mod level;
 mod matching;
 pub mod multi_exchange;
@@ -168,6 +170,7 @@ mod price_levels;
 mod result;
 mod side;
 mod snapshot;
+pub mod stats;
 pub mod stop;
 mod tif;
 mod trade;

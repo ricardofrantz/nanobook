@@ -1,4 +1,4 @@
-use nanobook::portfolio::{Metrics, compute_metrics};
+use nanobook::portfolio::metrics::{compute_metrics, rolling_sharpe, rolling_volatility, Metrics};
 use pyo3::prelude::*;
 
 /// Performance metrics for a return series.
@@ -25,16 +25,29 @@ pub struct PyMetrics {
     pub winning_periods: usize,
     #[pyo3(get)]
     pub losing_periods: usize,
+
+    // v0.8 extended metrics
+    #[pyo3(get)]
+    pub cvar_95: f64,
+    #[pyo3(get)]
+    pub win_rate: f64,
+    #[pyo3(get)]
+    pub profit_factor: f64,
+    #[pyo3(get)]
+    pub payoff_ratio: f64,
+    #[pyo3(get)]
+    pub kelly: f64,
 }
 
 #[pymethods]
 impl PyMetrics {
     fn __repr__(&self) -> String {
         format!(
-            "Metrics(total_return={:.2}%, sharpe={:.2}, max_drawdown={:.2}%)",
+            "Metrics(total_return={:.2}%, sharpe={:.2}, max_drawdown={:.2}%, win_rate={:.1}%)",
             self.total_return * 100.0,
             self.sharpe,
             self.max_drawdown * 100.0,
+            self.win_rate * 100.0,
         )
     }
 }
@@ -52,6 +65,11 @@ impl From<Metrics> for PyMetrics {
             num_periods: m.num_periods,
             winning_periods: m.winning_periods,
             losing_periods: m.losing_periods,
+            cvar_95: m.cvar_95,
+            win_rate: m.win_rate,
+            profit_factor: m.profit_factor,
+            payoff_ratio: m.payoff_ratio,
+            kelly: m.kelly,
         }
     }
 }
@@ -68,8 +86,8 @@ impl From<Metrics> for PyMetrics {
 ///
 /// Example::
 ///
-///     m = compute_metrics([0.01, -0.005, 0.02], 252.0, 0.0)
-///     print(m.sharpe)
+///     m = nanobook.py_compute_metrics([0.01, -0.005, 0.02], 252.0, 0.0)
+///     print(m.sharpe, m.cvar_95, m.kelly)
 ///
 #[pyfunction]
 #[pyo3(signature = (returns, periods_per_year=252.0, risk_free=0.0))]
@@ -79,4 +97,48 @@ pub fn py_compute_metrics(
     risk_free: f64,
 ) -> Option<PyMetrics> {
     compute_metrics(&returns, periods_per_year, risk_free).map(PyMetrics::from)
+}
+
+/// Compute rolling Sharpe ratio over a sliding window.
+///
+/// Args:
+///     returns: List of periodic returns.
+///     window: Window size (e.g., 63 for quarterly).
+///     periods_per_year: Annualization factor (default 252).
+///
+/// Returns:
+///     List of rolling Sharpe values. NaN for incomplete windows.
+///
+/// Example::
+///
+///     rolling = nanobook.py_rolling_sharpe(daily_returns, 63, 252)
+///
+#[pyfunction]
+#[pyo3(signature = (returns, window, periods_per_year=252))]
+pub fn py_rolling_sharpe(returns: Vec<f64>, window: usize, periods_per_year: usize) -> Vec<f64> {
+    rolling_sharpe(&returns, window, periods_per_year)
+}
+
+/// Compute rolling annualized volatility over a sliding window.
+///
+/// Args:
+///     returns: List of periodic returns.
+///     window: Window size (e.g., 63 for quarterly).
+///     periods_per_year: Annualization factor (default 252).
+///
+/// Returns:
+///     List of rolling volatility values. NaN for incomplete windows.
+///
+/// Example::
+///
+///     rolling = nanobook.py_rolling_volatility(daily_returns, 63, 252)
+///
+#[pyfunction]
+#[pyo3(signature = (returns, window, periods_per_year=252))]
+pub fn py_rolling_volatility(
+    returns: Vec<f64>,
+    window: usize,
+    periods_per_year: usize,
+) -> Vec<f64> {
+    rolling_volatility(&returns, window, periods_per_year)
 }
