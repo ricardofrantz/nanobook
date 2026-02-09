@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "nanobook"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Production-grade Rust execution infrastructure for automated trading: LOB engine, portfolio simulator, broker abstraction, risk engine"
