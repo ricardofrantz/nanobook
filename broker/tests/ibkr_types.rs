@@ -5,7 +5,7 @@
 
 #[cfg(feature = "ibkr")]
 mod ibkr_tests {
-    use nanobook_broker::ibkr::orders::{rate_limit_delay, OrderOutcome};
+    use nanobook_broker::ibkr::orders::{OrderOutcome, rate_limit_delay};
 
     // ========================================================================
     // OrderOutcome
@@ -55,8 +55,8 @@ mod ibkr_tests {
 
     #[test]
     fn ibkr_broker_not_connected() {
-        use nanobook_broker::ibkr::IbkrBroker;
         use nanobook_broker::Broker;
+        use nanobook_broker::ibkr::IbkrBroker;
 
         let broker = IbkrBroker::new("127.0.0.1", 4002, 100);
         // Client should be None before connect
@@ -72,9 +72,9 @@ mod ibkr_tests {
 // ============================================================================
 
 use nanobook::Symbol;
-use nanobook_broker::types::*;
-use nanobook_broker::mock::{FillMode, MockBroker};
 use nanobook_broker::Broker;
+use nanobook_broker::mock::{FillMode, MockBroker};
+use nanobook_broker::types::*;
 
 #[test]
 fn broker_side_debug() {

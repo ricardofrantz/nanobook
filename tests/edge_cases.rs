@@ -183,8 +183,8 @@ fn ioc_partial_fill() {
 
 #[cfg(feature = "portfolio")]
 mod portfolio_edges {
-    use nanobook::portfolio::{CostModel, Portfolio};
     use nanobook::Symbol;
+    use nanobook::portfolio::{CostModel, Portfolio};
 
     fn aapl() -> Symbol {
         Symbol::new("AAPL")

@@ -17,9 +17,9 @@ use std::sync::Mutex;
 
 use nanobook::Symbol;
 
+use crate::Broker;
 use crate::error::BrokerError;
 use crate::types::*;
-use crate::Broker;
 
 /// How the mock broker handles submitted orders.
 #[derive(Clone, Debug)]
@@ -290,9 +290,7 @@ mod tests {
 
     #[test]
     fn reject_mode() {
-        let mut broker = MockBroker::builder()
-            .fill_mode(FillMode::Reject)
-            .build();
+        let mut broker = MockBroker::builder().fill_mode(FillMode::Reject).build();
         broker.connect().unwrap();
 
         let order = BrokerOrder {
