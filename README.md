@@ -14,18 +14,18 @@ Python computes the strategy. nanobook handles everything else.
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────┐
-│         Your Python Strategy (private)            │
-│    Factors · Signals · Sizing · Scheduling        │
-├──────────────────────────────────────────────────┤
-│              nanobook  (Rust, open-source)         │
-│  ┌─────────┬──────────┬───────────┬────────────┐ │
-│  │ Broker  │   Risk   │ Portfolio │    LOB     │ │
-│  │  IBKR   │  Engine  │ Simulator │   Engine   │ │
-│  │ Binance │ PreTrade │ Backtest  │  8M ops/s  │ │
-│  └─────────┴──────────┴───────────┴────────────┘ │
-│    Rebalancer CLI: weights → diff → execute       │
-└──────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│        Your Python Strategy  (private)          │
+│   Factors · Signals · Sizing · Scheduling       │
+├─────────────────────────────────────────────────┤
+│            nanobook  (Rust, open-source)         │
+│  ┌──────────┬──────────┬──────────┬──────────┐  │
+│  │  Broker  │   Risk   │Portfolio │   LOB    │  │
+│  │   IBKR   │  Engine  │Simulator │  Engine  │  │
+│  │  Binance │ PreTrade │ Backtest │ 8M ops/s │  │
+│  └──────────┴──────────┴──────────┴──────────┘  │
+│   Rebalancer CLI: weights → diff → execute      │
+└─────────────────────────────────────────────────┘
 ```
 
 Python computes **what** to trade — factor rankings, signals, target weights.
@@ -55,7 +55,7 @@ pip install nanobook
 
 ```toml
 [dependencies]
-nanobook = "0.6"
+nanobook = "0.7"
 ```
 
 **From source:**
