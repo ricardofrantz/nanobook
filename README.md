@@ -196,7 +196,6 @@ Engineering decisions that keep the system simple and fast:
 ## Documentation
 
 - **[DOC.md](DOC.md)** — Developer reference: full API, types, patterns, advanced usage
-- **[SPECS.md](SPECS.md)** — Technical specification
 - **[docs.rs](https://docs.rs/nanobook)** — Rust API docs
 
 ## License

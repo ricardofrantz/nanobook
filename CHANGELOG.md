@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-02-09
+
+### Added
+
+- **`nanobook-broker` crate**: Generic `Broker` trait with IBKR and Binance implementations
+  - `MockBroker` with builder pattern, configurable fill modes, order recording
+  - IBKR: TWS/Gateway blocking client, order execution with fill monitoring
+  - Binance: REST spot client, HMAC-SHA256 auth, book ticker quotes
+- **`nanobook-risk` crate**: Pre-trade risk engine
+  - `RiskEngine::check_order()` — single-order position/leverage/short checks
+  - `RiskEngine::check_batch()` — batch validation with aggregate limits
+  - `RiskConfig::validate()` — fail-fast config validation at construction
+- **Backtest bridge** (`backtest_weights`): Schedule-driven portfolio simulator
+  with input validation (NaN/Inf, mismatched lengths, negative prices)
+- **`Symbol::from_str_truncated()`**: Safe truncation with UTF-8 boundary handling
+  for external input (broker feeds, ITCH data)
+- **CI hardening**:
+  - `cargo-deny` + `cargo-audit` security scanning with `deny.toml` policy
+  - MIRI for undefined behavior detection (strict provenance, alignment checks)
+  - `cargo-llvm-cov` code coverage → Codecov
+- **446 tests** (was ~333, +34%):
+  - Property tests: backtest bridge, portfolio overflow, risk engine
+  - Edge cases: adversarial inputs for all public APIs
+  - Risk engine `check_order` tests (was zero)
+  - Broker parsing: Binance JSON round-trips, IBKR type tests
+  - Rebalancer integration: execution helpers, constraint overrides, diff
+
+### Changed
+
+- `#[track_caller]` on `Symbol::new()` for better panic diagnostics
+- Bare `unwrap()` → `expect("invariant: ...")` in matching engine and stop book
+- Portfolio `unwrap()` sites → graceful `match` patterns
+- Rebalancer execution helpers promoted to `pub` for testability
+- `RiskConfig` gains `Default` impl (reuses serde defaults)
+
+### Fixed
+
+- Binance auth clock panic: `.expect()` → `.unwrap_or(Duration::ZERO)`
+- Backtest bridge `.zip()` silently truncating mismatched schedule lengths
+
+### Removed
+
+- `examples/demo.rs` — 354-line educational walkthrough (superseded by `basic_usage.rs`)
+- `SPECS.md` — outdated technical spec (superseded by `DOC.md`)
+
 ## [0.6.0] - 2026-02-06
 
 ### Added
@@ -177,7 +222,8 @@ Initial release of nanobook - a deterministic limit order book and matching engi
 - Fixed-point price representation (avoids floating-point errors)
 - Deterministic via monotonic timestamps (not system clock)
 
-[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/ricardofrantz/nanobook/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/ricardofrantz/nanobook/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ricardofrantz/nanobook/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ricardofrantz/nanobook/compare/v0.3.0...v0.4.0

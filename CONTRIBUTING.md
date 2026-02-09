@@ -64,18 +64,15 @@ cargo bench
 
 ## Architecture
 
-See [SPECS.md](SPECS.md) for the technical specification. Key modules:
+See [DOC.md](DOC.md) for the developer reference. Key crates:
 
-| Module | Purpose |
-|--------|---------|
-| `types.rs` | Core types (Price, Quantity, etc.) |
-| `order.rs` | Order struct and status |
-| `level.rs` | FIFO queue at a single price |
-| `price_levels.rs` | One side of the book |
-| `book.rs` | Complete order book |
-| `matching.rs` | Price-time priority algorithm |
-| `exchange.rs` | High-level API |
-| `event.rs` | Event log for replay |
+| Crate | Purpose |
+|-------|---------|
+| `nanobook` | Core LOB engine, portfolio simulator, backtest bridge |
+| `nanobook-broker` | Broker trait + IBKR/Binance implementations + mock |
+| `nanobook-risk` | Pre-trade risk engine (position limits, leverage, drawdown) |
+| `nanobook-rebalancer` | Target-weight portfolio rebalancer with audit trail |
+| `python/` | PyO3 bindings for all of the above |
 
 ## Reporting Issues
 
