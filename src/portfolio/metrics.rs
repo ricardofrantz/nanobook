@@ -238,19 +238,100 @@ fn compute_max_drawdown(returns: &[f64]) -> f64 {
 
 /// Conditional Value at Risk (CVaR / Expected Shortfall).
 ///
-/// Mean of the worst `alpha` fraction of returns (default alpha=0.05 for 95% CVaR).
-/// Matches quantstats convention: alpha=0.05 → mean of worst 5%.
+/// Matches quantstats convention: parametric VaR via normal distribution,
+/// then mean of returns strictly below VaR.
 fn compute_cvar(returns: &[f64], alpha: f64) -> f64 {
     if returns.is_empty() || alpha <= 0.0 || alpha >= 1.0 {
         return 0.0;
     }
 
-    let mut sorted: Vec<f64> = returns.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = returns.len() as f64;
+    let mu = returns.iter().sum::<f64>() / n;
+    let var_pop = returns.iter().map(|&r| (r - mu).powi(2)).sum::<f64>() / (n - 1.0);
+    let sigma = var_pop.sqrt();
 
-    let cutoff = ((returns.len() as f64 * alpha).ceil() as usize).max(1);
-    let tail = &sorted[..cutoff];
+    // Parametric VaR: norm.ppf(alpha, mu, sigma)
+    // ppf(0.05) for standard normal ≈ -1.6448536269514729
+    let z = norm_ppf(alpha);
+    let var_threshold = mu + sigma * z;
+
+    // CVaR: mean of returns strictly below VaR
+    let tail: Vec<f64> = returns.iter().copied().filter(|&r| r < var_threshold).collect();
+    if tail.is_empty() {
+        return *returns
+            .iter()
+            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or(&0.0);
+    }
     tail.iter().sum::<f64>() / tail.len() as f64
+}
+
+/// Inverse of the standard normal CDF (probit function).
+///
+/// Uses the rational approximation from Abramowitz & Stegun / Peter Acklam.
+fn norm_ppf(p: f64) -> f64 {
+    if p <= 0.0 {
+        return f64::NEG_INFINITY;
+    }
+    if p >= 1.0 {
+        return f64::INFINITY;
+    }
+    if (p - 0.5).abs() < 1e-15 {
+        return 0.0;
+    }
+
+    // Rational approximation coefficients (Acklam) — exact values required for accuracy.
+    #[allow(clippy::excessive_precision)]
+    const A: [f64; 6] = [
+        -3.969_683_028_665_376e1,
+        2.209_460_984_245_205e2,
+        -2.759_285_104_469_687e2,
+        1.383_577_518_672_690e2,
+        -3.066_479_806_614_716e1,
+        2.506_628_277_459_239e0,
+    ];
+    const B: [f64; 5] = [
+        -5.447_609_879_822_406e1,
+        1.615_858_368_580_409e2,
+        -1.556_989_798_598_866e2,
+        6.680_131_188_771_972e1,
+        -1.328_068_155_288_572e1,
+    ];
+    const C: [f64; 6] = [
+        -7.784_894_002_430_293e-3,
+        -3.223_964_580_411_365e-1,
+        -2.400_758_277_161_838e0,
+        -2.549_732_539_343_734e0,
+        4.374_664_141_464_968e0,
+        2.938_163_982_698_783e0,
+    ];
+    const D: [f64; 4] = [
+        7.784_695_709_041_462e-3,
+        3.224_671_290_700_398e-1,
+        2.445_134_137_142_996e0,
+        3.754_408_661_907_416e0,
+    ];
+
+    const P_LOW: f64 = 0.02425;
+    const P_HIGH: f64 = 1.0 - P_LOW;
+
+    if p < P_LOW {
+        // Rational approximation for lower region
+        let q = (-2.0 * p.ln()).sqrt();
+        (((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
+            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
+    } else if p <= P_HIGH {
+        // Rational approximation for central region
+        let q = p - 0.5;
+        let r = q * q;
+        (((((A[0] * r + A[1]) * r + A[2]) * r + A[3]) * r + A[4]) * r + A[5]) * q
+            / (((((B[0] * r + B[1]) * r + B[2]) * r + B[3]) * r + B[4]) * r + 1.0)
+    } else {
+        // Rational approximation for upper region
+        let q = (-2.0 * (1.0 - p).ln()).sqrt();
+        -(((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
+            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
+    }
 }
 
 /// Rolling Sharpe ratio over a sliding window.
@@ -481,8 +562,8 @@ mod tests {
         let result = rolling_sharpe(&returns, 20, 252);
         assert_eq!(result.len(), 100);
         // First 19 should be NaN
-        for i in 0..19 {
-            assert!(result[i].is_nan());
+        for v in result.iter().take(19) {
+            assert!(v.is_nan());
         }
         // Constant returns → zero std → Sharpe = 0
         assert!(!result[19].is_nan());

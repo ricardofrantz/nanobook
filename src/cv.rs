@@ -33,14 +33,14 @@
 /// let splits = time_series_split(10, 3);
 /// assert_eq!(splits.len(), 3);
 ///
-/// // Fold 0: train=[0,1], test=[2,3]
-/// // Fold 1: train=[0,1,2,3], test=[4,5]
-/// // Fold 2: train=[0,1,2,3,4,5], test=[6,7]
-/// assert_eq!(splits[0].0, vec![0, 1]);
-/// assert_eq!(splits[0].1, vec![2, 3]);
+/// // Fold 0: train=[0..4], test=[4,5]
+/// // Fold 1: train=[0..6], test=[6,7]
+/// // Fold 2: train=[0..8], test=[8,9]
+/// assert_eq!(splits[0].0, vec![0, 1, 2, 3]);
+/// assert_eq!(splits[0].1, vec![4, 5]);
 /// ```
 pub fn time_series_split(n_samples: usize, n_splits: usize) -> Vec<(Vec<usize>, Vec<usize>)> {
-    if n_splits == 0 || n_samples < 2 {
+    if n_splits < 2 || n_samples < 2 {
         return vec![];
     }
 
@@ -49,18 +49,16 @@ pub fn time_series_split(n_samples: usize, n_splits: usize) -> Vec<(Vec<usize>, 
         return vec![];
     }
 
+    // Match sklearn: test_starts = range(n - n_splits*test_size, n, test_size)
+    let first_test_start = n_samples - n_splits * test_size;
     let mut splits = Vec::with_capacity(n_splits);
 
     for i in 0..n_splits {
-        let train_end = test_size * (i + 1);
-        let test_end = train_end + test_size;
+        let test_start = first_test_start + i * test_size;
+        let test_end = test_start + test_size;
 
-        if test_end > n_samples {
-            break;
-        }
-
-        let train: Vec<usize> = (0..train_end).collect();
-        let test: Vec<usize> = (train_end..test_end).collect();
+        let train: Vec<usize> = (0..test_start).collect();
+        let test: Vec<usize> = (test_start..test_end).collect();
         splits.push((train, test));
     }
 
@@ -80,15 +78,15 @@ mod tests {
         let splits = time_series_split(10, 3);
         assert_eq!(splits.len(), 3);
 
-        // test_size = 10 / 4 = 2
-        assert_eq!(splits[0].0, vec![0, 1]);
-        assert_eq!(splits[0].1, vec![2, 3]);
+        // test_size = 10 / 4 = 2, first_test_start = 10 - 3*2 = 4
+        assert_eq!(splits[0].0, vec![0, 1, 2, 3]);
+        assert_eq!(splits[0].1, vec![4, 5]);
 
-        assert_eq!(splits[1].0, vec![0, 1, 2, 3]);
-        assert_eq!(splits[1].1, vec![4, 5]);
+        assert_eq!(splits[1].0, vec![0, 1, 2, 3, 4, 5]);
+        assert_eq!(splits[1].1, vec![6, 7]);
 
-        assert_eq!(splits[2].0, vec![0, 1, 2, 3, 4, 5]);
-        assert_eq!(splits[2].1, vec![6, 7]);
+        assert_eq!(splits[2].0, vec![0, 1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(splits[2].1, vec![8, 9]);
     }
 
     #[test]
@@ -140,11 +138,9 @@ mod tests {
 
     #[test]
     fn single_split() {
+        // sklearn requires n_splits >= 2; we match that constraint
         let splits = time_series_split(10, 1);
-        assert_eq!(splits.len(), 1);
-        // test_size = 10 / 2 = 5
-        assert_eq!(splits[0].0, vec![0, 1, 2, 3, 4]);
-        assert_eq!(splits[0].1, vec![5, 6, 7, 8, 9]);
+        assert!(splits.is_empty());
     }
 
     #[test]
