@@ -5,10 +5,13 @@ edition = "2024"
 rust-version = "1.85"
 description = "Pre-trade risk engine for nanobook"
 license = "MIT"
+repository = "https://github.com/ricardofrantz/nanobook"
+homepage = "https://github.com/ricardofrantz/nanobook"
+documentation = "https://docs.rs/nanobook-risk"
 
 [dependencies]
-nanobook = { path = "..", features = ["serde"] }
-nanobook-broker = { path = "../broker" }
+nanobook = { version = "0.8.0", path = "..", features = ["serde"] }
+nanobook-broker = { version = "0.2.0", path = "../broker" }
 rustc-hash = "2.1"
 serde = { version = "1", features = ["derive"] }
 

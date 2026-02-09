@@ -5,6 +5,9 @@ edition = "2024"
 rust-version = "1.85"
 description = "Broker trait and implementations (IBKR, Binance) for nanobook"
 license = "MIT"
+repository = "https://github.com/ricardofrantz/nanobook"
+homepage = "https://github.com/ricardofrantz/nanobook"
+documentation = "https://docs.rs/nanobook-broker"
 
 [features]
 default = []
@@ -12,7 +15,7 @@ ibkr = ["dep:ibapi", "dep:log"]
 binance = ["dep:reqwest", "dep:hmac", "dep:sha2", "dep:hex", "dep:serde", "dep:serde_json", "dep:log", "dep:zeroize"]
 
 [dependencies]
-nanobook = { path = "..", features = ["serde"] }
+nanobook = { version = "0.8.0", path = "..", features = ["serde"] }
 thiserror = "2.0"
 
 # IBKR dependencies (optional)
