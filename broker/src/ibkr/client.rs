@@ -171,7 +171,7 @@ impl IbkrClient {
     pub fn mid_price(&self, symbol: &Symbol) -> Result<i64, BrokerError> {
         let q = self.quote(symbol)?;
         let mid = match (q.bid_cents, q.ask_cents) {
-            (b, a) if b > 0 && a > 0 => (b + a) / 2,
+            (b, a) if b > 0 && a > 0 => b + (a - b) / 2,
             (b, _) if b > 0 => b,
             (_, a) if a > 0 => a,
             _ => q.last_cents,
