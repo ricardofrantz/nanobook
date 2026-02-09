@@ -501,8 +501,8 @@ proptest! {
 
 #[cfg(feature = "portfolio")]
 mod backtest_props {
-    use nanobook::backtest_bridge::backtest_weights;
     use nanobook::Symbol;
+    use nanobook::backtest_bridge::backtest_weights;
     use proptest::prelude::*;
 
     proptest! {
@@ -587,8 +587,8 @@ mod backtest_props {
 
 #[cfg(feature = "portfolio")]
 mod portfolio_props {
-    use nanobook::portfolio::{CostModel, Portfolio};
     use nanobook::Symbol;
+    use nanobook::portfolio::{CostModel, Portfolio};
     use proptest::prelude::*;
 
     proptest! {

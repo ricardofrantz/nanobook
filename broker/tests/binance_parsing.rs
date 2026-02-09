@@ -28,7 +28,10 @@ mod binance_tests {
     #[test]
     fn sign_empty_query() {
         let sig = auth::sign("", "secret");
-        assert!(!sig.is_empty(), "empty query should still produce a signature");
+        assert!(
+            !sig.is_empty(),
+            "empty query should still produce a signature"
+        );
         assert_eq!(sig.len(), 64, "SHA256 hex is always 64 chars");
     }
 
@@ -222,8 +225,8 @@ mod binance_tests {
 
     #[test]
     fn broker_not_connected_errors() {
-        use nanobook_broker::binance::BinanceBroker;
         use nanobook_broker::Broker;
+        use nanobook_broker::binance::BinanceBroker;
 
         let broker = BinanceBroker::new("test-key", "test-secret", true);
         // All operations should fail with NotConnected

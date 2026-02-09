@@ -163,14 +163,7 @@ fn short_not_allowed_fails() {
 
 #[test]
 fn zero_equity_does_not_panic() {
-    let report = engine().check_order(
-        &aapl(),
-        BrokerSide::Buy,
-        10,
-        150_00,
-        &account(0),
-        &[],
-    );
+    let report = engine().check_order(&aapl(), BrokerSide::Buy, 10, 150_00, &account(0), &[]);
     // Should not panic; position check defaults to 0%
     assert!(!report.has_failures());
 }
@@ -190,14 +183,7 @@ fn zero_quantity_does_not_panic() {
 
 #[test]
 fn zero_price_does_not_panic() {
-    let report = engine().check_order(
-        &aapl(),
-        BrokerSide::Buy,
-        100,
-        0,
-        &account(10_000_000),
-        &[],
-    );
+    let report = engine().check_order(&aapl(), BrokerSide::Buy, 100, 0, &account(10_000_000), &[]);
     assert!(!report.has_failures());
 }
 
@@ -266,12 +252,12 @@ fn leverage_below_one_fails_validation() {
 #[test]
 fn boundary_values_validate() {
     let config = RiskConfig {
-        max_position_pct: 1.0,  // exactly 100%
-        max_leverage: 1.0,       // exactly 1x
-        max_drawdown_pct: 0.0,   // zero drawdown allowed
-        max_short_pct: 0.0,      // no short allowed
-        min_trade_usd: 0.0,      // zero minimum
-        max_trade_usd: 0.0,      // zero maximum
+        max_position_pct: 1.0, // exactly 100%
+        max_leverage: 1.0,     // exactly 1x
+        max_drawdown_pct: 0.0, // zero drawdown allowed
+        max_short_pct: 0.0,    // no short allowed
+        min_trade_usd: 0.0,    // zero minimum
+        max_trade_usd: 0.0,    // zero maximum
         ..RiskConfig::default()
     };
     assert!(config.validate().is_ok());

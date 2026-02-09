@@ -53,8 +53,8 @@ fn symbol_truncated_all_ascii_normal() {
 
 #[cfg(feature = "portfolio")]
 mod backtest {
-    use nanobook::backtest_bridge::backtest_weights;
     use nanobook::Symbol;
+    use nanobook::backtest_bridge::backtest_weights;
 
     fn aapl() -> Symbol {
         Symbol::new("AAPL")
@@ -135,8 +135,8 @@ mod backtest {
 
 #[cfg(feature = "portfolio")]
 mod portfolio_safety {
-    use nanobook::portfolio::{CostModel, Portfolio};
     use nanobook::Symbol;
+    use nanobook::portfolio::{CostModel, Portfolio};
 
     fn aapl() -> Symbol {
         Symbol::new("AAPL")

@@ -6,7 +6,9 @@
 use nanobook::Symbol;
 use nanobook_broker::BrokerSide;
 use nanobook_rebalancer::diff::{Action, CurrentPosition};
-use nanobook_rebalancer::execution::{action_to_side, collect_all_symbols, apply_constraint_overrides};
+use nanobook_rebalancer::execution::{
+    action_to_side, apply_constraint_overrides, collect_all_symbols,
+};
 use nanobook_rebalancer::target::TargetSpec;
 
 fn aapl() -> Symbol {
@@ -50,7 +52,10 @@ fn action_buy_cover_maps_to_buy() {
 
 #[test]
 fn action_sell_short_maps_to_sell() {
-    assert!(matches!(action_to_side(Action::SellShort), BrokerSide::Sell));
+    assert!(matches!(
+        action_to_side(Action::SellShort),
+        BrokerSide::Sell
+    ));
 }
 
 // ============================================================================
@@ -160,14 +165,7 @@ fn compute_diff_no_changes_needed() {
 fn compute_diff_empty_everything() {
     use nanobook_rebalancer::diff::compute_diff;
 
-    let orders = compute_diff(
-        1_000_000_00,
-        &[],
-        &[],
-        &[],
-        0,
-        0,
-    );
+    let orders = compute_diff(1_000_000_00, &[], &[], &[], 0, 0);
 
     assert!(orders.is_empty());
 }

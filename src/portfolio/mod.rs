@@ -91,7 +91,10 @@ impl Portfolio {
     /// `initial_cash` is in cents (e.g., `1_000_000_00` = $1,000,000).
     /// Negative initial cash is a programming error (use `debug_assert`).
     pub fn new(initial_cash: i64, cost_model: CostModel) -> Self {
-        debug_assert!(initial_cash >= 0, "initial_cash must be non-negative, got {initial_cash}");
+        debug_assert!(
+            initial_cash >= 0,
+            "initial_cash must be non-negative, got {initial_cash}"
+        );
         Self {
             cash: initial_cash,
             positions: FxHashMap::default(),
