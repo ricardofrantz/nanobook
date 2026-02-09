@@ -4,8 +4,11 @@
 [![crates.io](https://img.shields.io/crates/v/nanobook.svg)](https://crates.io/crates/nanobook)
 [![docs.rs](https://docs.rs/nanobook/badge.svg)](https://docs.rs/nanobook)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![MIRI](https://img.shields.io/badge/MIRI-clean-brightgreen)](https://github.com/ricardofrantz/nanobook/actions/workflows/ci.yml)
+[![cargo-deny](https://img.shields.io/badge/cargo--deny-audited-brightgreen)](https://github.com/ricardofrantz/nanobook/actions/workflows/ci.yml)
 
-**Rust execution infrastructure for automated trading systems.**
+**Production-grade Rust execution infrastructure for automated trading.**
+Zero-allocation hot paths. No panics on external input. MIRI-verified memory safety.
 Python computes the strategy. nanobook handles everything else.
 
 ## Architecture

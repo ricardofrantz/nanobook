@@ -7,14 +7,14 @@ name = "nanobook"
 version = "0.7.0"
 edition = "2024"
 rust-version = "1.85"
-description = "Rust execution infrastructure for automated trading: LOB engine, portfolio simulator, broker abstraction, risk engine"
+description = "Production-grade Rust execution infrastructure for automated trading: LOB engine, portfolio simulator, broker abstraction, risk engine"
 license = "MIT"
 repository = "https://github.com/ricardofrantz/nanobook"
 homepage = "https://github.com/ricardofrantz/nanobook"
 documentation = "https://docs.rs/nanobook"
 readme = "README.md"
-keywords = ["orderbook", "trading", "matching-engine", "finance", "exchange"]
-categories = ["simulation", "algorithms", "data-structures"]
+keywords = ["orderbook", "trading", "matching-engine", "risk-management", "execution"]
+categories = ["simulation", "algorithms"]
 authors = ["Ricardo Frantz"]
 
 [dependencies]
