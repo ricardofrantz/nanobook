@@ -26,6 +26,28 @@ fn validate_query_param(value: &str, name: &str) -> Result<(), BrokerError> {
     }
 }
 
+/// Validate multiple query parameters at once.
+fn validate_query_params(params: &[(&str, &str)]) -> Result<(), BrokerError> {
+    for &(value, name) in params {
+        validate_query_param(value, name)?;
+    }
+    Ok(())
+}
+
+/// Check an HTTP response status and return a formatted error on failure.
+fn check_response(
+    resp: reqwest::blocking::Response,
+    context: &str,
+    error_kind: fn(String) -> BrokerError,
+) -> Result<reqwest::blocking::Response, BrokerError> {
+    if resp.status().is_success() {
+        return Ok(resp);
+    }
+    let status = resp.status();
+    let body = resp.text().unwrap_or_default();
+    Err(error_kind(format!("{context} returned {status}: {body}")))
+}
+
 /// Blocking Binance REST client.
 pub struct BinanceClient {
     client: Client,
@@ -67,12 +89,7 @@ impl BinanceClient {
             .send()
             .map_err(|e| BrokerError::Connection(format!("ping failed: {e}")))?;
 
-        if !resp.status().is_success() {
-            return Err(BrokerError::Connection(format!(
-                "ping returned {}",
-                resp.status()
-            )));
-        }
+        check_response(resp, "ping", BrokerError::Connection)?;
         Ok(())
     }
 
@@ -93,14 +110,7 @@ impl BinanceClient {
             .send()
             .map_err(|e| BrokerError::Connection(format!("account request failed: {e}")))?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().unwrap_or_default();
-            return Err(BrokerError::Connection(format!(
-                "account returned {status}: {body}"
-            )));
-        }
-
+        let resp = check_response(resp, "account", BrokerError::Connection)?;
         resp.json::<AccountInfo>()
             .map_err(|e| BrokerError::Connection(format!("failed to parse account: {e}")))
     }
@@ -115,10 +125,12 @@ impl BinanceClient {
         price: Option<&str>,
         time_in_force: Option<&str>,
     ) -> Result<OrderResponse, BrokerError> {
-        validate_query_param(symbol, "symbol")?;
-        validate_query_param(side, "side")?;
-        validate_query_param(order_type, "order_type")?;
-        validate_query_param(quantity, "quantity")?;
+        validate_query_params(&[
+            (symbol, "symbol"),
+            (side, "side"),
+            (order_type, "order_type"),
+            (quantity, "quantity"),
+        ])?;
         if let Some(p) = price {
             validate_query_param(p, "price")?;
         }
@@ -151,14 +163,7 @@ impl BinanceClient {
             .send()
             .map_err(|e| BrokerError::Order(format!("order request failed: {e}")))?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().unwrap_or_default();
-            return Err(BrokerError::Order(format!(
-                "order returned {status}: {body}"
-            )));
-        }
-
+        let resp = check_response(resp, "order", BrokerError::Order)?;
         resp.json::<OrderResponse>()
             .map_err(|e| BrokerError::Order(format!("failed to parse order response: {e}")))
     }
@@ -181,14 +186,7 @@ impl BinanceClient {
             .send()
             .map_err(|e| BrokerError::Order(format!("order status request failed: {e}")))?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().unwrap_or_default();
-            return Err(BrokerError::Order(format!(
-                "order status returned {status}: {body}"
-            )));
-        }
-
+        let resp = check_response(resp, "order status", BrokerError::Order)?;
         resp.json::<OrderResponse>()
             .map_err(|e| BrokerError::Order(format!("failed to parse order status: {e}")))
     }
@@ -211,14 +209,7 @@ impl BinanceClient {
             .send()
             .map_err(|e| BrokerError::Order(format!("cancel request failed: {e}")))?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().unwrap_or_default();
-            return Err(BrokerError::Order(format!(
-                "cancel returned {status}: {body}"
-            )));
-        }
-
+        check_response(resp, "cancel", BrokerError::Order)?;
         Ok(())
     }
 
@@ -233,14 +224,7 @@ impl BinanceClient {
             .send()
             .map_err(|e| BrokerError::Connection(format!("ticker request failed: {e}")))?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().unwrap_or_default();
-            return Err(BrokerError::Connection(format!(
-                "ticker returned {status}: {body}"
-            )));
-        }
-
+        let resp = check_response(resp, "ticker", BrokerError::Connection)?;
         resp.json::<BookTicker>()
             .map_err(|e| BrokerError::Connection(format!("failed to parse ticker: {e}")))
     }
