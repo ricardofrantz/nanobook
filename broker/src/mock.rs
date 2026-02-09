@@ -17,9 +17,9 @@ use std::sync::Mutex;
 
 use nanobook::Symbol;
 
-use crate::Broker;
 use crate::error::BrokerError;
 use crate::types::*;
+use crate::Broker;
 
 /// How the mock broker handles submitted orders.
 #[derive(Clone, Debug)]
@@ -120,8 +120,8 @@ impl MockBroker {
             fill_mode: FillMode::ImmediateFull,
             positions: Vec::new(),
             quotes: Vec::new(),
-            equity_cents: 1_000_000_00,
-            cash_cents: 1_000_000_00,
+            equity_cents: 100_000_000,
+            cash_cents: 100_000_000,
         }
     }
 
