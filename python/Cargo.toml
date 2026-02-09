@@ -15,5 +15,5 @@ itch = ["nanobook/itch"]
 nanobook = { path = "..", features = ["event-log", "serde", "persistence", "portfolio", "parallel"] }
 nanobook-broker = { path = "../broker", features = ["ibkr", "binance"] }
 nanobook-risk = { path = "../risk" }
-pyo3 = { version = "0.23", features = ["extension-module"] }
+pyo3 = { version = "0.24", features = ["extension-module"] }
 serde_json = "1"
