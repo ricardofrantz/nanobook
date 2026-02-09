@@ -99,11 +99,19 @@ jobs:
         with:
           path: artifacts
 
+      - name: Extract changelog for this version
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          awk "/^## \[${VERSION}\]/{found=1; next} /^## \[/{if(found) exit} found" CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "No CHANGELOG entry for ${VERSION}, falling back to auto-generated notes." > RELEASE_NOTES.md
+          fi
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
 
   publish-crate:
     name: Publish to crates.io
