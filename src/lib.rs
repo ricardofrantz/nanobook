@@ -155,12 +155,14 @@ pub mod cv;
 mod error;
 mod event;
 mod exchange;
+pub mod garch;
 pub mod indicators;
 #[cfg(feature = "itch")]
 pub mod itch;
 mod level;
 mod matching;
 pub mod multi_exchange;
+pub mod optimize;
 mod order;
 #[cfg(feature = "persistence")]
 pub mod persistence;

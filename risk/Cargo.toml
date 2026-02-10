@@ -10,7 +10,7 @@ homepage = "https://github.com/ricardofrantz/nanobook"
 documentation = "https://docs.rs/nanobook-risk"
 
 [dependencies]
-nanobook = { version = "0.8.0", path = "..", features = ["serde"] }
+nanobook = { version = "0.9.0", path = "..", features = ["serde"] }
 nanobook-broker = { version = "0.2.0", path = "../broker" }
 rustc-hash = "2.1"
 serde = { version = "1", features = ["derive"] }

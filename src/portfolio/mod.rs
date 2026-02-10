@@ -237,6 +237,23 @@ impl Portfolio {
         }
     }
 
+    /// Close a single symbol position at the provided price.
+    ///
+    /// Returns `true` if a non-flat position existed and was closed.
+    pub fn close_position_at(&mut self, symbol: Symbol, price: i64) -> bool {
+        if price <= 0 {
+            return false;
+        }
+
+        let qty = match self.positions.get(&symbol) {
+            Some(pos) if !pos.is_flat() => -pos.quantity,
+            _ => return false,
+        };
+
+        self.execute_fill(symbol, qty, price);
+        true
+    }
+
     /// Rebalance the portfolio through LOB matching engines.
     ///
     /// Routes orders through actual `Exchange` instances for realistic
@@ -512,6 +529,18 @@ mod tests {
         // Second: only AAPL — MSFT should be closed
         portfolio.rebalance_simple(&[(aapl(), 0.5)], &prices);
         assert!(portfolio.position(&msft()).unwrap().is_flat());
+    }
+
+    #[test]
+    fn close_position_at() {
+        let mut portfolio = Portfolio::new(1_000_000_00, CostModel::zero());
+        let prices = [(aapl(), 150_00)];
+        portfolio.rebalance_simple(&[(aapl(), 0.8)], &prices);
+        assert!(portfolio.position(&aapl()).unwrap().quantity > 0);
+
+        let closed = portfolio.close_position_at(aapl(), 155_00);
+        assert!(closed);
+        assert!(portfolio.position(&aapl()).unwrap().is_flat());
     }
 
     #[test]

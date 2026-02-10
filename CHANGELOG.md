@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **v0.9 integration APIs for qtrade**:
+  - `py_capabilities()` feature probing contract
+  - stop-aware `backtest_weights(..., stop_cfg=...)`
+  - backtest payload extensions: `holdings`, `symbol_returns`, `stop_events`
+  - `py_garch_forecast()` volatility forecast API
+  - long-only optimizer APIs:
+    - `py_optimize_min_variance`
+    - `py_optimize_max_sharpe`
+    - `py_optimize_risk_parity`
+    - `py_optimize_cvar`
+    - `py_optimize_cdar`
+
 ## [0.8.0] - 2026-02-09
 
 ### Added
