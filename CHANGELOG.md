@@ -7,19 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-02-10
+
 ### Added
 
-- **v0.9 integration APIs for qtrade**:
-  - `py_capabilities()` feature probing contract
-  - stop-aware `backtest_weights(..., stop_cfg=...)`
-  - backtest payload extensions: `holdings`, `symbol_returns`, `stop_events`
-  - `py_garch_forecast()` volatility forecast API
-  - long-only optimizer APIs:
-    - `py_optimize_min_variance`
-    - `py_optimize_max_sharpe`
-    - `py_optimize_risk_parity`
-    - `py_optimize_cvar`
-    - `py_optimize_cdar`
+- **GARCH(1,1) volatility forecasting** (`src/garch.rs`):
+  - `garch_forecast()` — maximum-likelihood GARCH fit with multi-step ahead forecast
+  - Python binding: `py_garch_forecast()`
+- **Long-only portfolio optimizers** (`src/optimize.rs`):
+  - `optimize_min_variance` — minimum-variance portfolio
+  - `optimize_max_sharpe` — maximum Sharpe ratio portfolio
+  - `optimize_risk_parity` — risk-parity (equal risk contribution) portfolio
+  - `optimize_cvar` — CVaR (Conditional Value at Risk) minimization
+  - `optimize_cdar` — CDaR (Conditional Drawdown at Risk) minimization
+  - All exposed to Python via PyO3
+- **Extended backtest bridge** for qtrade integration:
+  - `py_capabilities()` — feature probing contract
+  - Stop-aware `backtest_weights(..., stop_cfg=...)` with stop-loss/trailing support
+  - Backtest payload extensions: `holdings`, `symbol_returns`, `stop_events`
+- **Python v0.9 aliases** in `__init__.py` for clean import paths
+
+### Fixed
+
+- Mock broker order IDs now monotonically increase across calls
 
 ## [0.8.0] - 2026-02-09
 
@@ -298,7 +308,8 @@ Initial release of nanobook - a deterministic limit order book and matching engi
 - Fixed-point price representation (avoids floating-point errors)
 - Deterministic via monotonic timestamps (not system clock)
 
-[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/ricardofrantz/nanobook/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/ricardofrantz/nanobook/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/ricardofrantz/nanobook/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/ricardofrantz/nanobook/compare/v0.5.0...v0.6.0

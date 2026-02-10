@@ -1,6 +1,6 @@
 [package]
 name = "nanobook-risk"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Pre-trade risk engine for nanobook"
@@ -11,7 +11,7 @@ documentation = "https://docs.rs/nanobook-risk"
 
 [dependencies]
 nanobook = { version = "0.9.0", path = "..", features = ["serde"] }
-nanobook-broker = { version = "0.2.0", path = "../broker" }
+nanobook-broker = { version = "0.3.0", path = "../broker" }
 rustc-hash = "2.1"
 serde = { version = "1", features = ["derive"] }
 
