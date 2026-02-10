@@ -13,6 +13,12 @@ use pyo3::prelude::*;
 ///     Forecasted per-period volatility (float >= 0).
 #[pyfunction]
 #[pyo3(signature = (returns, p=1, q=1, mean="zero".to_string()))]
-pub fn py_garch_forecast(returns: Vec<f64>, p: usize, q: usize, mean: String) -> f64 {
+pub fn garch_forecast(returns: Vec<f64>, p: usize, q: usize, mean: String) -> f64 {
     garch::garch_forecast(&returns, p, q, &mean)
+}
+
+#[pyfunction]
+#[pyo3(signature = (returns, p=1, q=1, mean="zero".to_string()))]
+pub fn py_garch_forecast(returns: Vec<f64>, p: usize, q: usize, mean: String) -> f64 {
+    garch_forecast(returns, p, q, mean)
 }

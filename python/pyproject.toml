@@ -30,5 +30,6 @@ Issues = "https://github.com/ricardofrantz/nanobook/issues"
 
 [tool.maturin]
 features = ["pyo3/extension-module", "itch"]
-module-name = "nanobook"
+python-source = "."
+module-name = "nanobook.nanobook"
 include = ["nanobook.pyi"]

@@ -179,9 +179,9 @@ mod tests {
         let zero = garch_forecast(&returns, 1, 1, "zero");
         let constant = garch_forecast(&returns, 2, 1, "constant");
 
-        assert!((zero - 0.0044776400483411).abs() < 1e-12, "zero={zero}");
+        assert!((zero - 0.0044776400483411).abs() < 5e-14, "zero={zero}");
         assert!(
-            (constant - 0.0043960525154678).abs() < 1e-12,
+            (constant - 0.0043960525154678).abs() < 5e-14,
             "constant={constant}"
         );
     }

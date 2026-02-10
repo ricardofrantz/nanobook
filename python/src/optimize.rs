@@ -28,7 +28,7 @@ fn sanitize_symbols(symbols: Vec<String>) -> Vec<String> {
 }
 
 #[pyfunction]
-pub fn py_optimize_min_variance(
+pub fn optimize_min_variance(
     py: Python<'_>,
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
@@ -39,8 +39,17 @@ pub fn py_optimize_min_variance(
 }
 
 #[pyfunction]
+pub fn py_optimize_min_variance(
+    py: Python<'_>,
+    returns_matrix: Vec<Vec<f64>>,
+    symbols: Vec<String>,
+) -> PyResult<PyObject> {
+    optimize_min_variance(py, returns_matrix, symbols)
+}
+
+#[pyfunction]
 #[pyo3(signature = (returns_matrix, symbols, risk_free=0.0))]
-pub fn py_optimize_max_sharpe(
+pub fn optimize_max_sharpe(
     py: Python<'_>,
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
@@ -52,7 +61,18 @@ pub fn py_optimize_max_sharpe(
 }
 
 #[pyfunction]
-pub fn py_optimize_risk_parity(
+#[pyo3(signature = (returns_matrix, symbols, risk_free=0.0))]
+pub fn py_optimize_max_sharpe(
+    py: Python<'_>,
+    returns_matrix: Vec<Vec<f64>>,
+    symbols: Vec<String>,
+    risk_free: f64,
+) -> PyResult<PyObject> {
+    optimize_max_sharpe(py, returns_matrix, symbols, risk_free)
+}
+
+#[pyfunction]
+pub fn optimize_risk_parity(
     py: Python<'_>,
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
@@ -63,8 +83,17 @@ pub fn py_optimize_risk_parity(
 }
 
 #[pyfunction]
+pub fn py_optimize_risk_parity(
+    py: Python<'_>,
+    returns_matrix: Vec<Vec<f64>>,
+    symbols: Vec<String>,
+) -> PyResult<PyObject> {
+    optimize_risk_parity(py, returns_matrix, symbols)
+}
+
+#[pyfunction]
 #[pyo3(signature = (returns_matrix, symbols, alpha=0.95))]
-pub fn py_optimize_cvar(
+pub fn optimize_cvar(
     py: Python<'_>,
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
@@ -77,7 +106,18 @@ pub fn py_optimize_cvar(
 
 #[pyfunction]
 #[pyo3(signature = (returns_matrix, symbols, alpha=0.95))]
-pub fn py_optimize_cdar(
+pub fn py_optimize_cvar(
+    py: Python<'_>,
+    returns_matrix: Vec<Vec<f64>>,
+    symbols: Vec<String>,
+    alpha: f64,
+) -> PyResult<PyObject> {
+    optimize_cvar(py, returns_matrix, symbols, alpha)
+}
+
+#[pyfunction]
+#[pyo3(signature = (returns_matrix, symbols, alpha=0.95))]
+pub fn optimize_cdar(
     py: Python<'_>,
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
@@ -86,4 +126,15 @@ pub fn py_optimize_cdar(
     let symbols = sanitize_symbols(symbols);
     let w = py.allow_threads(|| optimize::optimize_cdar(&returns_matrix, alpha));
     Ok(to_weights_dict(py, &symbols, w)?.into())
+}
+
+#[pyfunction]
+#[pyo3(signature = (returns_matrix, symbols, alpha=0.95))]
+pub fn py_optimize_cdar(
+    py: Python<'_>,
+    returns_matrix: Vec<Vec<f64>>,
+    symbols: Vec<String>,
+    alpha: f64,
+) -> PyResult<PyObject> {
+    optimize_cdar(py, returns_matrix, symbols, alpha)
 }

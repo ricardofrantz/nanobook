@@ -43,12 +43,14 @@ def _qtrade_reference_returns_2d() -> list[list[float]]:
     ]
 
 
-def _assert_close(got: float, expected: float, atol: float = 1e-12):
+def _assert_close(got: float, expected: float, atol: float = 5e-13):
     assert math.isfinite(got)
     assert abs(got - expected) <= atol
 
 
-def _assert_weight_dict_close(got: dict[str, float], expected: dict[str, float], atol: float = 1e-12):
+def _assert_weight_dict_close(
+    got: dict[str, float], expected: dict[str, float], atol: float = 5e-13
+):
     assert set(got) == set(expected)
     for k, v in expected.items():
         _assert_close(got[k], v, atol=atol)
@@ -56,14 +58,14 @@ def _assert_weight_dict_close(got: dict[str, float], expected: dict[str, float],
 
 def test_garch_reference_target_zero_mean():
     got = nanobook.py_garch_forecast(_qtrade_reference_returns_1d(), p=1, q=1, mean="zero")
-    _assert_close(got, 0.0044776400483411, atol=1e-12)
+    _assert_close(got, 0.0044776400483411, atol=5e-14)
 
 
 def test_garch_reference_target_constant_mean():
     got = nanobook.py_garch_forecast(
         _qtrade_reference_returns_1d(), p=2, q=1, mean="constant"
     )
-    _assert_close(got, 0.0043960525154678, atol=1e-12)
+    _assert_close(got, 0.0043960525154678, atol=5e-14)
 
 
 def test_optimizer_reference_targets():
@@ -84,7 +86,7 @@ def test_optimizer_reference_targets():
             "NVDA": 0.2502155962699676,
             "META": 0.2498670580676274,
         },
-        atol=1e-12,
+        atol=5e-13,
     )
     _assert_weight_dict_close(
         maxsh,
@@ -94,7 +96,7 @@ def test_optimizer_reference_targets():
             "NVDA": 0.3816040047931394,
             "META": 0.2527155250972707,
         },
-        atol=1e-12,
+        atol=5e-13,
     )
     _assert_weight_dict_close(
         rp,
@@ -104,7 +106,7 @@ def test_optimizer_reference_targets():
             "NVDA": 0.2969466599605388,
             "META": 0.2672203683232534,
         },
-        atol=1e-12,
+        atol=5e-13,
     )
     _assert_weight_dict_close(
         cvar,
@@ -114,7 +116,7 @@ def test_optimizer_reference_targets():
             "NVDA": 0.1875,
             "META": 0.2500,
         },
-        atol=1e-14,
+        atol=1e-15,
     )
     _assert_weight_dict_close(
         cdar,
@@ -124,5 +126,5 @@ def test_optimizer_reference_targets():
             "NVDA": 0.1875,
             "META": 0.2500,
         },
-        atol=1e-10,
+        atol=1e-12,
     )

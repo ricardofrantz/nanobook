@@ -435,6 +435,9 @@ result = nanobook.py_backtest_weights(
 
 GIL is released during computation for maximum throughput.
 
+Clean aliases (no `py_` prefix) are exported for new integrations:
+`backtest_weights`, `capabilities`, `garch_forecast`, and `optimize_*`.
+
 ### qtrade v0.4 Bridge Pattern
 
 Capability probing contract used by `calc.bridge`:

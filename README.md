@@ -102,6 +102,9 @@ Your optimizer produces weights. `py_backtest_weights()` handles rebalancing,
 cost modeling, position tracking, and return computation at compiled speed
 with the GIL released.
 
+Clean aliases are also available for new callers:
+`backtest_weights`, `capabilities`, `garch_forecast`, `optimize_*`.
+
 ### qtrade v0.4 Capability Gating
 
 Use `py_capabilities()` and keep fallback logic in `calc.bridge`:

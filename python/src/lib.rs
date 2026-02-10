@@ -23,7 +23,7 @@ mod types;
 use pyo3::prelude::*;
 
 #[pyfunction]
-fn py_capabilities() -> Vec<&'static str> {
+fn capabilities() -> Vec<&'static str> {
     vec![
         "backtest_stops",
         "garch_forecast",
@@ -34,6 +34,11 @@ fn py_capabilities() -> Vec<&'static str> {
         "optimize_cdar",
         "backtest_holdings",
     ]
+}
+
+#[pyfunction]
+fn py_capabilities() -> Vec<&'static str> {
+    capabilities()
 }
 
 /// nanobook: Python bindings for a deterministic limit order book
@@ -98,12 +103,19 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(metrics::py_rolling_volatility, m)?)?;
 
     // v0.9 — capability probing and new compute APIs
+    m.add_function(wrap_pyfunction!(capabilities, m)?)?;
     m.add_function(wrap_pyfunction!(py_capabilities, m)?)?;
+    m.add_function(wrap_pyfunction!(garch::garch_forecast, m)?)?;
     m.add_function(wrap_pyfunction!(garch::py_garch_forecast, m)?)?;
+    m.add_function(wrap_pyfunction!(optimize::optimize_min_variance, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::py_optimize_min_variance, m)?)?;
+    m.add_function(wrap_pyfunction!(optimize::optimize_max_sharpe, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::py_optimize_max_sharpe, m)?)?;
+    m.add_function(wrap_pyfunction!(optimize::optimize_risk_parity, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::py_optimize_risk_parity, m)?)?;
+    m.add_function(wrap_pyfunction!(optimize::optimize_cvar, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::py_optimize_cvar, m)?)?;
+    m.add_function(wrap_pyfunction!(optimize::optimize_cdar, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::py_optimize_cdar, m)?)?;
 
     Ok(())

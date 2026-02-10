@@ -33,6 +33,7 @@ def test_capabilities_surface():
         "backtest_holdings",
     }
     assert expected.issubset(caps)
+    assert set(nanobook.capabilities()) == caps
 
 
 def test_garch_forecast_finite():
@@ -72,6 +73,14 @@ def test_backtest_weights_v09_payload():
     assert len(result["holdings"]) == 2
     assert len(result["symbol_returns"]) == 2
     assert result["stop_events"] == []
+
+    clean = nanobook.backtest_weights(
+        weight_schedule=[[("AAPL", 1.0)], [("AAPL", 1.0)]],
+        price_schedule=[[("AAPL", 100_00)], [("AAPL", 102_00)]],
+        initial_cash=100_000_00,
+        cost_bps=0,
+    )
+    assert clean.keys() == result.keys()
 
 
 def test_backtest_weights_fixed_stop():
@@ -119,3 +128,28 @@ def test_backtest_reports_tightest_stop_reason():
     event = result["stop_events"][0]
     assert event["reason"] == "trailing"
     assert event["trigger_price"] == 104_50
+
+
+def test_clean_aliases_equivalent():
+    symbols = ["AAPL", "MSFT", "NVDA"]
+    r = _sample_returns_matrix()
+
+    assert nanobook.garch_forecast([0.01, -0.003, 0.007, -0.002, 0.004]) == nanobook.py_garch_forecast(
+        [0.01, -0.003, 0.007, -0.002, 0.004]
+    )
+
+    assert nanobook.optimize_min_variance(r, symbols) == nanobook.py_optimize_min_variance(
+        r, symbols
+    )
+    assert nanobook.optimize_max_sharpe(
+        r, symbols, risk_free=0.0
+    ) == nanobook.py_optimize_max_sharpe(r, symbols, risk_free=0.0)
+    assert nanobook.optimize_risk_parity(r, symbols) == nanobook.py_optimize_risk_parity(
+        r, symbols
+    )
+    assert nanobook.optimize_cvar(r, symbols, alpha=0.95) == nanobook.py_optimize_cvar(
+        r, symbols, alpha=0.95
+    )
+    assert nanobook.optimize_cdar(r, symbols, alpha=0.95) == nanobook.py_optimize_cdar(
+        r, symbols, alpha=0.95
+    )
