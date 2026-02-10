@@ -512,6 +512,8 @@ mod tests {
         assert_eq!(result.stop_events.len(), 1);
         assert_eq!(result.stop_events[0].reason, "fixed");
         assert_eq!(result.stop_events[0].period_index, 1);
+        assert_eq!(result.stop_events[0].trigger_price, 90_00);
+        assert_eq!(result.stop_events[0].exit_price, 85_00);
         assert!(result.holdings[1].is_empty());
     }
 
@@ -542,5 +544,65 @@ mod tests {
 
         assert!(!result.stop_events.is_empty());
         assert_eq!(result.stop_events[0].reason, "trailing");
+    }
+
+    #[test]
+    fn first_breach_triggers_once_per_position_lifecycle() {
+        let weights = vec![
+            vec![(aapl(), 1.0)],
+            vec![(aapl(), 1.0)],
+            vec![(aapl(), 1.0)],
+        ];
+        let prices = vec![
+            vec![(aapl(), 100_00)],
+            vec![(aapl(), 90_00)], // fixed 10% stop breaches here
+            vec![(aapl(), 89_00)], // reopened, new stop basis, no second trigger
+        ];
+
+        let options = BacktestBridgeOptions {
+            stop_cfg: Some(BacktestStopConfig {
+                fixed_stop_pct: Some(0.10),
+                trailing_stop_pct: None,
+                atr_multiple: None,
+                atr_period: 14,
+            }),
+        };
+
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
+
+        assert_eq!(result.stop_events.len(), 1);
+        assert_eq!(result.stop_events[0].period_index, 1);
+        assert_eq!(result.stop_events[0].reason, "fixed");
+    }
+
+    #[test]
+    fn tighter_stop_reason_is_reported_when_multiple_rules_enabled() {
+        let weights = vec![
+            vec![(aapl(), 1.0)],
+            vec![(aapl(), 1.0)],
+            vec![(aapl(), 1.0)],
+        ];
+        let prices = vec![
+            vec![(aapl(), 100_00)],
+            vec![(aapl(), 110_00)], // updates trailing reference
+            vec![(aapl(), 103_00)], // breaches trailing(104.5) but not fixed(90)
+        ];
+
+        let options = BacktestBridgeOptions {
+            stop_cfg: Some(BacktestStopConfig {
+                fixed_stop_pct: Some(0.10),
+                trailing_stop_pct: Some(0.05),
+                atr_multiple: None,
+                atr_period: 14,
+            }),
+        };
+
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
+
+        assert_eq!(result.stop_events.len(), 1);
+        assert_eq!(result.stop_events[0].reason, "trailing");
+        assert_eq!(result.stop_events[0].trigger_price, 104_50);
     }
 }

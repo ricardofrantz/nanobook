@@ -39,7 +39,7 @@
 
 ```toml
 [dependencies]
-nanobook = "0.6"
+nanobook = "0.9"
 ```
 
 ```rust
@@ -413,22 +413,53 @@ Returns `BacktestBridgeResult`:
 | `equity_curve` | `Vec<i64>` | Equity at each period (cents) |
 | `final_cash` | `i64` | Ending cash balance |
 | `metrics` | `Option<Metrics>` | Sharpe, Sortino, max drawdown, etc. |
+| `holdings` | `Vec<Vec<(Symbol, f64)>>` | Per-period holdings weights |
+| `symbol_returns` | `Vec<Vec<(Symbol, f64)>>` | Per-period close-to-close symbol returns |
+| `stop_events` | `Vec<BacktestStopEvent>` | Stop trigger metadata (index, symbol, price, reason) |
 
 ### Python API
 
 ```python
-result = nanobook.backtest_weights(
+result = nanobook.py_backtest_weights(
     weight_schedule=[[("AAPL", 0.5), ("MSFT", 0.5)], ...],
     price_schedule=[[("AAPL", 185_00), ("MSFT", 370_00)], ...],
     initial_cash=1_000_000_00,
     cost_bps=15,
     periods_per_year=252.0,
     risk_free=0.0,
+    stop_cfg={"trailing_stop_pct": 0.05},
 )
-# result["returns"], result["equity_curve"], result["metrics"]
+# result["returns"], result["equity_curve"], result["metrics"],
+# result["holdings"], result["symbol_returns"], result["stop_events"]
 ```
 
 GIL is released during computation for maximum throughput.
+
+### qtrade v0.4 Bridge Pattern
+
+Capability probing contract used by `calc.bridge`:
+
+```python
+import nanobook
+
+def has_nanobook_feature(name: str) -> bool:
+    caps = set(nanobook.py_capabilities()) if hasattr(nanobook, "py_capabilities") else set()
+    if name in caps:
+        return True
+
+    symbol_map = {
+        "backtest_stops": "py_backtest_weights",
+        "garch_forecast": "py_garch_forecast",
+        "optimize_min_variance": "py_optimize_min_variance",
+        "optimize_max_sharpe": "py_optimize_max_sharpe",
+        "optimize_risk_parity": "py_optimize_risk_parity",
+        "optimize_cvar": "py_optimize_cvar",
+        "optimize_cdar": "py_optimize_cdar",
+        "backtest_holdings": "py_backtest_weights",
+    }
+    sym = symbol_map.get(name)
+    return bool(sym and hasattr(nanobook, sym))
+```
 
 ---
 

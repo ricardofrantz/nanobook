@@ -87,4 +87,35 @@ def test_backtest_weights_fixed_stop():
     event = result["stop_events"][0]
     assert event["symbol"] == "AAPL"
     assert event["reason"] == "fixed"
+    assert event["trigger_price"] == 90_00
+    assert event["exit_price"] == 85_00
     assert result["holdings"][1] == []
+
+
+def test_backtest_first_breach_once_per_position_lifecycle():
+    result = nanobook.py_backtest_weights(
+        weight_schedule=[[("AAPL", 1.0)], [("AAPL", 1.0)], [("AAPL", 1.0)]],
+        price_schedule=[[("AAPL", 100_00)], [("AAPL", 90_00)], [("AAPL", 89_00)]],
+        initial_cash=100_000_00,
+        cost_bps=0,
+        stop_cfg={"fixed_stop_pct": 0.10},
+    )
+
+    assert len(result["stop_events"]) == 1
+    assert result["stop_events"][0]["period_index"] == 1
+    assert result["stop_events"][0]["reason"] == "fixed"
+
+
+def test_backtest_reports_tightest_stop_reason():
+    result = nanobook.py_backtest_weights(
+        weight_schedule=[[("AAPL", 1.0)], [("AAPL", 1.0)], [("AAPL", 1.0)]],
+        price_schedule=[[("AAPL", 100_00)], [("AAPL", 110_00)], [("AAPL", 103_00)]],
+        initial_cash=100_000_00,
+        cost_bps=0,
+        stop_cfg={"fixed_stop_pct": 0.10, "trailing_stop_pct": 0.05},
+    )
+
+    assert len(result["stop_events"]) == 1
+    event = result["stop_events"][0]
+    assert event["reason"] == "trailing"
+    assert event["trigger_price"] == 104_50

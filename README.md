@@ -55,7 +55,7 @@ pip install nanobook
 
 ```toml
 [dependencies]
-nanobook = "0.7"
+nanobook = "0.9"
 ```
 
 **From source:**
@@ -78,7 +78,7 @@ Rust simulates the portfolio and returns metrics:
 ```python
 import nanobook
 
-result = nanobook.backtest_weights(
+result = nanobook.py_backtest_weights(
     weight_schedule=[
         [("AAPL", 0.5), ("MSFT", 0.5)],
         [("AAPL", 0.3), ("NVDA", 0.7)],
@@ -89,15 +89,58 @@ result = nanobook.backtest_weights(
     ],
     initial_cash=1_000_000_00,  # $1M in cents
     cost_bps=15,                # 15 bps round-trip
+    stop_cfg={"trailing_stop_pct": 0.05},
 )
 
 print(f"Sharpe: {result['metrics'].sharpe:.2f}")
 print(f"Max DD: {result['metrics'].max_drawdown:.1%}")
+print(result["holdings"][-1])    # per-period symbol weights
+print(result["stop_events"])     # stop trigger metadata
 ```
 
-Your optimizer produces weights. `backtest_weights()` handles rebalancing,
+Your optimizer produces weights. `py_backtest_weights()` handles rebalancing,
 cost modeling, position tracking, and return computation at compiled speed
 with the GIL released.
+
+### qtrade v0.4 Capability Gating
+
+Use `py_capabilities()` and keep fallback logic in `calc.bridge`:
+
+```python
+import nanobook
+
+def has_nanobook() -> bool:
+    try:
+        import nanobook as _nb  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+def nanobook_version() -> str | None:
+    return getattr(nanobook, "__version__", None) if has_nanobook() else None
+
+def has_nanobook_feature(name: str) -> bool:
+    if not has_nanobook():
+        return False
+
+    caps = set(nanobook.py_capabilities()) if hasattr(nanobook, "py_capabilities") else set()
+    if name in caps:
+        return True
+
+    # Symbol fallback for older builds
+    symbol_map = {
+        "backtest_stops": "py_backtest_weights",
+        "garch_forecast": "py_garch_forecast",
+        "optimize_min_variance": "py_optimize_min_variance",
+        "optimize_max_sharpe": "py_optimize_max_sharpe",
+        "optimize_risk_parity": "py_optimize_risk_parity",
+        "optimize_cvar": "py_optimize_cvar",
+        "optimize_cdar": "py_optimize_cdar",
+        "backtest_holdings": "py_backtest_weights",
+    }
+    sym = symbol_map.get(name)
+    return bool(sym and hasattr(nanobook, sym))
+```
 
 ## Layer Examples
 

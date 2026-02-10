@@ -168,4 +168,21 @@ mod tests {
         assert!(v.is_finite());
         assert!(v >= 0.0);
     }
+
+    #[test]
+    fn qtrade_reference_fixture_targets() {
+        // Fixed fixture used by qtrade v0.4 bridge parity checks.
+        let returns = vec![
+            0.011, -0.007, 0.004, -0.002, 0.006, -0.003, 0.002, 0.001, -0.004, 0.005, -0.001, 0.003,
+        ];
+
+        let zero = garch_forecast(&returns, 1, 1, "zero");
+        let constant = garch_forecast(&returns, 2, 1, "constant");
+
+        assert!((zero - 0.0044776400483411).abs() < 1e-12, "zero={zero}");
+        assert!(
+            (constant - 0.0043960525154678).abs() < 1e-12,
+            "constant={constant}"
+        );
+    }
 }

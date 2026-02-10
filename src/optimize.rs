@@ -399,6 +399,23 @@ mod tests {
         ]
     }
 
+    fn qtrade_reference_returns() -> Vec<Vec<f64>> {
+        vec![
+            vec![0.010, 0.004, -0.002, 0.006],
+            vec![-0.003, 0.006, 0.001, -0.002],
+            vec![0.007, -0.001, 0.002, 0.004],
+            vec![0.004, 0.003, -0.004, 0.005],
+            vec![-0.002, 0.005, 0.003, -0.001],
+            vec![0.006, -0.002, 0.001, 0.003],
+            vec![0.003, 0.004, -0.001, 0.002],
+            vec![-0.001, 0.002, 0.002, -0.003],
+            vec![0.005, 0.001, -0.002, 0.004],
+            vec![0.002, 0.003, 0.001, 0.000],
+            vec![-0.004, 0.002, 0.003, -0.002],
+            vec![0.006, -0.001, 0.000, 0.005],
+        ]
+    }
+
     fn assert_valid_weights(w: &[f64], n: usize) {
         assert_eq!(w.len(), n);
         assert!(w.iter().all(|x| x.is_finite() && *x >= -1e-12));
@@ -445,5 +462,56 @@ mod tests {
     fn invalid_matrix_returns_empty() {
         let bad = vec![vec![0.01, 0.02], vec![0.03]];
         assert!(optimize_min_variance(&bad).is_empty());
+    }
+
+    fn assert_close(got: &[f64], expected: &[f64], atol: f64) {
+        assert_eq!(got.len(), expected.len());
+        for (g, e) in got.iter().zip(expected.iter()) {
+            assert!((*g - *e).abs() <= atol, "got={g} expected={e}");
+        }
+    }
+
+    #[test]
+    fn qtrade_reference_fixture_targets() {
+        let r = qtrade_reference_returns();
+
+        let minvar = optimize_min_variance(&r);
+        let maxsh = optimize_max_sharpe(&r, 0.0);
+        let rp = optimize_risk_parity(&r);
+        let cvar = optimize_cvar(&r, 0.95);
+        let cdar = optimize_cdar(&r, 0.95);
+
+        assert_close(
+            &minvar,
+            &[
+                0.2497573732080370,
+                0.2501599724543681,
+                0.2502155962699676,
+                0.2498670580676274,
+            ],
+            1e-12,
+        );
+        assert_close(
+            &maxsh,
+            &[
+                0.0621484559673854,
+                0.3035320141422045,
+                0.3816040047931394,
+                0.2527155250972707,
+            ],
+            1e-12,
+        );
+        assert_close(
+            &rp,
+            &[
+                0.0777787788667712,
+                0.3580541928494367,
+                0.2969466599605388,
+                0.2672203683232534,
+            ],
+            1e-12,
+        );
+        assert_close(&cvar, &[0.1875, 0.3750, 0.1875, 0.2500], 1e-14);
+        assert_close(&cdar, &[0.1875, 0.3750, 0.1875, 0.2500], 1e-10);
     }
 }
