@@ -14,12 +14,13 @@
 //! ```
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use nanobook::Symbol;
 
+use crate::Broker;
 use crate::error::BrokerError;
 use crate::types::*;
-use crate::Broker;
 
 /// How the mock broker handles submitted orders.
 #[derive(Clone, Debug)]
@@ -96,7 +97,7 @@ impl MockBrokerBuilder {
             quotes: self.quotes,
             equity_cents: self.equity_cents,
             cash_cents: self.cash_cents,
-            next_order_id: 1,
+            next_order_id: AtomicU64::new(1),
             submitted_orders: Mutex::new(Vec::new()),
         }
     }
@@ -110,7 +111,7 @@ pub struct MockBroker {
     quotes: Vec<(Symbol, Quote)>,
     equity_cents: i64,
     cash_cents: i64,
-    next_order_id: u64,
+    next_order_id: AtomicU64,
     submitted_orders: Mutex<Vec<RecordedOrder>>,
 }
 
@@ -181,7 +182,7 @@ impl Broker for MockBroker {
 
         match &self.fill_mode {
             FillMode::Reject => Err(BrokerError::Order("mock: order rejected".into())),
-            _ => Ok(OrderId(self.next_order_id)),
+            _ => Ok(OrderId(self.next_order_id.fetch_add(1, Ordering::Relaxed))),
         }
     }
 
@@ -313,5 +314,26 @@ mod tests {
         let status = broker.order_status(OrderId(1)).unwrap();
         assert_eq!(status.status, OrderState::PartiallyFilled);
         assert_eq!(status.filled_quantity, 50);
+    }
+
+    #[test]
+    fn order_ids_are_monotonic() {
+        let mut broker = MockBroker::builder().build();
+        broker.connect().unwrap();
+
+        let order = BrokerOrder {
+            symbol: aapl(),
+            side: BrokerSide::Buy,
+            quantity: 1,
+            order_type: BrokerOrderType::Market,
+        };
+
+        let first = broker.submit_order(&order).unwrap();
+        let second = broker.submit_order(&order).unwrap();
+        let third = broker.submit_order(&order).unwrap();
+
+        assert_eq!(first, OrderId(1));
+        assert_eq!(second, OrderId(2));
+        assert_eq!(third, OrderId(3));
     }
 }
