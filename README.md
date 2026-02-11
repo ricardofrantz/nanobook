@@ -37,7 +37,7 @@ in Python, execution runs in Rust.
 
 | Crate | Description |
 |-------|-------------|
-| `nanobook` | LOB matching engine, portfolio simulator, backtest bridge |
+| `nanobook` | LOB matching engine, portfolio simulator, backtest bridge, GARCH, optimizers |
 | `nanobook-broker` | Broker trait with IBKR and Binance adapters |
 | `nanobook-risk` | Pre-trade risk engine (position limits, leverage, short exposure) |
 | `nanobook-python` | PyO3 bindings for all layers |
@@ -68,6 +68,9 @@ cargo test
 
 # Python bindings
 cd python && maturin develop --release
+
+# Binance adapter (feature-gated, not in PyPI wheels)
+cd python && maturin develop --release --features binance
 ```
 
 ## The Bridge: Python Strategy → Rust Execution
@@ -78,7 +81,7 @@ Rust simulates the portfolio and returns metrics:
 ```python
 import nanobook
 
-result = nanobook.py_backtest_weights(
+result = nanobook.backtest_weights(
     weight_schedule=[
         [("AAPL", 0.5), ("MSFT", 0.5)],
         [("AAPL", 0.3), ("NVDA", 0.7)],
@@ -98,51 +101,25 @@ print(result["holdings"][-1])    # per-period symbol weights
 print(result["stop_events"])     # stop trigger metadata
 ```
 
-Your optimizer produces weights. `py_backtest_weights()` handles rebalancing,
+Your optimizer produces weights. `backtest_weights()` handles rebalancing,
 cost modeling, position tracking, and return computation at compiled speed
 with the GIL released.
 
-Clean aliases are also available for new callers:
-`backtest_weights`, `capabilities`, `garch_forecast`, `optimize_*`.
+**v0.9 additions:** GARCH(1,1) forecasting, portfolio optimizers
+(min-variance, max-Sharpe, risk-parity, CVaR, CDaR), and trailing/fixed
+stop-loss simulation — all accessible from Python.
 
-### qtrade v0.4 Capability Gating
-
-Use `py_capabilities()` and keep fallback logic in `calc.bridge`:
+### Optimizer Example
 
 ```python
 import nanobook
+import numpy as np
 
-def has_nanobook() -> bool:
-    try:
-        import nanobook as _nb  # noqa: F401
-        return True
-    except Exception:
-        return False
+# Daily returns matrix (T × N)
+returns = np.random.randn(252, 5) * 0.01
 
-def nanobook_version() -> str | None:
-    return getattr(nanobook, "__version__", None) if has_nanobook() else None
-
-def has_nanobook_feature(name: str) -> bool:
-    if not has_nanobook():
-        return False
-
-    caps = set(nanobook.py_capabilities()) if hasattr(nanobook, "py_capabilities") else set()
-    if name in caps:
-        return True
-
-    # Symbol fallback for older builds
-    symbol_map = {
-        "backtest_stops": "py_backtest_weights",
-        "garch_forecast": "py_garch_forecast",
-        "optimize_min_variance": "py_optimize_min_variance",
-        "optimize_max_sharpe": "py_optimize_max_sharpe",
-        "optimize_risk_parity": "py_optimize_risk_parity",
-        "optimize_cvar": "py_optimize_cvar",
-        "optimize_cdar": "py_optimize_cdar",
-        "backtest_holdings": "py_backtest_weights",
-    }
-    sym = symbol_map.get(name)
-    return bool(sym and hasattr(nanobook, sym))
+weights = nanobook.optimize_max_sharpe(returns, risk_free_rate=0.0)
+print(dict(zip(["A","B","C","D","E"], weights)))
 ```
 
 ## Layer Examples
