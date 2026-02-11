@@ -229,6 +229,7 @@ fn covariance_matrix(matrix: &[Vec<f64>]) -> Vec<Vec<f64>> {
     }
 
     let denom = (rows as f64 - 1.0).max(1.0);
+    #[allow(clippy::needless_range_loop)]
     for i in 0..cols {
         for j in i..cols {
             let v = cov[i][j] / denom;
@@ -484,7 +485,7 @@ mod tests {
         assert_close(
             &minvar,
             &[
-                0.2497573732080370,
+                0.249_757_373_208_037,
                 0.2501599724543681,
                 0.2502155962699676,
                 0.2498670580676274,

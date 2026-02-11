@@ -29,6 +29,7 @@ use crate::types::parse_symbol;
 ///     ``symbol_returns``, ``stop_events``.
 #[pyfunction]
 #[pyo3(signature = (weight_schedule, price_schedule, initial_cash, cost_bps, periods_per_year=252.0, risk_free=0.0, stop_cfg=None))]
+#[allow(clippy::too_many_arguments)]
 pub fn backtest_weights(
     py: Python<'_>,
     weight_schedule: Vec<Vec<(String, f64)>>,
@@ -126,6 +127,7 @@ pub fn backtest_weights(
 /// Backward-compatible alias for older callers using ``py_backtest_weights``.
 #[pyfunction]
 #[pyo3(signature = (weight_schedule, price_schedule, initial_cash, cost_bps, periods_per_year=252.0, risk_free=0.0, stop_cfg=None))]
+#[allow(clippy::too_many_arguments)]
 pub fn py_backtest_weights(
     py: Python<'_>,
     weight_schedule: Vec<Vec<(String, f64)>>,

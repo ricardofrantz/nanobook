@@ -124,6 +124,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Publish workspace
-        run: cargo publish --workspace
+        run: |
+          cargo publish -p nanobook || true
+          cargo publish -p nanobook-broker || true
+          cargo publish -p nanobook-risk || true
+          cargo publish -p nanobook-rebalancer || true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

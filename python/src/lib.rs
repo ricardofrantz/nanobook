@@ -49,6 +49,7 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Broker types
     m.add_class::<broker::PyIbkrBroker>()?;
+    #[cfg(feature = "binance")]
     m.add_class::<broker::PyBinanceBroker>()?;
 
     // Risk engine

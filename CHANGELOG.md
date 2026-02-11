@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-02-11
+
+### Fixed
+
+- **CI: Linux wheels** — switched `reqwest` to `native-tls-vendored` (statically linked OpenSSL); eliminates system OpenSSL dependency in manylinux containers and avoids `ring` aarch64 cross-compilation issues
+- **CI: Windows wheels** — pinned Python to 3.13 and replaced `--find-interpreter` with explicit `--interpreter python3.13`; PyO3 0.24.x does not support Python 3.14
+- **CI: crates.io publish** — made publish step idempotent (`|| true` per crate) so already-published versions don't fail the job
+- **Clippy** — fixed `needless_range_loop` and `excessive_precision` warnings in `src/optimize.rs`
+
 ## [0.9.0] - 2026-02-10
 
 ### Added
@@ -308,7 +317,8 @@ Initial release of nanobook - a deterministic limit order book and matching engi
 - Fixed-point price representation (avoids floating-point errors)
 - Deterministic via monotonic timestamps (not system clock)
 
-[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/ricardofrantz/nanobook/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/ricardofrantz/nanobook/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/ricardofrantz/nanobook/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/ricardofrantz/nanobook/compare/v0.6.0...v0.7.0
