@@ -5,8 +5,8 @@
 //! and an audit trail.
 
 pub mod audit;
-pub mod config;
 pub mod broker;
+pub mod config;
 pub mod diff;
 pub mod error;
 pub mod execution;

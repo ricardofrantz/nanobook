@@ -213,10 +213,21 @@ fn large_order_fails_order_value() {
         max_order_value_cents: 10_000,
         ..RiskConfig::default()
     })
-    .check_order(&aapl(), BrokerSide::Buy, 1000, 150_00, &account(100_000_000), &[]);
+    .check_order(
+        &aapl(),
+        BrokerSide::Buy,
+        1000,
+        150_00,
+        &account(100_000_000),
+        &[],
+    );
 
     assert!(report.has_failures());
-    let order_limit = report.checks.iter().find(|r| r.name == "Max order value").unwrap();
+    let order_limit = report
+        .checks
+        .iter()
+        .find(|r| r.name == "Max order value")
+        .unwrap();
     assert_eq!(order_limit.status, RiskStatus::Fail);
 }
 
@@ -228,10 +239,21 @@ fn large_order_passes_order_value_boundary() {
         max_order_value_cents: 10_000,
         ..RiskConfig::default()
     })
-    .check_order(&aapl(), BrokerSide::Buy, 50, 200, &account(100_000_000), &[]);
+    .check_order(
+        &aapl(),
+        BrokerSide::Buy,
+        50,
+        200,
+        &account(100_000_000),
+        &[],
+    );
 
     assert!(!report.has_failures());
-    let order_limit = report.checks.iter().find(|r| r.name == "Max order value").unwrap();
+    let order_limit = report
+        .checks
+        .iter()
+        .find(|r| r.name == "Max order value")
+        .unwrap();
     assert_eq!(order_limit.status, RiskStatus::Pass);
     assert_eq!(order_limit.detail, "$100 <= $100 max_order_value_cents");
 }
@@ -244,7 +266,14 @@ fn check_order_reports_expected_check_names() {
         max_order_value_cents: 10_000,
         ..RiskConfig::default()
     })
-    .check_order(&aapl(), BrokerSide::Buy, 50, 200, &account(100_000_000), &[]);
+    .check_order(
+        &aapl(),
+        BrokerSide::Buy,
+        50,
+        200,
+        &account(100_000_000),
+        &[],
+    );
 
     let names: Vec<_> = report.checks.iter().map(|c| c.name).collect();
     assert!(names.contains(&"Max order value"));

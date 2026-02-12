@@ -12,8 +12,8 @@ use nanobook_broker::types::Position;
 use rustc_hash::FxHashMap;
 
 use crate::audit::{self, AuditLog};
-use crate::config::Config;
 use crate::broker::{as_connection_error, connect_ibkr};
+use crate::config::Config;
 use crate::diff::{self, Action, CurrentPosition, RebalanceOrder};
 use crate::error::{Error, Result};
 use crate::reconcile;
@@ -186,7 +186,13 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
         let shares = u64::try_from(order.shares)
             .map_err(|_| Error::Order(format!("invalid share quantity for order {order:?}")))?;
 
-        match client.execute_limit_order(order.symbol, side, shares, order.limit_price_cents, timeout) {
+        match client.execute_limit_order(
+            order.symbol,
+            side,
+            shares,
+            order.limit_price_cents,
+            timeout,
+        ) {
             Ok(result) => {
                 audit::log_order_submitted(&mut audit, order, result.order_id)?;
                 audit::log_order_filled(&mut audit, &result)?;

@@ -5,7 +5,11 @@ use std::time::Duration;
 use nanobook::Symbol;
 use nanobook_broker::ibkr::client::IbkrClient;
 use nanobook_broker::ibkr::orders;
-use nanobook_broker::{error::BrokerError, types::{Account, Position}, BrokerSide};
+use nanobook_broker::{
+    BrokerSide,
+    error::BrokerError,
+    types::{Account, Position},
+};
 
 use crate::config::Config;
 use crate::error::{Error, Result};
