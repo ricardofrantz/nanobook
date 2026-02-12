@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `connect_ibkr()` returns `Box<dyn BrokerGateway>` instead of concrete `IbkrClient`
   - `as_connection_error()` helper replaces repeated `.map_err(...)` chains
 
+### Removed
+
+- **CI: MIRI job** — removed from CI pipeline (stale nightly cache issues; core matching engine already well-tested via property tests and integration tests)
+
 ### Fixed
 
 - **README**: documented that `max_drawdown_pct` is validated at construction but not yet enforced at execution time
