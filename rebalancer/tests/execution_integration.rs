@@ -6,11 +6,11 @@
 use nanobook::Symbol;
 use nanobook_broker::BrokerSide;
 use nanobook_rebalancer::diff::{Action, CurrentPosition};
+use nanobook_rebalancer::error::Error;
 use nanobook_rebalancer::execution::{
     action_to_side, apply_constraint_overrides, collect_all_symbols, enforce_max_orders_per_run,
 };
 use nanobook_rebalancer::target::TargetSpec;
-use nanobook_rebalancer::error::Error;
 
 fn aapl() -> Symbol {
     Symbol::new("AAPL")

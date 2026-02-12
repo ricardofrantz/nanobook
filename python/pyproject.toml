@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "nanobook"
-version = "0.9.1"
+version = "0.9.2"
 requires-python = ">=3.11"
 description = "Deterministic limit order book, portfolio simulator, and matching engine"
 license = "MIT"

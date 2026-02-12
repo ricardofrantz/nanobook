@@ -84,7 +84,12 @@ pub fn check_risk(
             }
         };
 
-        broker_orders.push((order.symbol, action_to_side(order.action), shares, order.limit_price_cents));
+        broker_orders.push((
+            order.symbol,
+            action_to_side(order.action),
+            shares,
+            order.limit_price_cents,
+        ));
         symbols_with_orders.insert(order.symbol);
     }
 
@@ -103,7 +108,8 @@ pub fn check_risk(
         broker_orders.push((*symbol, side, 0, price));
     }
 
-    let current_positions: Vec<(Symbol, i64)> = current_qty.iter().map(|(sym, qty)| (*sym, *qty)).collect();
+    let current_positions: Vec<(Symbol, i64)> =
+        current_qty.iter().map(|(sym, qty)| (*sym, *qty)).collect();
 
     engine.check_batch(&broker_orders, &account, &current_positions, targets)
 }
@@ -173,7 +179,14 @@ mod tests {
         let prices = vec![(aapl(), 185_00)];
         let current: FxHashMap<Symbol, i64> = FxHashMap::default();
 
-        let report = check_risk(&orders, 10_000_000, &targets, &prices, &current, &default_risk_config());
+        let report = check_risk(
+            &orders,
+            10_000_000,
+            &targets,
+            &prices,
+            &current,
+            &default_risk_config(),
+        );
 
         assert!(report.has_failures());
     }
@@ -216,7 +229,14 @@ mod tests {
         let prices = vec![(aapl(), 185_00)];
         let current: FxHashMap<Symbol, i64> = FxHashMap::default();
 
-        let report = check_risk(&orders, 100_000_000, &targets, &prices, &current, &default_risk_config());
+        let report = check_risk(
+            &orders,
+            100_000_000,
+            &targets,
+            &prices,
+            &current,
+            &default_risk_config(),
+        );
 
         assert!(report.has_warnings());
         assert!(!report.has_failures());

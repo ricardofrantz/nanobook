@@ -303,13 +303,7 @@ mod tests {
         let targets = vec![(aapl(), 0.30)];
         let mut config = default_config();
         config.max_order_value_cents = 20_000_000; // keep order-level hard cap above max trade warning
-        let report = check_batch(
-            &config,
-            &orders,
-            &account(100_000_000),
-            &[],
-            &targets,
-        );
+        let report = check_batch(&config, &orders, &account(100_000_000), &[], &targets);
         assert!(report.has_warnings());
         assert!(!report.has_failures());
     }
@@ -321,13 +315,7 @@ mod tests {
         let mut config = default_config();
         config.max_order_value_cents = 10_000; // $100
 
-        let report = check_batch(
-            &config,
-            &orders,
-            &account(10_000_000),
-            &[],
-            &targets,
-        );
+        let report = check_batch(&config, &orders, &account(10_000_000), &[], &targets);
 
         assert!(report.has_failures());
     }
@@ -339,19 +327,10 @@ mod tests {
         let mut config = default_config();
         config.max_order_value_cents = 10_000; // $100
 
-        let report = check_batch(
-            &config,
-            &orders,
-            &account(10_000_000),
-            &[],
-            &targets,
-        );
+        let report = check_batch(&config, &orders, &account(10_000_000), &[], &targets);
 
         assert!(!report.has_failures());
-        assert!(!report
-            .checks
-            .iter()
-            .any(|c| c.name == "Max order value"));
+        assert!(!report.checks.iter().any(|c| c.name == "Max order value"));
     }
 
     #[test]
@@ -361,13 +340,7 @@ mod tests {
         let mut config = default_config();
         config.max_order_value_cents = 10_000; // $100
 
-        let report = check_batch(
-            &config,
-            &orders,
-            &account(10_000_000),
-            &[],
-            &targets,
-        );
+        let report = check_batch(&config, &orders, &account(10_000_000), &[], &targets);
 
         assert!(report.has_failures());
         let order_limit = report
@@ -376,63 +349,55 @@ mod tests {
             .find(|c| c.name == "Max order value")
             .unwrap();
         assert_eq!(order_limit.status, RiskStatus::Fail);
-        assert!(order_limit.detail.contains("$150 > $100 max_order_value_cents"));
+        assert!(
+            order_limit
+                .detail
+                .contains("$150 > $100 max_order_value_cents")
+        );
     }
 
     #[test]
     fn fails_max_batch_value() {
-        let orders = vec![(aapl(), BrokerSide::Buy, 40, 185_00), (spy(), BrokerSide::Sell, 40, 185_00)];
+        let orders = vec![
+            (aapl(), BrokerSide::Buy, 40, 185_00),
+            (spy(), BrokerSide::Sell, 40, 185_00),
+        ];
         let targets = vec![(aapl(), 0.30), (spy(), -0.30)];
         let mut config = default_config();
         config.max_batch_value_cents = 10_000; // $100
 
-        let report = check_batch(
-            &config,
-            &orders,
-            &account(10_000_000),
-            &[],
-            &targets,
-        );
+        let report = check_batch(&config, &orders, &account(10_000_000), &[], &targets);
 
         assert!(report.has_failures());
     }
 
     #[test]
     fn passes_max_batch_value_boundary() {
-        let orders = vec![(aapl(), BrokerSide::Buy, 4, 2500), (spy(), BrokerSide::Sell, 4, 0)];
+        let orders = vec![
+            (aapl(), BrokerSide::Buy, 4, 2500),
+            (spy(), BrokerSide::Sell, 4, 0),
+        ];
         let targets = vec![(aapl(), 0.30), (spy(), -0.30)];
         let mut config = default_config();
         config.max_batch_value_cents = 10_000; // $100
 
-        let report = check_batch(
-            &config,
-            &orders,
-            &account(10_000_000),
-            &[],
-            &targets,
-        );
+        let report = check_batch(&config, &orders, &account(10_000_000), &[], &targets);
 
         assert!(!report.has_failures());
-        assert!(!report
-            .checks
-            .iter()
-            .any(|c| c.name == "Max batch value"));
+        assert!(!report.checks.iter().any(|c| c.name == "Max batch value"));
     }
 
     #[test]
     fn fails_batch_value_with_report_name() {
-        let orders = vec![(aapl(), BrokerSide::Buy, 25, 500), (spy(), BrokerSide::Sell, 25, 500)];
+        let orders = vec![
+            (aapl(), BrokerSide::Buy, 25, 500),
+            (spy(), BrokerSide::Sell, 25, 500),
+        ];
         let targets = vec![(aapl(), 0.30), (spy(), -0.30)];
         let mut config = default_config();
         config.max_batch_value_cents = 10_000; // $100
 
-        let report = check_batch(
-            &config,
-            &orders,
-            &account(10_000_000),
-            &[],
-            &targets,
-        );
+        let report = check_batch(&config, &orders, &account(10_000_000), &[], &targets);
 
         assert!(report.has_failures());
         let batch_limit = report
@@ -441,6 +406,10 @@ mod tests {
             .find(|c| c.name == "Max batch value")
             .unwrap();
         assert_eq!(batch_limit.status, RiskStatus::Fail);
-        assert!(batch_limit.detail.contains("$250 > $100 max_batch_value_cents"));
+        assert!(
+            batch_limit
+                .detail
+                .contains("$250 > $100 max_batch_value_cents")
+        );
     }
 }
