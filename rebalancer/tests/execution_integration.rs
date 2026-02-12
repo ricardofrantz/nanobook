@@ -7,9 +7,10 @@ use nanobook::Symbol;
 use nanobook_broker::BrokerSide;
 use nanobook_rebalancer::diff::{Action, CurrentPosition};
 use nanobook_rebalancer::execution::{
-    action_to_side, apply_constraint_overrides, collect_all_symbols,
+    action_to_side, apply_constraint_overrides, collect_all_symbols, enforce_max_orders_per_run,
 };
 use nanobook_rebalancer::target::TargetSpec;
+use nanobook_rebalancer::error::Error;
 
 fn aapl() -> Symbol {
     Symbol::new("AAPL")
@@ -185,4 +186,22 @@ fn compute_diff_zero_equity() {
 
     // 0 equity → target_value = 0 → diff = 0 → no orders
     assert!(orders.is_empty());
+}
+
+#[test]
+fn enforce_max_orders_per_run_allows_under_limit() {
+    let result = enforce_max_orders_per_run(3, 5);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn enforce_max_orders_per_run_rejects_over_limit() {
+    let result = enforce_max_orders_per_run(10, 5);
+    match result {
+        Err(Error::RiskFailed(msg)) => {
+            assert!(msg.contains("10 orders generated"));
+            assert!(msg.contains("max_orders_per_run is 5"));
+        }
+        _ => panic!("expected RiskFailed"),
+    }
 }

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-02-12
+
+### Added
+
+- **Risk engine hard caps** (`nanobook-risk` 0.4.0):
+  - `max_order_value_cents` — per-order notional limit (single-order and batch checks)
+  - `max_batch_value_cents` — aggregate batch notional limit
+  - Config validation for both fields
+  - Python bindings: `RiskEngine(max_order_value_cents=..., max_batch_value_cents=...)`
+- **Rebalancer execution guardrail** (`nanobook-rebalancer` 0.4.0):
+  - `enforce_max_orders_per_run()` — aborts rebalance when generated orders exceed `max_orders_per_run` config
+  - Config validation: `max_orders_per_run` must be > 0
+
+### Changed
+
+- **Rebalancer risk centralization** (`nanobook-rebalancer` 0.4.0):
+  - Replaced ~140 lines of hand-rolled risk checks with delegation to `nanobook-risk` crate
+  - Re-exports `RiskReport`/`RiskCheck`/`RiskStatus` from shared risk crate
+- **Broker abstraction** (`nanobook-rebalancer` 0.4.0):
+  - New `BrokerGateway` trait decouples execution from IBKR internals
+  - `connect_ibkr()` returns `Box<dyn BrokerGateway>` instead of concrete `IbkrClient`
+  - `as_connection_error()` helper replaces repeated `.map_err(...)` chains
+
+### Fixed
+
+- **README**: documented that `max_drawdown_pct` is validated at construction but not yet enforced at execution time
+
 ## [0.9.1] - 2026-02-11
 
 ### Fixed
@@ -317,7 +344,8 @@ Initial release of nanobook - a deterministic limit order book and matching engi
 - Fixed-point price representation (avoids floating-point errors)
 - Deterministic via monotonic timestamps (not system clock)
 
-[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/ricardofrantz/nanobook/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/ricardofrantz/nanobook/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/ricardofrantz/nanobook/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/ricardofrantz/nanobook/compare/v0.7.0...v0.8.0

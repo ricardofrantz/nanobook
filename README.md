@@ -812,6 +812,11 @@ pub struct RiskConfig {
 }
 ```
 
+Notes:
+
+- `max_drawdown_pct` is validated at engine construction and preserved in config,
+  but not yet used in execution-time checks.
+
 ### Single Order Check
 
 ```rust

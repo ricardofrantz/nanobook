@@ -144,7 +144,43 @@ pub fn check_batch(
         });
     }
 
-    // 4. Max trade size — warn if any trade > max_trade_usd
+    // 4. Max order value in cents
+    let mut batch_value = 0_i64;
+    for &(sym, _side, qty, price) in orders {
+        let qty_i64 = i64::try_from(qty).unwrap_or(i64::MAX);
+        let notional = qty_i64.saturating_mul(price.saturating_abs());
+        batch_value = batch_value.saturating_add(notional);
+
+        let max_order = config.max_order_value_cents;
+        if max_order > 0 && notional > max_order {
+            checks.push(RiskCheck {
+                name: "Max order value",
+                status: RiskStatus::Fail,
+                detail: format!(
+                    "{}: ${:.0} > ${:.0} max_order_value_cents",
+                    sym,
+                    notional as f64 / 100.0,
+                    max_order as f64 / 100.0,
+                ),
+            });
+        }
+    }
+
+    // 5. Max rebalance batch value in cents
+    let max_batch = config.max_batch_value_cents;
+    if max_batch > 0 && batch_value > max_batch {
+        checks.push(RiskCheck {
+            name: "Max batch value",
+            status: RiskStatus::Fail,
+            detail: format!(
+                "${:.0} > ${:.0} max_batch_value_cents",
+                batch_value as f64 / 100.0,
+                max_batch as f64 / 100.0,
+            ),
+        });
+    }
+
+    // 6. Max trade size — warn if any trade > max_trade_usd
     let max_cents = (config.max_trade_usd * 100.0) as i64;
     for &(sym, _side, qty, price) in orders {
         let qty_i64 = i64::try_from(qty).unwrap_or(i64::MAX);
@@ -163,14 +199,14 @@ pub fn check_batch(
         }
     }
 
-    // 5. Order count
+    // 7. Order count
     checks.push(RiskCheck {
         name: "Order count",
         status: RiskStatus::Pass,
         detail: format!("{} orders", orders.len()),
     });
 
-    // 6. Target weights sanity
+    // 8. Target weights sanity
     let long_sum: f64 = target_map.values().filter(|w| **w > 0.0).sum();
     let short_sum: f64 = target_map
         .values()
@@ -265,8 +301,10 @@ mod tests {
     fn warn_large_trade() {
         let orders = vec![(aapl(), BrokerSide::Buy, 1000, 185_00)];
         let targets = vec![(aapl(), 0.30)];
+        let mut config = default_config();
+        config.max_order_value_cents = 20_000_000; // keep order-level hard cap above max trade warning
         let report = check_batch(
-            &default_config(),
+            &config,
             &orders,
             &account(100_000_000),
             &[],
@@ -274,5 +312,135 @@ mod tests {
         );
         assert!(report.has_warnings());
         assert!(!report.has_failures());
+    }
+
+    #[test]
+    fn fails_max_order_value() {
+        let orders = vec![(aapl(), BrokerSide::Buy, 120, 150_00)];
+        let targets = vec![(aapl(), 0.30)];
+        let mut config = default_config();
+        config.max_order_value_cents = 10_000; // $100
+
+        let report = check_batch(
+            &config,
+            &orders,
+            &account(10_000_000),
+            &[],
+            &targets,
+        );
+
+        assert!(report.has_failures());
+    }
+
+    #[test]
+    fn passes_max_order_value_boundary() {
+        let orders = vec![(aapl(), BrokerSide::Buy, 2, 5_000)];
+        let targets = vec![(aapl(), 0.30)];
+        let mut config = default_config();
+        config.max_order_value_cents = 10_000; // $100
+
+        let report = check_batch(
+            &config,
+            &orders,
+            &account(10_000_000),
+            &[],
+            &targets,
+        );
+
+        assert!(!report.has_failures());
+        assert!(!report
+            .checks
+            .iter()
+            .any(|c| c.name == "Max order value"));
+    }
+
+    #[test]
+    fn boundary_checks_include_failure_messages() {
+        let orders = vec![(aapl(), BrokerSide::Buy, 3, 5_000)];
+        let targets = vec![(aapl(), 0.30)];
+        let mut config = default_config();
+        config.max_order_value_cents = 10_000; // $100
+
+        let report = check_batch(
+            &config,
+            &orders,
+            &account(10_000_000),
+            &[],
+            &targets,
+        );
+
+        assert!(report.has_failures());
+        let order_limit = report
+            .checks
+            .iter()
+            .find(|c| c.name == "Max order value")
+            .unwrap();
+        assert_eq!(order_limit.status, RiskStatus::Fail);
+        assert!(order_limit.detail.contains("$150 > $100 max_order_value_cents"));
+    }
+
+    #[test]
+    fn fails_max_batch_value() {
+        let orders = vec![(aapl(), BrokerSide::Buy, 40, 185_00), (spy(), BrokerSide::Sell, 40, 185_00)];
+        let targets = vec![(aapl(), 0.30), (spy(), -0.30)];
+        let mut config = default_config();
+        config.max_batch_value_cents = 10_000; // $100
+
+        let report = check_batch(
+            &config,
+            &orders,
+            &account(10_000_000),
+            &[],
+            &targets,
+        );
+
+        assert!(report.has_failures());
+    }
+
+    #[test]
+    fn passes_max_batch_value_boundary() {
+        let orders = vec![(aapl(), BrokerSide::Buy, 4, 2500), (spy(), BrokerSide::Sell, 4, 0)];
+        let targets = vec![(aapl(), 0.30), (spy(), -0.30)];
+        let mut config = default_config();
+        config.max_batch_value_cents = 10_000; // $100
+
+        let report = check_batch(
+            &config,
+            &orders,
+            &account(10_000_000),
+            &[],
+            &targets,
+        );
+
+        assert!(!report.has_failures());
+        assert!(!report
+            .checks
+            .iter()
+            .any(|c| c.name == "Max batch value"));
+    }
+
+    #[test]
+    fn fails_batch_value_with_report_name() {
+        let orders = vec![(aapl(), BrokerSide::Buy, 25, 500), (spy(), BrokerSide::Sell, 25, 500)];
+        let targets = vec![(aapl(), 0.30), (spy(), -0.30)];
+        let mut config = default_config();
+        config.max_batch_value_cents = 10_000; // $100
+
+        let report = check_batch(
+            &config,
+            &orders,
+            &account(10_000_000),
+            &[],
+            &targets,
+        );
+
+        assert!(report.has_failures());
+        let batch_limit = report
+            .checks
+            .iter()
+            .find(|c| c.name == "Max batch value")
+            .unwrap();
+        assert_eq!(batch_limit.status, RiskStatus::Fail);
+        assert!(batch_limit.detail.contains("$250 > $100 max_batch_value_cents"));
     }
 }

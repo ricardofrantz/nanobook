@@ -1,6 +1,6 @@
 [package]
 name = "nanobook-rebalancer"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Portfolio rebalancer bridging nanobook to Interactive Brokers"
@@ -20,6 +20,7 @@ path = "src/lib.rs"
 [dependencies]
 nanobook = { version = "0.9.1", path = "..", features = ["portfolio", "serde"] }
 nanobook-broker = { version = "0.3.1", path = "../broker", features = ["ibkr"] }
+nanobook-risk = { version = "0.4.0", path = "../risk" }
 thiserror = "2.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

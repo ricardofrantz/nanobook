@@ -25,7 +25,17 @@ class BinanceBroker:
     def quote(self, symbol: str) -> Dict[str, Any]: ...
 
 class RiskEngine:
-    def __init__(self, max_position_pct: float = 0.25, max_leverage: float = 1.5, max_drawdown_pct: float = 0.20, allow_short: bool = True, max_short_pct: float = 0.30, max_trade_usd: float = 100_000.0) -> None: ...
+    def __init__(
+        self,
+        max_position_pct: float = 0.25,
+        max_leverage: float = 1.5,
+        max_drawdown_pct: float = 0.20,
+        allow_short: bool = True,
+        max_short_pct: float = 0.30,
+        max_trade_usd: float = 100_000.0,
+        max_order_value_cents: int = 10_000_000,
+        max_batch_value_cents: int = 100_000_000,
+    ) -> None: ...
     def check_order(self, symbol: str, side: str, quantity: int, price_cents: int, equity_cents: int, positions: List[Tuple[str, int]]) -> List[Dict[str, Any]]: ...
     def check_batch(self, orders: List[Tuple[str, str, int, int]], equity_cents: int, positions: List[Tuple[str, int]], target_weights: List[Tuple[str, float]]) -> List[Dict[str, Any]]: ...
 

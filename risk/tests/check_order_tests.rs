@@ -205,6 +205,53 @@ fn large_order_warns() {
     assert!(report.has_warnings());
 }
 
+#[test]
+fn large_order_fails_order_value() {
+    let report = RiskEngine::new(RiskConfig {
+        max_position_pct: 0.25,
+        max_trade_usd: 100_000.0,
+        max_order_value_cents: 10_000,
+        ..RiskConfig::default()
+    })
+    .check_order(&aapl(), BrokerSide::Buy, 1000, 150_00, &account(100_000_000), &[]);
+
+    assert!(report.has_failures());
+    let order_limit = report.checks.iter().find(|r| r.name == "Max order value").unwrap();
+    assert_eq!(order_limit.status, RiskStatus::Fail);
+}
+
+#[test]
+fn large_order_passes_order_value_boundary() {
+    let report = RiskEngine::new(RiskConfig {
+        max_position_pct: 0.25,
+        max_trade_usd: 100_000.0,
+        max_order_value_cents: 10_000,
+        ..RiskConfig::default()
+    })
+    .check_order(&aapl(), BrokerSide::Buy, 50, 200, &account(100_000_000), &[]);
+
+    assert!(!report.has_failures());
+    let order_limit = report.checks.iter().find(|r| r.name == "Max order value").unwrap();
+    assert_eq!(order_limit.status, RiskStatus::Pass);
+    assert_eq!(order_limit.detail, "$100 <= $100 max_order_value_cents");
+}
+
+#[test]
+fn check_order_reports_expected_check_names() {
+    let report = RiskEngine::new(RiskConfig {
+        max_position_pct: 0.25,
+        max_trade_usd: 100_000.0,
+        max_order_value_cents: 10_000,
+        ..RiskConfig::default()
+    })
+    .check_order(&aapl(), BrokerSide::Buy, 50, 200, &account(100_000_000), &[]);
+
+    let names: Vec<_> = report.checks.iter().map(|c| c.name).collect();
+    assert!(names.contains(&"Max order value"));
+    assert!(names.contains(&"Max position"));
+    assert!(names.contains(&"Order size"));
+}
+
 // ============================================================================
 // RiskConfig::validate
 // ============================================================================
@@ -239,6 +286,20 @@ fn negative_max_drawdown_fails_validation() {
 fn zero_max_position_fails_validation() {
     let mut config = RiskConfig::default();
     config.max_position_pct = 0.0;
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn negative_max_order_value_cents_fails_validation() {
+    let mut config = RiskConfig::default();
+    config.max_order_value_cents = -1;
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn negative_max_batch_value_cents_fails_validation() {
+    let mut config = RiskConfig::default();
+    config.max_batch_value_cents = -1;
     assert!(config.validate().is_err());
 }
 

@@ -57,6 +57,27 @@ impl RiskEngine {
 
         let mut checks = Vec::new();
 
+        let max_order = self.config.max_order_value_cents;
+        let order_status = if max_order > 0 && notional > max_order {
+            RiskStatus::Fail
+        } else {
+            RiskStatus::Pass
+        };
+        checks.push(RiskCheck {
+            name: "Max order value",
+            status: order_status,
+            detail: format!(
+                "${:.0} {} ${:.0} max_order_value_cents",
+                notional as f64 / 100.0,
+                if order_status == RiskStatus::Pass {
+                    "<="
+                } else {
+                    ">"
+                },
+                max_order as f64 / 100.0,
+            ),
+        });
+
         // Position concentration after this order
         let current_qty = current_positions
             .iter()

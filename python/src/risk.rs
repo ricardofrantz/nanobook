@@ -18,6 +18,8 @@ use crate::types::parse_symbol;
 ///     allow_short: Whether short selling is allowed
 ///     max_short_pct: Max short exposure as fraction of equity
 ///     max_trade_usd: Max single trade size in USD
+///     max_order_value_cents: Max single-order value in cents
+///     max_batch_value_cents: Max rebalance batch value in cents
 ///
 /// Example::
 ///
@@ -38,6 +40,8 @@ impl PyRiskEngine {
         allow_short=true,
         max_short_pct=0.30,
         max_trade_usd=100_000.0,
+        max_order_value_cents=10_000_000,
+        max_batch_value_cents=100_000_000,
     ))]
     fn new(
         max_position_pct: f64,
@@ -46,6 +50,8 @@ impl PyRiskEngine {
         allow_short: bool,
         max_short_pct: f64,
         max_trade_usd: f64,
+        max_order_value_cents: i64,
+        max_batch_value_cents: i64,
     ) -> Self {
         let config = RiskConfig {
             max_position_pct,
@@ -54,6 +60,8 @@ impl PyRiskEngine {
             allow_short,
             max_short_pct,
             max_trade_usd,
+            max_order_value_cents,
+            max_batch_value_cents,
             ..RiskConfig::default()
         };
         Self {

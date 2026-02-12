@@ -7,12 +7,13 @@ use std::time::Duration;
 use log::{error, info, warn};
 use nanobook::Symbol;
 use nanobook_broker::BrokerSide;
-use nanobook_broker::ibkr::client::IbkrClient;
 use nanobook_broker::ibkr::orders::{self, OrderOutcome};
+use nanobook_broker::types::Position;
 use rustc_hash::FxHashMap;
 
 use crate::audit::{self, AuditLog};
 use crate::config::Config;
+use crate::broker::{as_connection_error, connect_ibkr};
 use crate::diff::{self, Action, CurrentPosition, RebalanceOrder};
 use crate::error::{Error, Result};
 use crate::reconcile;
@@ -26,18 +27,8 @@ pub struct RunOptions {
     pub target_file: String,
 }
 
-/// Connect to IBKR using the rebalancer config.
-fn connect_ibkr(config: &Config) -> Result<IbkrClient> {
-    IbkrClient::connect(
-        &config.connection.host,
-        config.connection.port,
-        config.connection.client_id,
-    )
-    .map_err(|e| Error::Connection(e.to_string()))
-}
-
 /// Convert broker positions to rebalancer CurrentPosition type.
-fn to_current_positions(broker_positions: &[nanobook_broker::Position]) -> Vec<CurrentPosition> {
+fn to_current_positions(broker_positions: &[Position]) -> Vec<CurrentPosition> {
     broker_positions
         .iter()
         .map(|p| CurrentPosition {
@@ -56,6 +47,19 @@ pub fn action_to_side(action: Action) -> BrokerSide {
     }
 }
 
+pub fn enforce_max_orders_per_run(
+    generated_orders: usize,
+    max_orders_per_run: usize,
+) -> Result<()> {
+    if generated_orders > max_orders_per_run {
+        return Err(Error::RiskFailed(format!(
+            "{generated_orders} orders generated, but max_orders_per_run is {max_orders_per_run}",
+        )));
+    }
+
+    Ok(())
+}
+
 /// Execute a full rebalance run.
 pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()> {
     // 1. Connect to IBKR
@@ -66,9 +70,7 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     audit::log_run_started(&mut audit, &opts.target_file, &config.account.id)?;
 
     // 3. Fetch account summary
-    let summary = client
-        .account_summary()
-        .map_err(|e| Error::Connection(e.to_string()))?;
+    let summary = as_connection_error(client.account_summary())?;
     println!(
         "Account {} ({}): ${:.2} equity, ${:.2} cash",
         config.account.id,
@@ -78,9 +80,7 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     );
 
     // 4. Fetch current positions (convert from broker types to rebalancer types)
-    let broker_positions = client
-        .positions()
-        .map_err(|e| Error::Connection(e.to_string()))?;
+    let broker_positions = as_connection_error(client.positions())?;
     let positions = to_current_positions(&broker_positions);
     audit::log_positions(&mut audit, &positions, summary.equity_cents)?;
 
@@ -88,9 +88,7 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
 
     // 5. Fetch live prices for all symbols (current + target)
     let all_symbols = collect_all_symbols(&positions, target);
-    let prices = client
-        .prices(&all_symbols)
-        .map_err(|e| Error::Connection(e.to_string()))?;
+    let prices = as_connection_error(client.prices(&all_symbols))?;
 
     // 6. Compute diff
     let targets = target.as_target_pairs();
@@ -104,6 +102,8 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
         config.execution.limit_offset_bps,
         min_trade_cents,
     );
+
+    enforce_max_orders_per_run(orders.len(), config.execution.max_orders_per_run)?;
 
     if orders.is_empty() {
         println!("\nNo rebalancing needed — portfolio matches target.");
@@ -183,14 +183,10 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
         submitted += 1;
 
         let side = action_to_side(order.action);
-        match orders::execute_limit_order(
-            client.inner(),
-            order.symbol,
-            side,
-            order.shares,
-            order.limit_price_cents,
-            timeout,
-        ) {
+        let shares = u64::try_from(order.shares)
+            .map_err(|_| Error::Order(format!("invalid share quantity for order {order:?}")))?;
+
+        match client.execute_limit_order(order.symbol, side, shares, order.limit_price_cents, timeout) {
             Ok(result) => {
                 audit::log_order_submitted(&mut audit, order, result.order_id)?;
                 audit::log_order_filled(&mut audit, &result)?;
@@ -246,16 +242,10 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
 
     // 13. Reconcile
     info!("Running post-execution reconciliation...");
-    let final_broker_positions = client
-        .positions()
-        .map_err(|e| Error::Connection(e.to_string()))?;
+    let final_broker_positions = as_connection_error(client.positions())?;
     let final_positions = to_current_positions(&final_broker_positions);
-    let final_prices = client
-        .prices(&all_symbols)
-        .map_err(|e| Error::Connection(e.to_string()))?;
-    let final_summary = client
-        .account_summary()
-        .map_err(|e| Error::Connection(e.to_string()))?;
+    let final_prices = as_connection_error(client.prices(&all_symbols))?;
+    let final_summary = as_connection_error(client.account_summary())?;
 
     let report = reconcile::reconcile(
         &final_positions,
@@ -271,12 +261,8 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
 /// Show current IBKR positions.
 pub fn show_positions(config: &Config) -> Result<()> {
     let client = connect_ibkr(config)?;
-    let summary = client
-        .account_summary()
-        .map_err(|e| Error::Connection(e.to_string()))?;
-    let broker_positions = client
-        .positions()
-        .map_err(|e| Error::Connection(e.to_string()))?;
+    let summary = as_connection_error(client.account_summary())?;
+    let broker_positions = as_connection_error(client.positions())?;
     let positions = to_current_positions(&broker_positions);
 
     println!(
@@ -301,9 +287,7 @@ pub fn check_status(config: &Config) -> Result<()> {
     let client = connect_ibkr(config)?;
     println!("OK");
 
-    let summary = client
-        .account_summary()
-        .map_err(|e| Error::Connection(e.to_string()))?;
+    let summary = as_connection_error(client.account_summary())?;
     println!(
         "Account {}: ${:.2} equity",
         config.account.id,
@@ -316,18 +300,12 @@ pub fn check_status(config: &Config) -> Result<()> {
 /// Run reconciliation against the last target.
 pub fn run_reconcile(config: &Config, target: &TargetSpec) -> Result<()> {
     let client = connect_ibkr(config)?;
-    let summary = client
-        .account_summary()
-        .map_err(|e| Error::Connection(e.to_string()))?;
-    let broker_positions = client
-        .positions()
-        .map_err(|e| Error::Connection(e.to_string()))?;
+    let summary = as_connection_error(client.account_summary())?;
+    let broker_positions = as_connection_error(client.positions())?;
     let positions = to_current_positions(&broker_positions);
 
     let all_symbols = collect_all_symbols(&positions, target);
-    let prices = client
-        .prices(&all_symbols)
-        .map_err(|e| Error::Connection(e.to_string()))?;
+    let prices = as_connection_error(client.prices(&all_symbols))?;
     let targets = target.as_target_pairs();
 
     let report = reconcile::reconcile(&positions, &targets, &prices, summary.equity_cents);

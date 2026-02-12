@@ -12,6 +12,7 @@ Cargo.lock
 __pycache__/
 *.pyc
 *.so
+uv.lock
 
 # OS
 .DS_Store

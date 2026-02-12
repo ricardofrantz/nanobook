@@ -6,6 +6,7 @@
 
 pub mod audit;
 pub mod config;
+pub mod broker;
 pub mod diff;
 pub mod error;
 pub mod execution;

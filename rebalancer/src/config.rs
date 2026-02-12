@@ -189,6 +189,9 @@ impl Config {
         if self.risk.max_short_pct < 0.0 || self.risk.max_short_pct > 1.0 {
             return Err(Error::Config("max_short_pct must be in [0.0, 1.0]".into()));
         }
+        if self.execution.max_orders_per_run == 0 {
+            return Err(Error::Config("max_orders_per_run must be > 0".into()));
+        }
         Ok(())
     }
 
@@ -272,6 +275,13 @@ audit_file = "audit.jsonl"
     fn validate_catches_bad_leverage() {
         let mut config: Config = toml::from_str(example_toml()).unwrap();
         config.risk.max_leverage = 0.5;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validate_catches_bad_max_orders_per_run() {
+        let mut config: Config = toml::from_str(example_toml()).unwrap();
+        config.execution.max_orders_per_run = 0;
         assert!(config.validate().is_err());
     }
 

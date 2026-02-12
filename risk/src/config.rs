@@ -62,6 +62,18 @@ impl RiskConfig {
                 self.min_trade_usd
             ));
         }
+        if self.max_order_value_cents < 0 {
+            return Err(format!(
+                "max_order_value_cents must be >= 0, got {}",
+                self.max_order_value_cents
+            ));
+        }
+        if self.max_batch_value_cents < 0 {
+            return Err(format!(
+                "max_batch_value_cents must be >= 0, got {}",
+                self.max_batch_value_cents
+            ));
+        }
         if !self.max_trade_usd.is_finite() || self.max_trade_usd < 0.0 {
             return Err(format!(
                 "max_trade_usd must be >= 0 and finite, got {}",

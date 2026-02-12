@@ -3,63 +3,46 @@
 //! Validates a set of rebalance orders against risk limits before execution.
 
 use nanobook::Symbol;
-use rustc_hash::FxHashMap;
-use serde::Serialize;
+use nanobook_broker::{Account, BrokerSide};
+use rustc_hash::{FxHashMap, FxHashSet};
+
+use nanobook_risk::{RiskConfig as SharedRiskConfig, RiskEngine as RiskEngineImpl};
 
 use crate::config::RiskConfig;
-use crate::diff::RebalanceOrder;
+use crate::diff::{Action, RebalanceOrder};
 
-/// Result of running all risk checks.
-#[derive(Debug, Clone, Serialize)]
-pub struct RiskReport {
-    pub checks: Vec<RiskCheck>,
-}
+pub use nanobook_risk::report::{RiskCheck, RiskReport, RiskStatus};
 
-/// A single risk check result.
-#[derive(Debug, Clone, Serialize)]
-pub struct RiskCheck {
-    pub name: &'static str,
-    pub status: RiskStatus,
-    pub detail: String,
-}
-
-/// Whether a check passed, warned, or failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum RiskStatus {
-    Pass,
-    Warn,
-    Fail,
-}
-
-impl std::fmt::Display for RiskStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RiskStatus::Pass => write!(f, "PASS"),
-            RiskStatus::Warn => write!(f, "WARN"),
-            RiskStatus::Fail => write!(f, "FAIL"),
-        }
+/// Convert rebalancer actions to broker-side direction.
+fn action_to_side(action: Action) -> BrokerSide {
+    match action {
+        Action::Buy | Action::BuyCover => BrokerSide::Buy,
+        Action::Sell | Action::SellShort => BrokerSide::Sell,
     }
 }
 
-impl RiskReport {
-    /// True if any check failed (not just warned).
-    pub fn has_failures(&self) -> bool {
-        self.checks.iter().any(|c| c.status == RiskStatus::Fail)
-    }
-
-    /// True if any check warned.
-    pub fn has_warnings(&self) -> bool {
-        self.checks.iter().any(|c| c.status == RiskStatus::Warn)
-    }
+/// Convert rebalancer risk config into nanobook-risk config.
+fn adapt_config(config: &RiskConfig) -> SharedRiskConfig {
+    let mut shared = SharedRiskConfig::default();
+    shared.max_position_pct = config.max_position_pct;
+    shared.max_leverage = config.max_leverage;
+    shared.min_trade_usd = config.min_trade_usd;
+    shared.max_trade_usd = config.max_trade_usd;
+    shared.allow_short = config.allow_short;
+    shared.max_short_pct = config.max_short_pct;
+    // Rebalancer config doesn't expose these yet; 0 = disabled.
+    shared.max_order_value_cents = 0;
+    shared.max_batch_value_cents = 0;
+    shared
 }
 
-impl std::fmt::Display for RiskReport {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "RISK CHECKS:")?;
-        for check in &self.checks {
-            writeln!(f, "  [{}] {}: {}", check.status, check.name, check.detail)?;
-        }
-        Ok(())
+fn validation_failure(detail: impl Into<String>) -> RiskReport {
+    RiskReport {
+        checks: vec![RiskCheck {
+            name: "Order validation",
+            status: RiskStatus::Fail,
+            detail: detail.into(),
+        }],
     }
 }
 
@@ -80,186 +63,49 @@ pub fn check_risk(
     current_qty: &FxHashMap<Symbol, i64>,
     config: &RiskConfig,
 ) -> RiskReport {
+    let engine = RiskEngineImpl::new(adapt_config(config));
+    let account = Account {
+        equity_cents,
+        buying_power_cents: equity_cents,
+        cash_cents: equity_cents,
+        gross_position_value_cents: 0,
+    };
+
     let price_map: FxHashMap<Symbol, i64> = prices.iter().copied().collect();
-    let target_map: FxHashMap<Symbol, f64> = targets.iter().copied().collect();
+    let mut broker_orders: Vec<(Symbol, BrokerSide, u64, i64)> =
+        Vec::with_capacity(orders.len() + current_qty.len());
+    let mut symbols_with_orders: FxHashSet<Symbol> = FxHashSet::default();
 
-    let mut checks = Vec::new();
-
-    // 1. Max position check — no single position > max_position_pct
-    // Use the target weights directly (they represent post-trade state)
-    // Also respect per-run constraint overrides if present
-    let max_pos = config.max_position_pct;
-    let mut worst_pos = 0.0_f64;
-    let mut worst_sym = Symbol::new("?");
-    for &(sym, weight) in targets {
-        let abs_w = weight.abs();
-        if abs_w > worst_pos {
-            worst_pos = abs_w;
-            worst_sym = sym;
-        }
-    }
-    let pos_status = if worst_pos > max_pos {
-        RiskStatus::Fail
-    } else {
-        RiskStatus::Pass
-    };
-    checks.push(RiskCheck {
-        name: "Max position",
-        status: pos_status,
-        detail: format!(
-            "{:.1}% ({}) {} {:.1}% limit",
-            worst_pos * 100.0,
-            worst_sym.as_str(),
-            if pos_status == RiskStatus::Pass {
-                "<="
-            } else {
-                ">"
-            },
-            max_pos * 100.0,
-        ),
-    });
-
-    // 2. Leverage check — gross exposure / equity
-    // Post-trade positions: current + order diffs
-    let mut post_qty: FxHashMap<Symbol, i64> = current_qty.clone();
     for order in orders {
-        let sign = match order.action {
-            crate::diff::Action::Buy | crate::diff::Action::BuyCover => 1,
-            crate::diff::Action::Sell | crate::diff::Action::SellShort => -1,
+        let shares = match u64::try_from(order.shares) {
+            Ok(v) => v,
+            Err(_) => {
+                return validation_failure(format!("invalid share quantity for {order:?}"));
+            }
         };
-        *post_qty.entry(order.symbol).or_insert(0) += sign * order.shares;
+
+        broker_orders.push((order.symbol, action_to_side(order.action), shares, order.limit_price_cents));
+        symbols_with_orders.insert(order.symbol);
     }
-    let gross_exposure: i64 = post_qty
-        .iter()
-        .map(|(sym, qty)| {
-            let price = price_map.get(sym).copied().unwrap_or(0);
-            qty.abs() * price
-        })
-        .sum();
-    let leverage = if equity_cents > 0 {
-        gross_exposure as f64 / equity_cents as f64
-    } else {
-        0.0
-    };
-    let lev_status = if leverage > config.max_leverage {
-        RiskStatus::Fail
-    } else {
-        RiskStatus::Pass
-    };
-    checks.push(RiskCheck {
-        name: "Leverage",
-        status: lev_status,
-        detail: format!(
-            "{:.2}x {} {:.2}x limit",
-            leverage,
-            if lev_status == RiskStatus::Pass {
-                "<="
-            } else {
-                ">"
-            },
-            config.max_leverage,
-        ),
-    });
 
-    // 3. Short exposure check
-    let short_exposure: i64 = post_qty
-        .iter()
-        .filter(|(_, qty)| **qty < 0)
-        .map(|(sym, qty)| {
-            let price = price_map.get(sym).copied().unwrap_or(0);
-            qty.abs() * price
-        })
-        .sum();
-    let short_pct = if equity_cents > 0 {
-        short_exposure as f64 / equity_cents as f64
-    } else {
-        0.0
-    };
-
-    let has_shorts = orders
-        .iter()
-        .any(|o| matches!(o.action, crate::diff::Action::SellShort));
-
-    if has_shorts && !config.allow_short {
-        checks.push(RiskCheck {
-            name: "Short selling",
-            status: RiskStatus::Fail,
-            detail: "short selling not allowed".into(),
-        });
-    } else {
-        let short_status = if short_pct > config.max_short_pct {
-            RiskStatus::Fail
+    // Include unchanged current positions by carrying a zero-quantity seed with a known price.
+    // This keeps leverage/short exposure checks consistent with pre-trade behavior.
+    for (symbol, qty) in current_qty.iter().filter(|(_, qty)| **qty != 0) {
+        if symbols_with_orders.contains(symbol) {
+            continue;
+        }
+        let price = price_map.get(symbol).copied().unwrap_or(0);
+        let side = if *qty >= 0 {
+            BrokerSide::Buy
         } else {
-            RiskStatus::Pass
+            BrokerSide::Sell
         };
-        checks.push(RiskCheck {
-            name: "Short exposure",
-            status: short_status,
-            detail: format!(
-                "{:.1}% {} {:.1}% limit",
-                short_pct * 100.0,
-                if short_status == RiskStatus::Pass {
-                    "<="
-                } else {
-                    ">"
-                },
-                config.max_short_pct * 100.0,
-            ),
-        });
+        broker_orders.push((*symbol, side, 0, price));
     }
 
-    // 4. Min trade check — all trades > min_trade_usd
-    checks.push(RiskCheck {
-        name: "Min trade size",
-        status: RiskStatus::Pass, // diff engine already filters sub-minimum trades
-        detail: format!("All trades >= ${:.0} minimum", config.min_trade_usd),
-    });
+    let current_positions: Vec<(Symbol, i64)> = current_qty.iter().map(|(sym, qty)| (*sym, *qty)).collect();
 
-    // 5. Max trade check — warn if any trade > max_trade_usd
-    let max_cents = (config.max_trade_usd * 100.0) as i64;
-    for order in orders {
-        if order.notional_cents > max_cents {
-            checks.push(RiskCheck {
-                name: "Max trade size",
-                status: RiskStatus::Warn,
-                detail: format!(
-                    "Trade {} {}: ${:.0} > ${:.0} max_trade_usd",
-                    order.action,
-                    order.symbol,
-                    order.notional_cents as f64 / 100.0,
-                    config.max_trade_usd,
-                ),
-            });
-        }
-    }
-
-    // 6. Order count check
-    let order_count = orders.len();
-    checks.push(RiskCheck {
-        name: "Order count",
-        status: RiskStatus::Pass,
-        detail: format!("{order_count} orders"),
-    });
-
-    // 7. Target weights sanity — sum of long weights
-    let long_sum: f64 = target_map.values().filter(|w| **w > 0.0).sum();
-    let short_sum: f64 = target_map
-        .values()
-        .filter(|w| **w < 0.0)
-        .map(|w| w.abs())
-        .sum();
-    checks.push(RiskCheck {
-        name: "Weight allocation",
-        status: RiskStatus::Pass,
-        detail: format!(
-            "{:.1}% long, {:.1}% short, {:.1}% cash",
-            long_sum * 100.0,
-            short_sum * 100.0,
-            (1.0 - long_sum) * 100.0,
-        ),
-    });
-
-    RiskReport { checks }
+    engine.check_batch(&broker_orders, &account, &current_positions, targets)
 }
 
 #[cfg(test)]
@@ -298,7 +144,7 @@ mod tests {
 
         let targets = vec![(aapl(), 0.30)];
         let prices = vec![(aapl(), 185_00)];
-        let current = FxHashMap::default();
+        let current: FxHashMap<Symbol, i64> = FxHashMap::default();
 
         let report = check_risk(
             &orders,
@@ -325,16 +171,9 @@ mod tests {
 
         let targets = vec![(aapl(), 0.50)]; // 50% > 40% limit
         let prices = vec![(aapl(), 185_00)];
-        let current = FxHashMap::default();
+        let current: FxHashMap<Symbol, i64> = FxHashMap::default();
 
-        let report = check_risk(
-            &orders,
-            10_000_000,
-            &targets,
-            &prices,
-            &current,
-            &default_risk_config(),
-        );
+        let report = check_risk(&orders, 10_000_000, &targets, &prices, &current, &default_risk_config());
 
         assert!(report.has_failures());
     }
@@ -355,7 +194,7 @@ mod tests {
 
         let targets = vec![(spy(), -0.10)];
         let prices = vec![(spy(), 430_00)];
-        let current = FxHashMap::default();
+        let current: FxHashMap<Symbol, i64> = FxHashMap::default();
 
         let report = check_risk(&orders, 10_000_000, &targets, &prices, &current, &config);
 
@@ -375,16 +214,9 @@ mod tests {
 
         let targets = vec![(aapl(), 0.30)];
         let prices = vec![(aapl(), 185_00)];
-        let current = FxHashMap::default();
+        let current: FxHashMap<Symbol, i64> = FxHashMap::default();
 
-        let report = check_risk(
-            &orders,
-            100_000_000, // $1M (so 30% is under position limit)
-            &targets,
-            &prices,
-            &current,
-            &default_risk_config(),
-        );
+        let report = check_risk(&orders, 100_000_000, &targets, &prices, &current, &default_risk_config());
 
         assert!(report.has_warnings());
         assert!(!report.has_failures());
