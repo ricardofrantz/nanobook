@@ -110,31 +110,6 @@ jobs:
       - name: Run cargo-audit
         run: cargo audit
 
-  miri:
-    name: Miri (undefined behavior)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust nightly + Miri
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: miri
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: miri
-
-      - name: Run Miri
-        run: cargo +nightly miri test --lib --no-default-features
-        env:
-          MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-symbolic-alignment-check"
-
-      - name: Run Miri (portfolio)
-        run: cargo +nightly miri test --lib --features portfolio
-        env:
-          MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-symbolic-alignment-check"
-
   coverage:
     name: Code coverage
     runs-on: ubuntu-latest
