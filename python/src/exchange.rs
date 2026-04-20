@@ -209,7 +209,7 @@ impl PyExchange {
     }
 
     /// Get a stop order by ID.
-    fn get_stop_order(&self, py: Python<'_>, order_id: u64) -> PyResult<Option<PyObject>> {
+    fn get_stop_order(&self, py: Python<'_>, order_id: u64) -> PyResult<Option<Py<PyAny>>> {
         if let Some(stop) = self.inner.get_stop_order(OrderId(order_id)) {
             let dict = PyDict::new(py);
             dict.set_item("id", stop.id.0)?;
@@ -219,7 +219,7 @@ impl PyExchange {
             dict.set_item("quantity", stop.quantity)?;
             dict.set_item("status", format!("{:?}", stop.status).to_lowercase())?;
             dict.set_item("timestamp", stop.timestamp)?;
-            Ok(Some(dict.into()))
+            Ok(Some(dict.into_any().unbind()))
         } else {
             Ok(None)
         }

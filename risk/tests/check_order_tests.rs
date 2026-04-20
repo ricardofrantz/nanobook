@@ -292,50 +292,64 @@ fn default_config_validates() {
 
 #[test]
 fn nan_max_position_fails_validation() {
-    let mut config = RiskConfig::default();
-    config.max_position_pct = f64::NAN;
+    let config = RiskConfig {
+        max_position_pct: f64::NAN,
+        ..RiskConfig::default()
+    };
     assert!(config.validate().is_err());
 }
 
 #[test]
 fn inf_max_leverage_fails_validation() {
-    let mut config = RiskConfig::default();
-    config.max_leverage = f64::INFINITY;
+    let config = RiskConfig {
+        max_leverage: f64::INFINITY,
+        ..RiskConfig::default()
+    };
     assert!(config.validate().is_err());
 }
 
 #[test]
 fn negative_max_drawdown_fails_validation() {
-    let mut config = RiskConfig::default();
-    config.max_drawdown_pct = -0.01;
+    let config = RiskConfig {
+        max_drawdown_pct: -0.01,
+        ..RiskConfig::default()
+    };
     assert!(config.validate().is_err());
 }
 
 #[test]
 fn zero_max_position_fails_validation() {
-    let mut config = RiskConfig::default();
-    config.max_position_pct = 0.0;
+    let config = RiskConfig {
+        max_position_pct: 0.0,
+        ..RiskConfig::default()
+    };
     assert!(config.validate().is_err());
 }
 
 #[test]
 fn negative_max_order_value_cents_fails_validation() {
-    let mut config = RiskConfig::default();
-    config.max_order_value_cents = -1;
+    let config = RiskConfig {
+        max_order_value_cents: -1,
+        ..RiskConfig::default()
+    };
     assert!(config.validate().is_err());
 }
 
 #[test]
 fn negative_max_batch_value_cents_fails_validation() {
-    let mut config = RiskConfig::default();
-    config.max_batch_value_cents = -1;
+    let config = RiskConfig {
+        max_batch_value_cents: -1,
+        ..RiskConfig::default()
+    };
     assert!(config.validate().is_err());
 }
 
 #[test]
 fn leverage_below_one_fails_validation() {
-    let mut config = RiskConfig::default();
-    config.max_leverage = 0.5;
+    let config = RiskConfig {
+        max_leverage: 0.5,
+        ..RiskConfig::default()
+    };
     assert!(config.validate().is_err());
 }
 
@@ -356,7 +370,9 @@ fn boundary_values_validate() {
 #[test]
 #[should_panic(expected = "invalid RiskConfig")]
 fn risk_engine_panics_on_invalid_config() {
-    let mut config = RiskConfig::default();
-    config.max_position_pct = f64::NAN;
+    let config = RiskConfig {
+        max_position_pct: f64::NAN,
+        ..RiskConfig::default()
+    };
     RiskEngine::new(config);
 }

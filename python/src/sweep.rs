@@ -54,7 +54,7 @@ pub fn py_sweep_equal_weight(
     let params: Vec<usize> = (0..n_params).collect();
 
     // Release the GIL for Rayon parallel execution
-    let results = py.allow_threads(|| {
+    let results = py.detach(|| {
         sweep_strategy(
             &params,
             &price_series,

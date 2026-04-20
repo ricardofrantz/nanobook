@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn all_pass_simple() {
-        let orders = vec![(aapl(), BrokerSide::Buy, 100_u64, 185_00_i64)];
+        let orders = vec![(aapl(), BrokerSide::Buy, 100_u64, 18_500_i64)];
         let targets = vec![(aapl(), 0.30)];
         let report = check_batch(
             &default_config(),
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn fail_max_position() {
-        let orders = vec![(aapl(), BrokerSide::Buy, 500, 185_00)];
+        let orders = vec![(aapl(), BrokerSide::Buy, 500, 18_500)];
         let targets = vec![(aapl(), 0.50)]; // 50% > 40%
         let report = check_batch(
             &default_config(),
@@ -291,7 +291,7 @@ mod tests {
         let mut config = default_config();
         config.allow_short = false;
 
-        let orders = vec![(spy(), BrokerSide::Sell, 50, 430_00)];
+        let orders = vec![(spy(), BrokerSide::Sell, 50, 43_000)];
         let targets = vec![(spy(), -0.10)];
         let report = check_batch(&config, &orders, &account(10_000_000), &[], &targets);
         assert!(report.has_failures());
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn warn_large_trade() {
-        let orders = vec![(aapl(), BrokerSide::Buy, 1000, 185_00)];
+        let orders = vec![(aapl(), BrokerSide::Buy, 1000, 18_500)];
         let targets = vec![(aapl(), 0.30)];
         let mut config = default_config();
         config.max_order_value_cents = 20_000_000; // keep order-level hard cap above max trade warning
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn fails_max_order_value() {
-        let orders = vec![(aapl(), BrokerSide::Buy, 120, 150_00)];
+        let orders = vec![(aapl(), BrokerSide::Buy, 120, 15_000)];
         let targets = vec![(aapl(), 0.30)];
         let mut config = default_config();
         config.max_order_value_cents = 10_000; // $100
@@ -359,8 +359,8 @@ mod tests {
     #[test]
     fn fails_max_batch_value() {
         let orders = vec![
-            (aapl(), BrokerSide::Buy, 40, 185_00),
-            (spy(), BrokerSide::Sell, 40, 185_00),
+            (aapl(), BrokerSide::Buy, 40, 18_500),
+            (spy(), BrokerSide::Sell, 40, 18_500),
         ];
         let targets = vec![(aapl(), 0.30), (spy(), -0.30)];
         let mut config = default_config();

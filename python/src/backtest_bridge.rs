@@ -39,7 +39,7 @@ pub fn backtest_weights(
     periods_per_year: f64,
     risk_free: f64,
     stop_cfg: Option<Bound<'_, PyDict>>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     // Convert Python types to Rust types.
     let rust_weights: Vec<Vec<(nanobook::Symbol, f64)>> = weight_schedule
         .iter()
@@ -66,7 +66,7 @@ pub fn backtest_weights(
     };
 
     // Release GIL during computation.
-    let result = py.allow_threads(|| {
+    let result = py.detach(|| {
         backtest_bridge::backtest_weights_with_options(
             &rust_weights,
             &rust_prices,
@@ -121,7 +121,7 @@ pub fn backtest_weights(
     }
     dict.set_item("stop_events", stop_events)?;
 
-    Ok(dict.into())
+    Ok(dict.into_any().unbind())
 }
 
 /// Backward-compatible alias for older callers using ``py_backtest_weights``.
@@ -137,7 +137,7 @@ pub fn py_backtest_weights(
     periods_per_year: f64,
     risk_free: f64,
     stop_cfg: Option<Bound<'_, PyDict>>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     backtest_weights(
         py,
         weight_schedule,

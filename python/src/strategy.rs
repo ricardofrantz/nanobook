@@ -18,7 +18,7 @@ impl Strategy for PyStrategy {
         prices: &[(Symbol, i64)],
         portfolio: &Portfolio,
     ) -> Vec<(Symbol, f64)> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let py_prices: HashMap<String, i64> = prices
                 .iter()
                 .map(|(sym, p)| (sym.to_string(), *p))

@@ -108,12 +108,12 @@ impl PyPortfolio {
     }
 
     /// Get all positions as a dict {symbol: Position}.
-    fn positions(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn positions(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         for (sym, pos) in self.inner.positions() {
             dict.set_item(sym.to_string(), PyPosition { inner: pos.clone() })?;
         }
-        Ok(dict.into())
+        Ok(dict.into_any().unbind())
     }
 
     /// Total equity (cash + position values) given current prices.
@@ -183,7 +183,7 @@ impl PyPortfolio {
     }
 
     /// Take a portfolio snapshot.
-    fn snapshot(&self, py: Python<'_>, prices: Vec<(String, i64)>) -> PyResult<PyObject> {
+    fn snapshot(&self, py: Python<'_>, prices: Vec<(String, i64)>) -> PyResult<Py<PyAny>> {
         let prices = parse_price_list(&prices)?;
         let snap = self.inner.snapshot(&prices);
 
@@ -199,7 +199,7 @@ impl PyPortfolio {
         }
         dict.set_item("weights", weights)?;
 
-        Ok(dict.into())
+        Ok(dict.into_any().unbind())
     }
 
     /// Compute metrics from the recorded return series.

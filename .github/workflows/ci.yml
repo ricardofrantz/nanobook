@@ -20,6 +20,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -43,10 +47,8 @@ jobs:
           - { os: ubuntu-latest,  python: "3.12" }
           - { os: ubuntu-latest,  python: "3.13" }
           - { os: ubuntu-latest,  python: "3.14" }
-          - { os: macos-latest,   python: "3.13" }
-          - { os: windows-latest, python: "3.13" }
-    env:
-      PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
+          - { os: macos-latest,   python: "3.14" }
+          - { os: windows-latest, python: "3.14" }
     steps:
       - uses: actions/checkout@v4
 
@@ -73,6 +75,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
