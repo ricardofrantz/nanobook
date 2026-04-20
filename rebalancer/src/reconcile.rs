@@ -134,12 +134,12 @@ mod tests {
         let positions = vec![CurrentPosition {
             symbol: aapl(),
             quantity: 2702,
-            avg_cost_cents: 185_00,
+            avg_cost_cents: 18_500,
         }];
 
         let targets = vec![(aapl(), 0.5)];
-        let prices = vec![(aapl(), 185_00)];
-        let equity = 1_000_000_00;
+        let prices = vec![(aapl(), 18_500)];
+        let equity = 100_000_000;
 
         let report = reconcile(&positions, &targets, &prices, equity);
         assert!(report.tracking_error_pct < 1.0);
@@ -149,8 +149,8 @@ mod tests {
     fn missing_position() {
         let positions = vec![]; // no positions
         let targets = vec![(aapl(), 0.5)];
-        let prices = vec![(aapl(), 185_00)];
-        let equity = 1_000_000_00;
+        let prices = vec![(aapl(), 18_500)];
+        let equity = 100_000_000;
 
         let report = reconcile(&positions, &targets, &prices, equity);
         assert!(report.tracking_error_pct > 1.0); // significant error
@@ -163,18 +163,18 @@ mod tests {
             CurrentPosition {
                 symbol: aapl(),
                 quantity: 2702,
-                avg_cost_cents: 185_00,
+                avg_cost_cents: 18_500,
             },
             CurrentPosition {
                 symbol: msft(),
                 quantity: 100, // not in targets
-                avg_cost_cents: 400_00,
+                avg_cost_cents: 40_000,
             },
         ];
 
         let targets = vec![(aapl(), 0.5)];
-        let prices = vec![(aapl(), 185_00), (msft(), 410_00)];
-        let equity = 1_000_000_00;
+        let prices = vec![(aapl(), 18_500), (msft(), 41_000)];
+        let equity = 100_000_000;
 
         let report = reconcile(&positions, &targets, &prices, equity);
         // MSFT should show up with target_weight=0 but actual > 0

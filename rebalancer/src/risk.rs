@@ -23,17 +23,18 @@ fn action_to_side(action: Action) -> BrokerSide {
 
 /// Convert rebalancer risk config into nanobook-risk config.
 fn adapt_config(config: &RiskConfig) -> SharedRiskConfig {
-    let mut shared = SharedRiskConfig::default();
-    shared.max_position_pct = config.max_position_pct;
-    shared.max_leverage = config.max_leverage;
-    shared.min_trade_usd = config.min_trade_usd;
-    shared.max_trade_usd = config.max_trade_usd;
-    shared.allow_short = config.allow_short;
-    shared.max_short_pct = config.max_short_pct;
-    // Rebalancer config doesn't expose these yet; 0 = disabled.
-    shared.max_order_value_cents = 0;
-    shared.max_batch_value_cents = 0;
-    shared
+    SharedRiskConfig {
+        max_position_pct: config.max_position_pct,
+        max_leverage: config.max_leverage,
+        min_trade_usd: config.min_trade_usd,
+        max_trade_usd: config.max_trade_usd,
+        allow_short: config.allow_short,
+        max_short_pct: config.max_short_pct,
+        // Rebalancer config doesn't expose these yet; 0 = disabled.
+        max_order_value_cents: 0,
+        max_batch_value_cents: 0,
+        ..SharedRiskConfig::default()
+    }
 }
 
 fn validation_failure(detail: impl Into<String>) -> RiskReport {
@@ -143,13 +144,13 @@ mod tests {
             symbol: aapl(),
             action: Action::Buy,
             shares: 100,
-            limit_price_cents: 185_00,
+            limit_price_cents: 18_500,
             notional_cents: 1_850_000,
             description: "open",
         }];
 
         let targets = vec![(aapl(), 0.30)];
-        let prices = vec![(aapl(), 185_00)];
+        let prices = vec![(aapl(), 18_500)];
         let current: FxHashMap<Symbol, i64> = FxHashMap::default();
 
         let report = check_risk(
@@ -170,13 +171,13 @@ mod tests {
             symbol: aapl(),
             action: Action::Buy,
             shares: 500,
-            limit_price_cents: 185_00,
+            limit_price_cents: 18_500,
             notional_cents: 9_250_000,
             description: "open",
         }];
 
         let targets = vec![(aapl(), 0.50)]; // 50% > 40% limit
-        let prices = vec![(aapl(), 185_00)];
+        let prices = vec![(aapl(), 18_500)];
         let current: FxHashMap<Symbol, i64> = FxHashMap::default();
 
         let report = check_risk(
@@ -200,13 +201,13 @@ mod tests {
             symbol: spy(),
             action: Action::SellShort,
             shares: 50,
-            limit_price_cents: 430_00,
+            limit_price_cents: 43_000,
             notional_cents: 2_150_000,
             description: "open short",
         }];
 
         let targets = vec![(spy(), -0.10)];
-        let prices = vec![(spy(), 430_00)];
+        let prices = vec![(spy(), 43_000)];
         let current: FxHashMap<Symbol, i64> = FxHashMap::default();
 
         let report = check_risk(&orders, 10_000_000, &targets, &prices, &current, &config);
@@ -220,13 +221,13 @@ mod tests {
             symbol: aapl(),
             action: Action::Buy,
             shares: 1000,
-            limit_price_cents: 185_00,
+            limit_price_cents: 18_500,
             notional_cents: 18_500_000, // $185K > $100K max
             description: "open",
         }];
 
         let targets = vec![(aapl(), 0.30)];
-        let prices = vec![(aapl(), 185_00)];
+        let prices = vec![(aapl(), 18_500)];
         let current: FxHashMap<Symbol, i64> = FxHashMap::default();
 
         let report = check_risk(

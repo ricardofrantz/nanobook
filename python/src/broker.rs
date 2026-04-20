@@ -53,7 +53,7 @@ impl PyIbkrBroker {
     ///
     /// Returns list of dicts with keys: symbol, quantity, avg_cost_cents,
     /// market_value_cents, unrealized_pnl_cents.
-    fn positions(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn positions(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let positions = self
             .inner
             .positions()
@@ -69,14 +69,14 @@ impl PyIbkrBroker {
             dict.set_item("unrealized_pnl_cents", pos.unrealized_pnl_cents)?;
             list.append(dict)?;
         }
-        Ok(list.into())
+        Ok(list.into_any().unbind())
     }
 
     /// Get account summary.
     ///
     /// Returns dict with keys: equity_cents, buying_power_cents, cash_cents,
     /// gross_position_value_cents.
-    fn account(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn account(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let account = self
             .inner
             .account()
@@ -90,7 +90,7 @@ impl PyIbkrBroker {
             "gross_position_value_cents",
             account.gross_position_value_cents,
         )?;
-        Ok(dict.into())
+        Ok(dict.into_any().unbind())
     }
 
     /// Submit an order.
@@ -160,7 +160,7 @@ impl PyIbkrBroker {
     ///
     /// Returns dict with keys: id, status, filled_quantity,
     /// remaining_quantity, avg_fill_price_cents.
-    fn order_status(&self, py: Python<'_>, order_id: u64) -> PyResult<PyObject> {
+    fn order_status(&self, py: Python<'_>, order_id: u64) -> PyResult<Py<PyAny>> {
         let id = nanobook_broker::OrderId(order_id);
         let status = self
             .inner
@@ -173,7 +173,7 @@ impl PyIbkrBroker {
         dict.set_item("filled_quantity", status.filled_quantity)?;
         dict.set_item("remaining_quantity", status.remaining_quantity)?;
         dict.set_item("avg_fill_price_cents", status.avg_fill_price_cents)?;
-        Ok(dict.into())
+        Ok(dict.into_any().unbind())
     }
 
     /// Cancel a pending order.
@@ -187,7 +187,7 @@ impl PyIbkrBroker {
     /// Get current quote for a symbol.
     ///
     /// Returns dict with keys: symbol, bid_cents, ask_cents, last_cents, volume.
-    fn quote(&self, py: Python<'_>, symbol: &str) -> PyResult<PyObject> {
+    fn quote(&self, py: Python<'_>, symbol: &str) -> PyResult<Py<PyAny>> {
         let sym = parse_symbol(symbol)?;
         let quote = self
             .inner
@@ -200,7 +200,7 @@ impl PyIbkrBroker {
         dict.set_item("ask_cents", quote.ask_cents)?;
         dict.set_item("last_cents", quote.last_cents)?;
         dict.set_item("volume", quote.volume)?;
-        Ok(dict.into())
+        Ok(dict.into_any().unbind())
     }
 
     fn __repr__(&self) -> String {
@@ -257,7 +257,7 @@ mod binance_binding {
         }
 
         /// Get all positions (non-zero balances).
-        fn positions(&self, py: Python<'_>) -> PyResult<PyObject> {
+        fn positions(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
             let positions = self
                 .inner
                 .positions()
@@ -273,11 +273,11 @@ mod binance_binding {
                 dict.set_item("unrealized_pnl_cents", pos.unrealized_pnl_cents)?;
                 list.append(dict)?;
             }
-            Ok(list.into())
+            Ok(list.into_any().unbind())
         }
 
         /// Get account summary (USDT balance).
-        fn account(&self, py: Python<'_>) -> PyResult<PyObject> {
+        fn account(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
             let account = self
                 .inner
                 .account()
@@ -291,7 +291,7 @@ mod binance_binding {
                 "gross_position_value_cents",
                 account.gross_position_value_cents,
             )?;
-            Ok(dict.into())
+            Ok(dict.into_any().unbind())
         }
 
         /// Submit an order.
@@ -349,7 +349,7 @@ mod binance_binding {
         }
 
         /// Get order status.
-        fn order_status(&self, py: Python<'_>, order_id: u64) -> PyResult<PyObject> {
+        fn order_status(&self, py: Python<'_>, order_id: u64) -> PyResult<Py<PyAny>> {
             let id = nanobook_broker::OrderId(order_id);
             let status = self
                 .inner
@@ -362,7 +362,7 @@ mod binance_binding {
             dict.set_item("filled_quantity", status.filled_quantity)?;
             dict.set_item("remaining_quantity", status.remaining_quantity)?;
             dict.set_item("avg_fill_price_cents", status.avg_fill_price_cents)?;
-            Ok(dict.into())
+            Ok(dict.into_any().unbind())
         }
 
         /// Cancel an order.
@@ -374,7 +374,7 @@ mod binance_binding {
         }
 
         /// Get current quote for a symbol (e.g., "BTC").
-        fn quote(&self, py: Python<'_>, symbol: &str) -> PyResult<PyObject> {
+        fn quote(&self, py: Python<'_>, symbol: &str) -> PyResult<Py<PyAny>> {
             let sym = parse_symbol(symbol)?;
             let quote = self
                 .inner
@@ -387,7 +387,7 @@ mod binance_binding {
             dict.set_item("ask_cents", quote.ask_cents)?;
             dict.set_item("last_cents", quote.last_cents)?;
             dict.set_item("volume", quote.volume)?;
-            Ok(dict.into())
+            Ok(dict.into_any().unbind())
         }
 
         fn __repr__(&self) -> String {

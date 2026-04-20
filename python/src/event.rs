@@ -28,7 +28,7 @@ impl PyEvent {
         format!("{:?}", self.inner)
     }
 
-    pub fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
+    pub fn __getstate__(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let json = serde_json::to_string(&self.inner)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         json.into_py_any(py)

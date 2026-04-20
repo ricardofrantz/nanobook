@@ -32,10 +32,10 @@ pub fn optimize_min_variance(
     py: Python<'_>,
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let symbols = sanitize_symbols(symbols);
-    let w = py.allow_threads(|| optimize::optimize_min_variance(&returns_matrix));
-    Ok(to_weights_dict(py, &symbols, w)?.into())
+    let w = py.detach(|| optimize::optimize_min_variance(&returns_matrix));
+    Ok(to_weights_dict(py, &symbols, w)?.into_any().unbind())
 }
 
 #[pyfunction]
@@ -43,7 +43,7 @@ pub fn py_optimize_min_variance(
     py: Python<'_>,
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     optimize_min_variance(py, returns_matrix, symbols)
 }
 
@@ -54,10 +54,10 @@ pub fn optimize_max_sharpe(
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
     risk_free: f64,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let symbols = sanitize_symbols(symbols);
-    let w = py.allow_threads(|| optimize::optimize_max_sharpe(&returns_matrix, risk_free));
-    Ok(to_weights_dict(py, &symbols, w)?.into())
+    let w = py.detach(|| optimize::optimize_max_sharpe(&returns_matrix, risk_free));
+    Ok(to_weights_dict(py, &symbols, w)?.into_any().unbind())
 }
 
 #[pyfunction]
@@ -67,7 +67,7 @@ pub fn py_optimize_max_sharpe(
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
     risk_free: f64,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     optimize_max_sharpe(py, returns_matrix, symbols, risk_free)
 }
 
@@ -76,10 +76,10 @@ pub fn optimize_risk_parity(
     py: Python<'_>,
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let symbols = sanitize_symbols(symbols);
-    let w = py.allow_threads(|| optimize::optimize_risk_parity(&returns_matrix));
-    Ok(to_weights_dict(py, &symbols, w)?.into())
+    let w = py.detach(|| optimize::optimize_risk_parity(&returns_matrix));
+    Ok(to_weights_dict(py, &symbols, w)?.into_any().unbind())
 }
 
 #[pyfunction]
@@ -87,7 +87,7 @@ pub fn py_optimize_risk_parity(
     py: Python<'_>,
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     optimize_risk_parity(py, returns_matrix, symbols)
 }
 
@@ -98,10 +98,10 @@ pub fn optimize_cvar(
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
     alpha: f64,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let symbols = sanitize_symbols(symbols);
-    let w = py.allow_threads(|| optimize::optimize_cvar(&returns_matrix, alpha));
-    Ok(to_weights_dict(py, &symbols, w)?.into())
+    let w = py.detach(|| optimize::optimize_cvar(&returns_matrix, alpha));
+    Ok(to_weights_dict(py, &symbols, w)?.into_any().unbind())
 }
 
 #[pyfunction]
@@ -111,7 +111,7 @@ pub fn py_optimize_cvar(
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
     alpha: f64,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     optimize_cvar(py, returns_matrix, symbols, alpha)
 }
 
@@ -122,10 +122,10 @@ pub fn optimize_cdar(
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
     alpha: f64,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let symbols = sanitize_symbols(symbols);
-    let w = py.allow_threads(|| optimize::optimize_cdar(&returns_matrix, alpha));
-    Ok(to_weights_dict(py, &symbols, w)?.into())
+    let w = py.detach(|| optimize::optimize_cdar(&returns_matrix, alpha));
+    Ok(to_weights_dict(py, &symbols, w)?.into_any().unbind())
 }
 
 #[pyfunction]
@@ -135,6 +135,6 @@ pub fn py_optimize_cdar(
     returns_matrix: Vec<Vec<f64>>,
     symbols: Vec<String>,
     alpha: f64,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     optimize_cdar(py, returns_matrix, symbols, alpha)
 }

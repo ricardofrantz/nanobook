@@ -241,9 +241,9 @@ mod tests {
     #[test]
     fn builder_basic() {
         let mut broker = MockBroker::builder()
-            .with_position(aapl(), 100, 150_00)
-            .with_account(1_000_000_00, 500_000_00)
-            .with_quote(aapl(), 149_50, 150_50)
+            .with_position(aapl(), 100, 15_000)
+            .with_account(100_000_000, 50_000_000)
+            .with_quote(aapl(), 14_950, 15_050)
             .build();
 
         broker.connect().unwrap();
@@ -254,11 +254,11 @@ mod tests {
         assert_eq!(positions[0].quantity, 100);
 
         let account = broker.account().unwrap();
-        assert_eq!(account.equity_cents, 1_000_000_00);
+        assert_eq!(account.equity_cents, 100_000_000);
 
         let quote = broker.quote(&aapl()).unwrap();
-        assert_eq!(quote.bid_cents, 149_50);
-        assert_eq!(quote.ask_cents, 150_50);
+        assert_eq!(quote.bid_cents, 14_950);
+        assert_eq!(quote.ask_cents, 15_050);
     }
 
     #[test]
@@ -277,7 +277,7 @@ mod tests {
             symbol: aapl(),
             side: BrokerSide::Buy,
             quantity: 50,
-            order_type: BrokerOrderType::Limit(Price(150_00)),
+            order_type: BrokerOrderType::Limit(Price(15_000)),
         };
 
         let id = broker.submit_order(&order).unwrap();

@@ -245,12 +245,12 @@ mod tests {
     #[test]
     fn basic_buy() {
         let orders = compute_diff(
-            1_000_000_00, // $1M
-            &[],          // no current positions
+            100_000_000, // $1M
+            &[],         // no current positions
             &[(aapl(), 0.5)],
-            &[(aapl(), 185_00)],
+            &[(aapl(), 18_500)],
             5,      // 5 bps offset
-            100_00, // $100 min trade
+            10_000, // $100 min trade
         );
 
         assert_eq!(orders.len(), 1);
@@ -266,14 +266,14 @@ mod tests {
         let current = vec![CurrentPosition {
             symbol: aapl(),
             quantity: 100,
-            avg_cost_cents: 180_00,
+            avg_cost_cents: 18_000,
         }];
 
         let orders = compute_diff(
-            1_000_000_00,
+            100_000_000,
             &current,
             &[(aapl(), 0.5)],
-            &[(aapl(), 185_00)],
+            &[(aapl(), 18_500)],
             0,
             0,
         );
@@ -290,14 +290,14 @@ mod tests {
         let current = vec![CurrentPosition {
             symbol: msft(),
             quantity: 200,
-            avg_cost_cents: 400_00,
+            avg_cost_cents: 40_000,
         }];
 
         let orders = compute_diff(
-            1_000_000_00,
+            100_000_000,
             &current,
             &[(aapl(), 0.5)], // MSFT not in targets → close
-            &[(aapl(), 185_00), (msft(), 410_00)],
+            &[(aapl(), 18_500), (msft(), 41_000)],
             0,
             0,
         );
@@ -313,10 +313,10 @@ mod tests {
     #[test]
     fn short_position() {
         let orders = compute_diff(
-            1_000_000_00,
+            100_000_000,
             &[],
             &[(spy(), -0.10)], // 10% short
-            &[(spy(), 430_00)],
+            &[(spy(), 43_000)],
             0,
             0,
         );
@@ -333,16 +333,16 @@ mod tests {
         let current = vec![CurrentPosition {
             symbol: aapl(),
             quantity: 2702, // already at target
-            avg_cost_cents: 185_00,
+            avg_cost_cents: 18_500,
         }];
 
         let orders = compute_diff(
-            1_000_000_00,
+            100_000_000,
             &current,
             &[(aapl(), 0.5)],
-            &[(aapl(), 185_00)],
+            &[(aapl(), 18_500)],
             0,
-            100_00, // $100 min trade
+            10_000, // $100 min trade
         );
 
         // Diff is 0 shares (or very small) → no orders
@@ -352,26 +352,26 @@ mod tests {
     #[test]
     fn limit_price_offset() {
         let orders = compute_diff(
-            1_000_000_00,
+            100_000_000,
             &[],
             &[(aapl(), 0.5)],
-            &[(aapl(), 200_00)], // $200
+            &[(aapl(), 20_000)], // $200
             10,                  // 10 bps
             0,
         );
 
         assert_eq!(orders.len(), 1);
         // Buy: mid + 10bps = $200.00 + $0.20 = $200.20
-        assert_eq!(orders[0].limit_price_cents, 200_20);
+        assert_eq!(orders[0].limit_price_cents, 20_020);
     }
 
     #[test]
     fn cost_estimation() {
         let orders = compute_diff(
-            1_000_000_00,
+            100_000_000,
             &[],
             &[(aapl(), 0.5)],
-            &[(aapl(), 185_00)],
+            &[(aapl(), 18_500)],
             0,
             0,
         );
@@ -387,14 +387,14 @@ mod tests {
         let current = vec![CurrentPosition {
             symbol: spy(),
             quantity: -100, // short 100 shares
-            avg_cost_cents: 430_00,
+            avg_cost_cents: 43_000,
         }];
 
         let orders = compute_diff(
-            1_000_000_00,
+            100_000_000,
             &current,
             &[], // no targets → close everything
-            &[(spy(), 430_00)],
+            &[(spy(), 43_000)],
             0,
             0,
         );

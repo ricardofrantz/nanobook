@@ -43,6 +43,7 @@ impl PyRiskEngine {
         max_order_value_cents=10_000_000,
         max_batch_value_cents=100_000_000,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         max_position_pct: f64,
         max_leverage: f64,
@@ -90,7 +91,7 @@ impl PyRiskEngine {
         price_cents: i64,
         equity_cents: i64,
         positions: Vec<(String, i64)>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let sym = parse_symbol(symbol)?;
         let broker_side = parse_side(side)?;
 
@@ -129,7 +130,7 @@ impl PyRiskEngine {
         equity_cents: i64,
         positions: Vec<(String, i64)>,
         target_weights: Vec<(String, f64)>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let account = Account {
             equity_cents,
             buying_power_cents: equity_cents,
@@ -178,7 +179,7 @@ fn parse_side(s: &str) -> PyResult<BrokerSide> {
     }
 }
 
-fn report_to_py(py: Python<'_>, report: &nanobook_risk::RiskReport) -> PyResult<PyObject> {
+fn report_to_py(py: Python<'_>, report: &nanobook_risk::RiskReport) -> PyResult<Py<PyAny>> {
     let list = PyList::empty(py);
     for check in &report.checks {
         let dict = PyDict::new(py);
@@ -187,5 +188,5 @@ fn report_to_py(py: Python<'_>, report: &nanobook_risk::RiskReport) -> PyResult<
         dict.set_item("detail", &check.detail)?;
         list.append(dict)?;
     }
-    Ok(list.into())
+    Ok(list.into_any().unbind())
 }
