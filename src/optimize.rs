@@ -260,8 +260,29 @@ fn covariance_matrix(matrix: &[Vec<f64>]) -> Vec<Vec<f64>> {
             cov[i][j] = v;
             cov[j][i] = v;
         }
-        // Small ridge for numerical stability.
-        cov[i][i] += 1e-10;
+    }
+
+    // Relative ridge for numerical stability.
+    //
+    // The diagonal is scaled by `1e-6 * trace(Σ) / n`, i.e. a fixed
+    // fraction of the mean variance. A fixed `1e-10 * I` is too small
+    // for daily-return covariances whose eigenvalues can be O(10⁻⁴) or
+    // smaller, leaving the matrix effectively singular for correlated
+    // assets. Scaling with the trace keeps the ridge meaningful across
+    // unit choices (daily vs. monthly returns, percent vs. decimal).
+    // Computed BEFORE mutation so the ridge does not inflate itself.
+    let trace: f64 = (0..cols).map(|i| cov[i][i]).sum();
+    let n = cols as f64;
+    let ridge = if trace > 0.0 && trace.is_finite() {
+        1e-6 * trace / n
+    } else {
+        // Degenerate input (zero variance everywhere or NaN/Inf):
+        // fall back to the legacy absolute ridge so downstream
+        // solvers still see a strictly positive definite matrix.
+        1e-10
+    };
+    for (i, row) in cov.iter_mut().enumerate() {
+        row[i] += ridge;
     }
 
     cov
@@ -455,6 +476,74 @@ mod tests {
         assert_valid_weights(&w, 3);
     }
 
+    /// Regression for N9: the covariance ridge is a fraction of
+    /// `trace(Σ) / n`, not a fixed absolute constant. With `σ = 0.1`
+    /// (10% returns) the ridge must be O(10⁻⁸) — the old fixed
+    /// `1e-10` would be off by two orders of magnitude.
+    #[test]
+    fn covariance_ridge_is_trace_relative() {
+        // Two assets with iid returns of σ ≈ 0.1. Diagonal ≈ 0.01.
+        let r: Vec<Vec<f64>> = vec![
+            vec![0.10, -0.10],
+            vec![-0.10, 0.10],
+            vec![0.10, -0.10],
+            vec![-0.10, 0.10],
+            vec![0.10, -0.10],
+        ];
+        let cov = covariance_matrix(&r);
+
+        // Pre-ridge diagonal = sample variance (same for both assets).
+        // Col 1: [0.10, -0.10, 0.10, -0.10, 0.10], mean = 0.02.
+        // Squared deviations sum = 3*(0.08)² + 2*(0.12)² = 0.0192 + 0.0288 = 0.048.
+        // σ² = 0.048 / 4 = 0.012.
+        let expected_var = 0.012;
+        // Trace(Σ) / n = expected_var; ridge = 1e-6 * expected_var.
+        let expected_ridge = 1e-6 * expected_var;
+        let expected_diag = expected_var + expected_ridge;
+
+        assert!(
+            (cov[0][0] - expected_diag).abs() < 1e-12,
+            "cov[0][0] = {}, expected {}",
+            cov[0][0],
+            expected_diag
+        );
+        // Ridge contribution on its own must be O(1e-8) for this scale —
+        // more than 10x the legacy 1e-10 absolute ridge.
+        let ridge_added = cov[0][0] - expected_var;
+        assert!(
+            ridge_added > 10.0 * 1e-10,
+            "trace-relative ridge {ridge_added} should dominate legacy 1e-10 at σ=0.1"
+        );
+    }
+
+    /// Regression for N9 (coverage): perfectly correlated assets still
+    /// produce finite, simplex-valid min-variance weights.
+    #[test]
+    fn min_variance_on_perfectly_correlated_assets_returns_finite() {
+        // One underlying daily-return series with σ ≈ 1%.
+        let factor: Vec<f64> = vec![
+            0.010, -0.003, 0.007, 0.004, -0.002, 0.006, 0.003, -0.001, 0.005, 0.002, -0.004, 0.006,
+        ];
+        // Three identical columns — maximum correlation.
+        let returns: Vec<Vec<f64>> = factor.iter().map(|&r| vec![r, r, r]).collect();
+
+        let w = optimize_min_variance(&returns);
+
+        assert_eq!(w.len(), 3);
+        assert!(
+            w.iter().all(|v| v.is_finite()),
+            "non-finite weight: {:?}",
+            w
+        );
+        assert!(w.iter().all(|v| *v >= -1e-12), "negative weight: {:?}", w);
+        let s: f64 = w.iter().sum();
+        assert!(
+            (s - 1.0).abs() < 1e-6,
+            "weights must sum to 1, got {s} ({:?})",
+            w
+        );
+    }
+
     #[test]
     fn max_sharpe_weights_are_valid() {
         let r = sample_returns();
@@ -505,6 +594,8 @@ mod tests {
         }
     }
 
+    // Literals are Rust's Debug round-trip form — intentionally precise.
+    #[allow(clippy::excessive_precision)]
     #[test]
     fn qtrade_reference_fixture_targets() {
         let r = qtrade_reference_returns();
@@ -515,33 +606,39 @@ mod tests {
         let cvar = inverse_cvar_weights(&r, 0.95);
         let cdar = inverse_cdar_weights(&r, 0.95);
 
+        // Goldens regenerated in N9 when the covariance ridge moved from
+        // a fixed `1e-10 * I` to the trace-relative `(1e-6 * trace(Σ)/n) * I`.
+        // At the qtrade fixture's scale (σ ≈ 0.3% daily), the new ridge is
+        // ~1e-11 — smaller than the legacy 1e-10, so the optimizer lands
+        // closer to the un-regularized fixed point. CVaR / CDaR don't use
+        // the covariance matrix and are unchanged.
         assert_close(
             &minvar,
             &[
-                0.249_757_373_208_037,
-                0.2501599724543681,
-                0.2502155962699676,
-                0.2498670580676274,
+                0.24975737320731933,
+                0.25015997245484023,
+                0.25021559627060619,
+                0.24986705806723414,
             ],
             5e-13,
         );
         assert_close(
             &maxsh,
             &[
-                0.0621484559673854,
-                0.3035320141422045,
-                0.3816040047931394,
-                0.2527155250972707,
+                0.06213077960176228,
+                0.30352368598709623,
+                0.38160955623207826,
+                0.25273597817906324,
             ],
             5e-13,
         );
         assert_close(
             &rp,
             &[
-                0.0777787788667712,
-                0.3580541928494367,
-                0.2969466599605388,
-                0.2672203683232534,
+                0.11767968124665359,
+                0.27473046110881050,
+                0.45096650611370881,
+                0.15662335153082713,
             ],
             5e-13,
         );
