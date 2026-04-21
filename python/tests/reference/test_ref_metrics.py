@@ -23,15 +23,33 @@ pytestmark = pytest.mark.skipif(not HAS_QS, reason="quantstats not installed")
 
 
 class TestCVaRReference:
-    """Validate nanobook CVaR against quantstats."""
+    """Validate nanobook CVaR against the empirical reference.
 
-    ATOL = 1e-8
+    From v0.10, nanobook's default CVaR method is `Historical` (pure
+    empirical: mean of the lowest `ceil(n * alpha)` returns). quantstats's
+    `qs.stats.cvar` uses a hybrid parametric-normal VaR threshold + empirical
+    tail mean; the two values coincide for well-behaved normal samples but
+    diverge on skewed or small samples.
 
-    def test_random_returns(self, random_returns):
-        ret_pd = pd.Series(random_returns)
-        ref = qs.stats.cvar(ret_pd)
+    This test pins the Historical result against a pure empirical reference
+    computed directly from the sample. For the legacy hybrid behavior, see
+    the Rust-side `cvar_parametric_matches_quantstats` test.
+    """
+
+    ATOL = 1e-12  # Bit-level: both sides compute sort, slice, mean.
+
+    def test_random_returns_empirical(self, random_returns):
+        """Historical CVaR = mean of the lowest ceil(n * alpha) returns."""
+        n = len(random_returns)
+        alpha = 0.05
+        tail_n = int(np.ceil(n * alpha))
+        sorted_returns = np.sort(random_returns)
+        ref = float(sorted_returns[:tail_n].mean())
+
         m = nanobook.py_compute_metrics(random_returns.tolist(), 252.0, 0.0)
-        assert abs(m.cvar_95 - ref) < self.ATOL
+        assert abs(m.cvar_95 - ref) < self.ATOL, (
+            f"cvar_95={m.cvar_95}, empirical_ref={ref}, diff={m.cvar_95 - ref}"
+        )
 
 
 class TestWinRateReference:

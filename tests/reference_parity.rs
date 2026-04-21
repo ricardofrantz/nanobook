@@ -25,8 +25,9 @@
 //! - `atr_matches_talib`               — initial scaffolding (N10).
 //! - `sharpe_matches_quantstats`       — initial scaffolding (N10).
 //! - `max_drawdown_matches_quantstats` — initial scaffolding (N10).
+//! - `cvar_historical_matches_empirical` — added by N2 (default method).
+//! - `cvar_parametric_matches_quantstats` — added by N2 (legacy method).
 //! - `sortino_matches_quantstats`      — added by N4 (ddof=0 fix).
-//! - `cvar_historical_matches_quantstats` — added by N2 (historical CVaR).
 //!
 //! Related regression tests in other files:
 //!
@@ -246,5 +247,61 @@ fn max_drawdown_matches_quantstats() {
         diff <= 1e-9,
         "max_drawdown: ours={ours} (positive fraction), \
          quantstats={expected} (signed), |our - |theirs||={diff}"
+    );
+}
+
+/// Historical CVaR (default in v0.10) must agree with the pure
+/// empirical `mean(sorted[..ceil(n * alpha)])` formula at bit-level
+/// precision. `compute_metrics.cvar_95` uses this method by default.
+///
+/// Tolerance: 1e-12 — both sides compute the identical operation
+/// (sort, slice, mean).
+#[test]
+fn cvar_historical_matches_empirical() {
+    use nanobook::portfolio::metrics::{CVaRMethod, cvar};
+
+    let g = golden();
+    let returns = f64_vec(&g, &["inputs", "returns"]);
+    let expected = f64_scalar(&g, &["empirical", "cvar_95"]);
+
+    // Direct API.
+    let ours_direct = cvar(&returns, 0.05, CVaRMethod::Historical);
+    let diff = (ours_direct - expected).abs();
+    assert!(
+        diff <= 1e-12,
+        "cvar(Historical): ours={ours_direct}, empirical={expected}, diff={diff}"
+    );
+
+    // The Metrics struct routes through this method too.
+    let metrics = nanobook::portfolio::metrics::compute_metrics(&returns, 252.0, 0.0)
+        .expect("non-empty return series");
+    let diff = (metrics.cvar_95 - expected).abs();
+    assert!(
+        diff <= 1e-12,
+        "metrics.cvar_95 (Historical default): ours={}, empirical={expected}, diff={diff}",
+        metrics.cvar_95
+    );
+}
+
+/// ParametricNormal CVaR (legacy v0.9 behavior) must still agree with
+/// quantstats's `expected_shortfall` at 1e-9 — quantstats uses the
+/// same hybrid estimator.
+///
+/// This pins the legacy path so users who opt in via
+/// `CVaRMethod::ParametricNormal` continue to get the value they had
+/// before v0.10.
+#[test]
+fn cvar_parametric_matches_quantstats() {
+    use nanobook::portfolio::metrics::{CVaRMethod, cvar};
+
+    let g = golden();
+    let returns = f64_vec(&g, &["inputs", "returns"]);
+    let expected = f64_scalar(&g, &["quantstats", "cvar_95_parametric"]);
+
+    let ours = cvar(&returns, 0.05, CVaRMethod::ParametricNormal);
+    let diff = (ours - expected).abs();
+    assert!(
+        diff <= 1e-9,
+        "cvar(ParametricNormal): ours={ours}, quantstats={expected}, diff={diff}"
     );
 }
