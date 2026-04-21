@@ -788,6 +788,136 @@ the 2-week milestone.
   - The same rustc 1.93.1 incremental-cache ICE in `nanobook-python` recurred during Clippy; `cargo clean -p nanobook-python -p nanobook` clears it. This is tooling/cache behavior, not a source issue.
 - Self-audit: The strict deserialization coverage is complete by the review contract's own count: 13 `Deserialize` containers and 13 `deny_unknown_fields` attributes. The main reviewer concern is likely the enum attribute on `AccountType`, but it compiles and keeps the plan's count-based review command coherent. Adding `Deserialize` to `nanobook-risk::RiskConfig` is backward-compatible for Rust users and enables risk config consumers to reject unknown fields if they deserialize it directly.
 
-### Review of PR-5 (commit 3ff6ec17eceb0dd919dda3b917890f92fbf814f3) — PENDING
+### Review of PR-5 (commit 3ff6ec17eceb0dd919dda3b917890f92fbf814f3) — APPROVED
+
+Reviewer: Claude (Opus 4.7), session 2026-04-21.
+
+**Verdict: APPROVED.** Every `Deserialize` container across
+`rebalancer/src/config.rs`, `rebalancer/src/target.rs`, and
+`risk/src/config.rs` now carries `#[serde(deny_unknown_fields)]`. Typo-
+rejection tests pass. User-facing CHANGELOG text is correct. The
+commit body has a cosmetic defect that does NOT affect downstream
+users.
+
+**Review commands re-run independently (all green):**
+
+- `rg -n 'derive\([^)]*Deserialize' rebalancer/src/config.rs rebalancer/src/target.rs risk/src/config.rs | wc -l` → **13**
+- `rg -n 'deny_unknown_fields' rebalancer/src/config.rs rebalancer/src/target.rs risk/src/config.rs | wc -l` → **13**
+- **Count reconciles.** Every `Deserialize` container has the attribute.
+- `rg -n 'typo_in.*is_rejected' rebalancer/tests/config_unknown_field.rs` → 2 matches (risk + execution tests)
+- `cargo test --package nanobook-rebalancer --test config_unknown_field` → **3/3 PASS**
+  (`typo_in_execution_config_is_rejected`, `typo_in_risk_config_is_rejected`, `valid_config_still_parses`)
+- `git show --stat 3ff6ec1` → 5 files, all within the contract's listed files.
+
+**Per-file `deny_unknown_fields` placement** (verified by reading):
+
+| File | Count | Covers |
+|---|---:|---|
+| `risk/src/config.rs` | 1 | `RiskConfig` struct |
+| `rebalancer/src/config.rs` | 8 | `Config`, `ConstraintsConfig`, `CostConfig`, `ExecutionConfig`, `ConnectionConfig`, `AccountConfig`, `AccountType` enum (deviation #1), `LoggingConfig`, `RiskConfig` (local) |
+| `rebalancer/src/target.rs` | 4 | `TargetSpec`, `TargetMetadata`, `TargetPosition`, `Constraints` |
+
+13 total. Matches the `Deserialize` derive count exactly.
+
+**Tests spot-checked** (`rebalancer/tests/config_unknown_field.rs`):
+
+- `typo_in_risk_config_is_rejected` at line 40 asserts that a toml
+  fragment with `max_leverage_pct` (typo) returns an error whose
+  message contains the field name — not just a generic parse error.
+  This is the plan's required signal-strength bar.
+- `typo_in_execution_config_is_rejected` at line 55 does the same for
+  the execution section.
+- `valid_config_still_parses` ensures existing legitimate configs
+  aren't regressed.
+
+**CHANGELOG.** The `[Unreleased]` block has a dedicated "BREAKING: config
+typo rejection" entry citing `max_leverage_pct` as the example. User-
+facing content is correct and matches the plan's migration-friendly
+style. ✓
+
+**Deviations accepted:**
+
+1. **`deny_unknown_fields` on the `AccountType` enum.** Deviation #1.
+   Serde enums already reject unknown variants by default, so the
+   attribute is redundant for type safety. Codex added it to keep the
+   count-based review command coherent (13 Deserialize derives == 13
+   deny_unknown_fields attributes). Not harmful; honest; keeps the
+   plan's contract mechanically satisfied. Accepted with a note:
+   count-based review commands are fragile (same lesson as PR-3's
+   `#[rustfmt::skip]` and PR-1's `999_999` false positive).
+
+2. **`Deserialize` + `deny_unknown_fields` added to
+   `nanobook-risk::RiskConfig`.** Deviation #2. The plan's contract
+   listed `risk/src/config.rs` and its `RiskConfig` type. The struct
+   previously didn't derive `Deserialize`; Codex added it so external
+   callers (including the rebalancer) can deserialize it directly with
+   strict field checking. Non-breaking for existing Rust callers
+   because `Deserialize` is additive. Accepted.
+
+3. **Commit body lost backticked field names and contains literal
+   `\n`.** Deviation #3. Reads in `git log` as: "A typo like `` instead
+   of `` previously\nloaded silently..." — backticks and their
+   contents were stripped by shell substitution, and newlines are
+   literal. This is a regression from PR-3 and PR-4 (which had clean
+   bodies). CHANGELOG content is correct and is the user-facing source
+   of truth. Commit subject is correct. Per §C.10 Codex cannot amend.
+   NOT a rebuttal reason — same policy as PR-2. Flag for the PR-6
+   release-prep: either `git rebase -i` locally to fix both PR-2 and
+   PR-5 commit bodies before tagging v0.9.3, OR switch to `git commit
+   -F <file>` from a pre-written message file to avoid shell
+   substitution pitfalls in future PRs.
+
+**Non-blocking observations:**
+
+1. **`rustc 1.93.1` incremental-cache ICE.** Codex noted a tooling
+   issue cleared by `cargo clean -p nanobook-python -p nanobook`. Not
+   a source defect. Worth pinning the clippy clean-build command in
+   the plan's §0.2 verification steps as a troubleshooting note.
+
+2. **Count-based review commands are fragile.** Third instance this
+   P0:
+   - PR-1: `rg '999_999'` over-matched on an unrelated constant.
+   - PR-3: multiline regex needed `#[rustfmt::skip]` workaround.
+   - PR-5: strict count-equality drove an `AccountType` enum attribute
+     that's redundant but mechanically satisfying.
+
+   For P1 review contracts, prefer content-based assertions (e.g.,
+   "every `Deserialize` struct declared in file X has `deny_unknown_
+   fields` on the next non-blank line") over bare counts or
+   formatting-sensitive regex. Noted as a plan-quality item for PR-31.
+
+3. **Previous PR follow-up backlog:**
+   - `src/stats.rs:173` false-positive TODO (PR-1)
+   - Dead error path in `orders::submit_order` Market branch (PR-1)
+   - H3 float-cents truncations (PR-1 → PR-20)
+   - PR-2 commit body literal `\n` (PR-6 cleanup candidate)
+   - **PR-5 commit body literal `\n` + stripped backticks**
+     (added to PR-6 cleanup candidate list)
+
+**Self-audit reconciliation.** Codex transparently flagged the
+`AccountType` choice and the commit-body regression. Both are
+cosmetic; the user-facing code and CHANGELOG are correct. Approving
+without rebuttal.
+
+**Next action.** Codex may proceed to PR-6 (`docs(release): v0.9.3
+honesty release notes + version bump`). PR-6 is the P0-closing PR:
+version bumps across all 5 workspace crates, CHANGELOG consolidation
+with a dated `[0.9.3]` block, README "What nanobook is NOT"
+section, and `benches/README.md` with latency-measurement
+methodology. It is the ONLY PR that should touch `Cargo.toml` version
+fields; if Codex sees version bumps creeping into other PRs, stop
+and flag.
+
+**Commit-body hygiene for PR-6.** Switch the commit-creation pattern
+from `git commit -m "$(cat <<EOF ... EOF)"` to writing the body to a
+file (`.git/COMMIT_EDITMSG` or similar) and running `git commit -F
+<file>`. This avoids shell substitution stripping backticks and
+collapsing newlines. Codex may also want to `git rebase -i` commits
+`176a5d0` (PR-2) and `3ff6ec1` (PR-5) to fix their bodies before
+the v0.9.3 tag is cut — Ricardo decides whether to do this now or
+leave it.
+
+**P0 progress.** 5/6 PRs approved. Remaining: PR-6. P0 on track for
+the 2-week milestone.
 
 Claude fills this in during review session.
