@@ -56,19 +56,21 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      - uses: astral-sh/setup-uv@v5
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
           key: python-${{ matrix.python }}
 
-      - run: pip install pytest hypothesis
-
       - name: Build and install Python extension
-        run: pip install ./python
+        working-directory: python
+        run: uv sync --python ${{ matrix.python }} --group dev
 
       - name: Run Python tests (property + unit)
-        run: pytest python/tests/ -v --ignore=python/tests/reference
+        working-directory: python
+        run: uv run --python ${{ matrix.python }} --group dev python -m pytest tests/ -v --ignore=tests/reference
 
   lint:
     name: Lint

@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Upgraded PyO3 bindings to a Python 3.14-compatible line
   - Updated Python binding internals for current PyO3 APIs (`attach` / `detach`, explicit `Py<PyAny>`)
   - Aligned CI and wheel builds with Python 3.14 instead of relying on ABI3 forward-compatibility mode
+- **Reproducible tooling**:
+  - Track Rust and Python lockfiles for repeatable CI/test dependency resolution
+  - Pin the verified Python build backend and dev-test dependencies used by the Python 3.14 test gate
 
 ## [0.9.2] - 2026-02-12
 
