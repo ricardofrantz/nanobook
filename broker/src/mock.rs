@@ -40,6 +40,7 @@ pub struct RecordedOrder {
     pub side: BrokerSide,
     pub quantity: u64,
     pub order_type: String,
+    pub client_order_id: Option<ClientOrderId>,
 }
 
 /// Builder for `MockBroker`.
@@ -178,6 +179,7 @@ impl Broker for MockBroker {
             side: order.side,
             quantity: order.quantity,
             order_type: format!("{:?}", order.order_type),
+            client_order_id: order.client_order_id.clone(),
         });
 
         match &self.fill_mode {
@@ -278,6 +280,7 @@ mod tests {
             side: BrokerSide::Buy,
             quantity: 50,
             order_type: BrokerOrderType::Limit(Price(15_000)),
+            client_order_id: None,
         };
 
         let id = broker.submit_order(&order).unwrap();
@@ -299,6 +302,7 @@ mod tests {
             side: BrokerSide::Buy,
             quantity: 50,
             order_type: BrokerOrderType::Market,
+            client_order_id: None,
         };
 
         assert!(broker.submit_order(&order).is_err());
@@ -326,6 +330,7 @@ mod tests {
             side: BrokerSide::Buy,
             quantity: 1,
             order_type: BrokerOrderType::Market,
+            client_order_id: None,
         };
 
         let first = broker.submit_order(&order).unwrap();

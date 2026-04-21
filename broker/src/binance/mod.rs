@@ -155,6 +155,7 @@ impl Broker for BinanceBroker {
             &qty_str,
             price.as_deref(),
             tif,
+            order.client_order_id.as_ref().map(|cid| cid.as_str()),
         )?;
 
         Ok(OrderId(resp.order_id))

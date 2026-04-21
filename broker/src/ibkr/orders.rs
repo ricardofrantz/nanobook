@@ -91,7 +91,7 @@ pub fn submit_order(
         BrokerSide::Sell => IbAction::Sell,
     };
 
-    let ib_order = match order.order_type {
+    let mut ib_order = match order.order_type {
         #[cfg(feature = "strict-market-reject")]
         BrokerOrderType::Market => return Err(BrokerError::MarketOrderRejected),
 
@@ -103,6 +103,10 @@ pub fn submit_order(
             limit_order(ib_action, quantity, limit_price)
         }
     };
+
+    if let Some(cid) = &order.client_order_id {
+        ib_order.order_ref = cid.as_str().to_string();
+    }
 
     let order_id = client
         .next_valid_order_id()
@@ -139,6 +143,7 @@ pub fn execute_limit_order(
     side: BrokerSide,
     shares: i64,
     limit_price_cents: i64,
+    client_order_id: Option<&ClientOrderId>,
     timeout: Duration,
 ) -> Result<OrderResult, BrokerError> {
     let contract = Contract::stock(symbol.as_str()).build();
@@ -151,7 +156,10 @@ pub fn execute_limit_order(
     let limit_price = limit_price_cents as f64 / 100.0;
     let quantity = shares as f64;
 
-    let ib_order = limit_order(ib_action, quantity, limit_price);
+    let mut ib_order = limit_order(ib_action, quantity, limit_price);
+    if let Some(cid) = client_order_id {
+        ib_order.order_ref = cid.as_str().to_string();
+    }
 
     let order_id = client
         .next_valid_order_id()

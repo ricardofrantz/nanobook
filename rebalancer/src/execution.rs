@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use log::{error, info, warn};
 use nanobook::Symbol;
-use nanobook_broker::BrokerSide;
 use nanobook_broker::ibkr::orders::{self, OrderOutcome};
 use nanobook_broker::types::Position;
+use nanobook_broker::{BrokerSide, ClientOrderId};
 use rustc_hash::FxHashMap;
 
 use crate::audit::{self, AuditLog};
@@ -58,6 +58,24 @@ pub fn enforce_max_orders_per_run(
     }
 
     Ok(())
+}
+
+/// Derive the stable broker-side idempotency key for a computed rebalance order.
+pub fn derive_client_order_id(
+    target: &TargetSpec,
+    order: &RebalanceOrder,
+) -> Result<ClientOrderId> {
+    let side = action_to_side(order.action);
+    let qty = u64::try_from(order.shares)
+        .map_err(|_| Error::Order(format!("invalid share quantity for order {order:?}")))?;
+    let scope = target.idempotency_scope();
+
+    Ok(ClientOrderId::derive(
+        &scope,
+        order.symbol.as_str(),
+        side,
+        qty,
+    ))
 }
 
 /// Execute a full rebalance run.
@@ -185,12 +203,14 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
         let side = action_to_side(order.action);
         let shares = u64::try_from(order.shares)
             .map_err(|_| Error::Order(format!("invalid share quantity for order {order:?}")))?;
+        let client_order_id = derive_client_order_id(target, order)?;
 
         match client.execute_limit_order(
             order.symbol,
             side,
             shares,
             order.limit_price_cents,
+            Some(&client_order_id),
             timeout,
         ) {
             Ok(result) => {

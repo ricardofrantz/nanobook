@@ -6,7 +6,7 @@ use nanobook::Symbol;
 use nanobook_broker::ibkr::client::IbkrClient;
 use nanobook_broker::ibkr::orders;
 use nanobook_broker::{
-    BrokerSide,
+    BrokerSide, ClientOrderId,
     error::BrokerError,
     types::{Account, Position},
 };
@@ -31,6 +31,7 @@ pub trait BrokerGateway {
         side: BrokerSide,
         shares: u64,
         limit_price_cents: i64,
+        client_order_id: Option<&ClientOrderId>,
         timeout: Duration,
     ) -> BrokerResult<orders::OrderResult>;
 }
@@ -54,6 +55,7 @@ impl BrokerGateway for IbkrClient {
         side: BrokerSide,
         shares: u64,
         limit_price_cents: i64,
+        client_order_id: Option<&ClientOrderId>,
         timeout: Duration,
     ) -> BrokerResult<orders::OrderResult> {
         let shares = i64::try_from(shares)
@@ -65,6 +67,7 @@ impl BrokerGateway for IbkrClient {
             side,
             shares,
             limit_price_cents,
+            client_order_id,
             timeout,
         )
     }

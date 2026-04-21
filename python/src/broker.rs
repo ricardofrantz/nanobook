@@ -103,7 +103,7 @@ impl PyIbkrBroker {
     ///     limit_price_cents: Price in cents (required for limit orders)
     ///
     /// Returns the broker-assigned order ID.
-    #[pyo3(signature = (symbol, side, quantity, order_type="market", limit_price_cents=None))]
+    #[pyo3(signature = (symbol, side, quantity, order_type="market", limit_price_cents=None, client_order_id=None))]
     fn submit_order(
         &self,
         symbol: &str,
@@ -111,6 +111,7 @@ impl PyIbkrBroker {
         quantity: u64,
         order_type: &str,
         limit_price_cents: Option<i64>,
+        client_order_id: Option<String>,
     ) -> PyResult<u64> {
         let sym = parse_symbol(symbol)?;
 
@@ -146,6 +147,10 @@ impl PyIbkrBroker {
             side: broker_side,
             quantity,
             order_type: broker_order_type,
+            client_order_id: client_order_id
+                .map(nanobook_broker::ClientOrderId::new)
+                .transpose()
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
         };
 
         let id = self
@@ -295,7 +300,7 @@ mod binance_binding {
         }
 
         /// Submit an order.
-        #[pyo3(signature = (symbol, side, quantity, order_type="market", limit_price_cents=None))]
+        #[pyo3(signature = (symbol, side, quantity, order_type="market", limit_price_cents=None, client_order_id=None))]
         fn submit_order(
             &self,
             symbol: &str,
@@ -303,6 +308,7 @@ mod binance_binding {
             quantity: u64,
             order_type: &str,
             limit_price_cents: Option<i64>,
+            client_order_id: Option<String>,
         ) -> PyResult<u64> {
             let sym = parse_symbol(symbol)?;
 
@@ -338,6 +344,10 @@ mod binance_binding {
                 side: broker_side,
                 quantity,
                 order_type: broker_order_type,
+                client_order_id: client_order_id
+                    .map(nanobook_broker::ClientOrderId::new)
+                    .transpose()
+                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
             };
 
             let id = self

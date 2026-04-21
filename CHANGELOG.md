@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Track Rust and Python lockfiles for repeatable CI/test dependency resolution
   - Pin the verified Python build backend and dev-test dependencies used by the Python 3.14 test gate
 
+### Added
+
+- **Broker idempotency**:
+  - Added deterministic `ClientOrderId` derivation for broker-side order deduplication
+  - Threaded client order IDs into IBKR `orderRef` and Binance `newClientOrderId`
+  - Added optional `client_order_id` arguments to Python broker order submission
+
 ## [0.9.2] - 2026-02-12
 
 ### Added
