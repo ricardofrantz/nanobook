@@ -4,8 +4,10 @@
 //! likelihood-fitted GARCH(p,q). The recursion uses fixed parameters
 //! alpha = 0.08, beta = 0.90, and omega derived from the sample variance:
 //!
-//!     h[t+1] = omega + sum(alpha_j * eps[t+1-j]^2)
-//!              + sum(beta_k * h[t+1-k])
+//! ```text
+//! h[t+1] = omega + sum(alpha_j * eps[t+1-j]^2)
+//!          + sum(beta_k * h[t+1-k])
+//! ```
 //!
 //! For MLE-fitted GARCH, use the Python `arch` package or wait for the
 //! `garch-mle` feature flag in nanobook >= 0.11.
