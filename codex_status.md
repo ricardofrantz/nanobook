@@ -99,6 +99,108 @@ Current PR: PR-1 (COMPLETED — awaiting review)
 - Ricardo instructed Codex to use judgment and proceed; I am treating this as
   a pre-existing false positive, not a PR-1 failure.
 
-### Review of PR-1 (commit 55e6bb9277fe1e27a3f8ed2dd33273ee850ffd91) — PENDING
+### Review of PR-1 (commit 55e6bb9277fe1e27a3f8ed2dd33273ee850ffd91) — APPROVED
 
-Claude fills this in during review session.
+Reviewer: Claude (Opus 4.7), session 2026-04-21.
+
+**Verdict: APPROVED.** The legacy $999,999.99 market-order hack is
+gone from the live path. The implementation uses true
+`ibapi::orders::order_builder::market_order` (option 1) for the default
+Market submission and retains `encode_order` as a quote-bounded option-2
+helper. The `strict-market-reject` feature correctly gates both
+functions. All regression tests present and passing.
+
+**Review commands re-run independently (all green):**
+
+- `rg -n '999_999|999,999' broker/src/` → no hits ✓
+- `rg -n '0\.01' broker/src/ibkr/orders.rs` → no hits ✓
+- `rg -n 'legacy \$999,999.99 hack must never re-appear' broker/tests/ibkr_market_order_bounds.rs` → 1 match (line 79) ✓
+- `rg -n 'NoQuoteForMarketOrder|MarketOrderRejected' broker/src/error.rs` → 2 matches (lines 25, 28) ✓
+- `cargo test --package nanobook-broker` → 12/12 PASS (including doctests)
+- `cargo test --package nanobook-broker --features ibkr --test ibkr_market_order_bounds` → 5/5 PASS
+- `cargo test --package nanobook-broker --features "ibkr,strict-market-reject" --test ibkr_market_order_bounds` → 2/2 PASS
+- `cargo clippy -p nanobook-broker --all-targets -- -D warnings` → clean
+- `cargo clippy -p nanobook-broker --all-targets --features "ibkr,strict-market-reject" -- -D warnings` → clean
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` → clean
+- `cargo fmt --all -- --check` → clean
+- `git show --stat 55e6bb9` → 9 files, all under `broker/` or `CHANGELOG.md`. No scope creep.
+
+**Deviations accepted:**
+
+1. **Baseline drift (ffb1549 → 04c1a59).** The plan's launcher prompt named
+   `ffb1549` as the starting commit. Codex correctly identified that
+   `master` had advanced to `04c1a59` (Ricardo-approved Python 3.14 baseline
+   + reproducible-lockfile commits) and used that as the baseline. §0.2
+   verification confirmed clean on `04c1a59`. Accepted.
+
+2. **Option 1 (true MKT) over option 2 (bounded limit) in live path.** The
+   plan's **Investigation required** block explicitly said "prefer option 1
+   (true market) if available" and Codex's investigation documented that
+   `ibapi` 2.7 and 2.11 both expose `order_builder::market_order` with
+   `OrderType::Market` requiring no limit price. Using option 1 as the
+   live default and retaining `encode_order` as the bounded-fallback
+   helper is faithful to the plan's Investigation instruction. Accepted.
+
+3. **`broker/src/types.rs` touched (BestQuote).** Not listed in **Files
+   touched**, but the contract's Target state code block used
+   `crate::types::BestQuote`, implying the type needed to be defined
+   somewhere. `broker/src/types.rs` is the natural home. Accepted.
+
+4. **`broker/src/ibkr/mod.rs` touched (expose market_data module).**
+   Required to surface the new `market_data` module. Wiring change, not
+   scope creep. Accepted.
+
+5. **`cargo test --package nanobook-broker --features ibkr ...`** added to
+   Codex's own review-command set because new regression tests are gated
+   on the `ibkr` feature. I re-ran the same matrix. Accepted.
+
+**Plan defect identified (not Codex's fault):**
+
+The PR-1 review command `rg -n '999_999|999,999' src/` was over-broad and
+matches `0.999_999_999_999_809_93` in `src/stats.rs:173` — a
+pre-existing rational-approximation coefficient unrelated to the IBKR
+hack. Codex correctly declined to edit `src/` because doing so would
+violate the PR-1 scope-discipline auto-reject rule. This is a plan
+defect, not a PR-1 failure. I will tighten the review-command pattern
+in `plan_2026-04-20.md` for future similar patterns to match only the
+literal dollar-and-cents form (e.g., `999_999\.99|999,999\.99`). The
+false positive does not block approval.
+
+**Non-blocking observations (follow-up candidates):**
+
+1. **Dead error path in live submission.** `orders::submit_order` accepts
+   `best_quote: Option<&BestQuote>` but the `BrokerOrderType::Market`
+   branch (orders.rs:99) calls `ibapi::market_order` directly and does
+   not consult `best_quote`. Consequently, `BrokerError::NoQuoteForMarketOrder`
+   is unreachable from the live path and only fires inside the
+   `encode_order` helper used by tests and future explicit-fallback
+   callers. Defensible, but worth a `// design note:` comment in
+   `orders.rs` at some point, or tightening the helper's visibility if
+   no external caller is intended. Not required for PR-1.
+
+2. **`let _ = best_quote;` at orders.rs:56** under
+   `strict-market-reject` is an explicit silencing of an unused
+   parameter in the strict path. Acceptable; standard Rust idiom.
+
+3. **`(x * 100.0) as i64` patterns remain** in `broker/src/ibkr/client.rs`
+   at lines 84, 138, 140, 141, 185, 186, 187. These are the H3
+   security finding and are slated for PR-20 (`f64_cents_checked`).
+   Confirmed not in PR-1 scope. Tracking as a blocker for v0.10, not
+   v0.9.3.
+
+4. **`src/stats.rs:173` `0.999_999_999_999_809_93`** TODO is recorded in
+   codex_status.md as out-of-scope. Agreed; leave it until whichever PR
+   audits `src/stats.rs` gets scheduled. Add to the P1 stats-module
+   cleanup candidates (PR-9 or PR-17 are the closest matches, though
+   neither touches line 173 directly).
+
+**Self-audit reconciliation.** Codex's self-audit paragraph correctly
+anticipated the "diverged from the plan's sample target block" concern
+and pre-rebutted it by citing the Investigation instruction. I find the
+rebuttal sound. `Mutex<HashMap<Symbol, BestQuote>>` instead of `dashmap`
+is the correct call per §0.5 / §C.5 (no new crates without listing).
+
+**Next action:** Codex may proceed to PR-2
+(`feat(broker): deterministic client-order-ids for idempotent retries`).
+PR-2 builds directly on the broker types touched here and should read
+`broker/src/types.rs` before modifying `BrokerOrder`.
