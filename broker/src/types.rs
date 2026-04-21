@@ -55,6 +55,13 @@ pub struct Quote {
     pub volume: u64,
 }
 
+/// Last-seen bid/ask quote used to bound market-order fallbacks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BestQuote {
+    pub bid_cents: i64,
+    pub ask_cents: i64,
+}
+
 /// Opaque order ID returned by the broker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OrderId(pub u64);

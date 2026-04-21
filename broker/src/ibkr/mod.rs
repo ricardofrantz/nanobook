@@ -1,6 +1,7 @@
 //! Interactive Brokers (IBKR) broker implementation.
 
 pub mod client;
+pub mod market_data;
 pub mod orders;
 
 use nanobook::Symbol;
@@ -62,7 +63,7 @@ impl Broker for IbkrBroker {
 
     fn submit_order(&self, order: &BrokerOrder) -> Result<OrderId, BrokerError> {
         let client = self.require_client()?;
-        orders::submit_order(client.inner(), order)
+        client.submit_order(order)
     }
 
     fn order_status(&self, id: OrderId) -> Result<BrokerOrderStatus, BrokerError> {
