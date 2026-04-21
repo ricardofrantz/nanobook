@@ -46,8 +46,13 @@ def backtest_weights(
     )
 
 
+def garch_ewma_forecast(returns, p=1, q=1, mean="zero"):
+    return py_garch_ewma_forecast(returns, p, q, mean)
+
+
 def garch_forecast(returns, p=1, q=1, mean="zero"):
-    return py_garch_forecast(returns, p, q, mean)
+    _warn_deprecated_once("garch_forecast", "garch_ewma_forecast")
+    return garch_ewma_forecast(returns, p, q, mean)
 
 
 def optimize_min_variance(returns_matrix, symbols):

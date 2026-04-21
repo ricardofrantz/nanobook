@@ -57,12 +57,12 @@ def _assert_weight_dict_close(
 
 
 def test_garch_reference_target_zero_mean():
-    got = nanobook.py_garch_forecast(_qtrade_reference_returns_1d(), p=1, q=1, mean="zero")
+    got = nanobook.py_garch_ewma_forecast(_qtrade_reference_returns_1d(), p=1, q=1, mean="zero")
     _assert_close(got, 0.0044776400483411, atol=5e-14)
 
 
 def test_garch_reference_target_constant_mean():
-    got = nanobook.py_garch_forecast(
+    got = nanobook.py_garch_ewma_forecast(
         _qtrade_reference_returns_1d(), p=2, q=1, mean="constant"
     )
     _assert_close(got, 0.0043960525154678, atol=5e-14)

@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- **GARCH naming**:
+  - Renamed `garch_forecast` to `garch_ewma_forecast`
+  - The old name implied an MLE-fitted GARCH model, but the implementation uses fixed EWMA-style parameters
+  - Old names remain as deprecated shims for one minor release
 - **Optimizer naming**:
   - Renamed `optimize_cvar` / `optimize_cdar` to `inverse_cvar_weights` / `inverse_cdar_weights`
   - Old names remain as deprecated shims for one minor release

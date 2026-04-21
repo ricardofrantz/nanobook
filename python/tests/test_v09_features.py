@@ -24,7 +24,7 @@ def test_capabilities_surface():
     caps = set(nanobook.py_capabilities())
     expected = {
         "backtest_stops",
-        "garch_forecast",
+        "garch_ewma_forecast",
         "optimize_min_variance",
         "optimize_max_sharpe",
         "optimize_risk_parity",
@@ -36,8 +36,8 @@ def test_capabilities_surface():
     assert set(nanobook.capabilities()) == caps
 
 
-def test_garch_forecast_finite():
-    v = nanobook.py_garch_forecast([0.01, -0.003, 0.007, -0.002, 0.004], p=1, q=1)
+def test_garch_ewma_forecast_finite():
+    v = nanobook.py_garch_ewma_forecast([0.01, -0.003, 0.007, -0.002, 0.004], p=1, q=1)
     assert math.isfinite(v)
     assert v >= 0.0
 
@@ -134,7 +134,7 @@ def test_clean_aliases_equivalent():
     symbols = ["AAPL", "MSFT", "NVDA"]
     r = _sample_returns_matrix()
 
-    assert nanobook.garch_forecast([0.01, -0.003, 0.007, -0.002, 0.004]) == nanobook.py_garch_forecast(
+    assert nanobook.garch_ewma_forecast([0.01, -0.003, 0.007, -0.002, 0.004]) == nanobook.py_garch_ewma_forecast(
         [0.01, -0.003, 0.007, -0.002, 0.004]
     )
 
@@ -169,3 +169,11 @@ def test_deprecated_optimizer_aliases_warn_once():
         assert nanobook.optimize_cdar(r, symbols, alpha=0.95) == nanobook.inverse_cdar_weights(
             r, symbols, alpha=0.95
         )
+
+
+def test_deprecated_garch_alias_warns_once():
+    import pytest
+
+    returns = [0.01, -0.003, 0.007, -0.002, 0.004]
+    with pytest.warns(DeprecationWarning, match="garch_ewma_forecast"):
+        assert nanobook.garch_forecast(returns) == nanobook.garch_ewma_forecast(returns)

@@ -104,7 +104,7 @@ Your optimizer produces weights. `backtest_weights()` handles rebalancing,
 cost modeling, position tracking, and return computation at compiled speed
 with the GIL released.
 
-**v0.9 additions:** GARCH(1,1) forecasting, portfolio optimizers
+**v0.9 additions:** fixed-parameter EWMA-style GARCH forecasting, portfolio optimizers
 (min-variance, max-Sharpe, risk-parity, inverse CVaR, inverse CDaR), and
 trailing/fixed stop-loss simulation — all accessible from Python.
 
@@ -666,7 +666,7 @@ result = nanobook.py_backtest_weights(
 GIL is released during computation for maximum throughput.
 
 Clean aliases (no `py_` prefix) are exported for new integrations:
-`backtest_weights`, `capabilities`, `garch_forecast`,
+`backtest_weights`, `capabilities`, `garch_ewma_forecast`,
 `inverse_cvar_weights`, `inverse_cdar_weights`, and other optimizer helpers.
 
 ### qtrade v0.4 Bridge Pattern
@@ -683,7 +683,7 @@ def has_nanobook_feature(name: str) -> bool:
 
     symbol_map = {
         "backtest_stops": "py_backtest_weights",
-        "garch_forecast": "py_garch_forecast",
+        "garch_ewma_forecast": "py_garch_ewma_forecast",
         "optimize_min_variance": "py_optimize_min_variance",
         "optimize_max_sharpe": "py_optimize_max_sharpe",
         "optimize_risk_parity": "py_optimize_risk_parity",

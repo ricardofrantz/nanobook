@@ -1,27 +1,32 @@
-//! Deterministic GARCH-style volatility forecast.
+//! One-step-ahead variance forecasting using an EWMA-style recursion.
 //!
-//! This module intentionally prioritizes stability and predictable behavior
-//! over parameter-rich model fitting. It provides a robust one-step-ahead
-//! volatility estimate for qtrade integration, with deterministic fallbacks
-//! on sparse or degenerate inputs.
+//! Despite the historical name `garch_forecast`, this is NOT a maximum-
+//! likelihood-fitted GARCH(p,q). The recursion uses fixed parameters
+//! alpha = 0.08, beta = 0.90, and omega derived from the sample variance:
+//!
+//!     h[t+1] = omega + sum(alpha_j * eps[t+1-j]^2)
+//!              + sum(beta_k * h[t+1-k])
+//!
+//! For MLE-fitted GARCH, use the Python `arch` package or wait for the
+//! `garch-mle` feature flag in nanobook >= 0.11.
 
-/// One-step-ahead volatility forecast from a GARCH(p, q)-style recursion.
+/// One-step-ahead volatility forecast with fixed EWMA-style parameters.
 ///
-/// Returns per-period volatility (not annualized).
+/// Returns per-period standard deviation (not variance, not annualized).
 ///
 /// Behavior:
 /// - Invalid/non-finite inputs fall back to sample volatility.
 /// - `mean` supports `"zero"` and `"constant"`/`"mean"`.
 /// - `p`/`q` are clamped to a small bounded range for numerical stability.
-pub fn garch_forecast(returns: &[f64], p: usize, q: usize, mean: &str) -> f64 {
+pub fn garch_ewma_forecast(returns: &[f64], p: usize, q: usize, mean: &str) -> f64 {
     let fallback = sample_volatility(returns);
 
     if returns.len() < 2 || returns.iter().any(|r| !r.is_finite()) {
         return fallback;
     }
 
-    let p = p.clamp(1, 8);
-    let q = q.clamp(1, 8);
+    let p = p.clamp(1, 8).min(returns.len());
+    let q = q.clamp(1, 8).min(returns.len());
 
     let use_constant_mean = matches!(mean.to_ascii_lowercase().as_str(), "constant" | "mean");
     let mu = if use_constant_mean {
@@ -80,10 +85,9 @@ pub fn garch_forecast(returns: &[f64], p: usize, q: usize, mean: &str) -> f64 {
     }
 
     let mut garch_next = 0.0;
+    debug_assert!(t + 1 >= q, "caller must pass at least q returns");
     for j in 1..=q {
-        if t + 1 >= j {
-            garch_next += betas[j - 1] * h[t + 1 - j];
-        }
+        garch_next += betas[j - 1] * h[t + 1 - j];
     }
 
     let sigma = (omega + arch_next + garch_next).max(1e-12).sqrt();
@@ -92,6 +96,13 @@ pub fn garch_forecast(returns: &[f64], p: usize, q: usize, mean: &str) -> f64 {
     } else {
         fallback
     }
+}
+
+/// Deprecated alias for [`garch_ewma_forecast`]; removed in v0.11.
+#[rustfmt::skip]
+#[deprecated(since = "0.9.3", note = "use `garch_ewma_forecast`; parameters are fixed, not MLE-fit")]
+pub fn garch_forecast(returns: &[f64], p: usize, q: usize, mean: &str) -> f64 {
+    garch_ewma_forecast(returns, p, q, mean)
 }
 
 fn sample_volatility(returns: &[f64]) -> f64 {
@@ -138,17 +149,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn forecast_is_finite_on_valid_input() {
+    fn ewma_forecast_is_finite_on_valid_input() {
         let returns = vec![0.01, -0.004, 0.008, -0.002, 0.005, -0.003, 0.004];
-        let v = garch_forecast(&returns, 1, 1, "zero");
+        let v = garch_ewma_forecast(&returns, 1, 1, "zero");
         assert!(v.is_finite());
         assert!(v >= 0.0);
     }
 
     #[test]
-    fn forecast_handles_constant_mean_mode() {
+    fn ewma_forecast_handles_constant_mean_mode() {
         let returns = vec![0.02, 0.01, 0.015, 0.0, -0.005, 0.01, 0.012];
-        let v = garch_forecast(&returns, 2, 1, "constant");
+        let v = garch_ewma_forecast(&returns, 2, 1, "constant");
         assert!(v.is_finite());
         assert!(v >= 0.0);
     }
@@ -156,17 +167,27 @@ mod tests {
     #[test]
     fn invalid_input_falls_back() {
         let returns = vec![0.01, f64::NAN, 0.02];
-        let v = garch_forecast(&returns, 1, 1, "zero");
+        let v = garch_ewma_forecast(&returns, 1, 1, "zero");
         assert!(v.is_finite());
         assert!(v >= 0.0);
     }
 
     #[test]
-    fn short_series_is_stable() {
+    fn ewma_forecast_short_input_is_bounded() {
         let returns = vec![0.01];
-        let v = garch_forecast(&returns, 1, 1, "zero");
+        let v = garch_ewma_forecast(&returns, 1, 4, "zero");
         assert!(v.is_finite());
         assert!(v >= 0.0);
+    }
+
+    #[allow(deprecated)]
+    #[test]
+    fn deprecated_garch_forecast_shim_delegates() {
+        let returns = vec![0.01, -0.004, 0.008, -0.002, 0.005, -0.003, 0.004];
+        assert_eq!(
+            garch_forecast(&returns, 2, 2, "constant"),
+            garch_ewma_forecast(&returns, 2, 2, "constant")
+        );
     }
 
     #[test]
@@ -176,8 +197,8 @@ mod tests {
             0.011, -0.007, 0.004, -0.002, 0.006, -0.003, 0.002, 0.001, -0.004, 0.005, -0.001, 0.003,
         ];
 
-        let zero = garch_forecast(&returns, 1, 1, "zero");
-        let constant = garch_forecast(&returns, 2, 1, "constant");
+        let zero = garch_ewma_forecast(&returns, 1, 1, "zero");
+        let constant = garch_ewma_forecast(&returns, 2, 1, "constant");
 
         assert!((zero - 0.0044776400483411).abs() < 5e-14, "zero={zero}");
         assert!(
