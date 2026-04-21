@@ -26,7 +26,7 @@ use pyo3::prelude::*;
 fn capabilities() -> Vec<&'static str> {
     vec![
         "backtest_stops",
-        "garch_forecast",
+        "garch_ewma_forecast",
         "optimize_min_variance",
         "optimize_max_sharpe",
         "optimize_risk_parity",
@@ -106,6 +106,8 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // v0.9 — capability probing and new compute APIs
     m.add_function(wrap_pyfunction!(capabilities, m)?)?;
     m.add_function(wrap_pyfunction!(py_capabilities, m)?)?;
+    m.add_function(wrap_pyfunction!(garch::garch_ewma_forecast, m)?)?;
+    m.add_function(wrap_pyfunction!(garch::py_garch_ewma_forecast, m)?)?;
     m.add_function(wrap_pyfunction!(garch::garch_forecast, m)?)?;
     m.add_function(wrap_pyfunction!(garch::py_garch_forecast, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::optimize_min_variance, m)?)?;
