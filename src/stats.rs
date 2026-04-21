@@ -53,13 +53,32 @@ pub(crate) fn welford_mean_m2(slice: &[f64]) -> (f64, f64) {
 /// Compute ranks with average tie-breaking (matches scipy's default).
 ///
 /// Elements are ranked 1..N. Tied values receive the average of their ranks.
+///
+/// # NaN handling
+///
+/// If any input value is NaN, this function returns a vector of `n` NaN
+/// ranks. This matches `scipy.stats.rankdata(values, nan_policy='propagate')`.
+/// Older nanobook versions silently assigned ranks to NaN inputs via
+/// `partial_cmp().unwrap_or(Ordering::Equal)`, producing incorrect Spearman
+/// correlations and quintile spreads downstream. Callers that want NaN
+/// inputs treated as ordinary values must filter or substitute first.
 fn rankdata(values: &[f64]) -> Vec<f64> {
     let n = values.len();
     if n == 0 {
         return vec![];
     }
 
-    // Sort indices by value
+    // NaN propagation: any NaN in the input produces an all-NaN output.
+    // partial_cmp returns None for NaN comparisons, and the sort fallback
+    // `Ordering::Equal` would scatter NaN values through the rank
+    // assignment, silently corrupting any downstream statistic.
+    if values.iter().any(|v| v.is_nan()) {
+        return vec![f64::NAN; n];
+    }
+
+    // Sort indices by value. With NaN ruled out above, partial_cmp is
+    // infallible for the remaining finite/+-inf values, so the Equal
+    // fallback is unreachable.
     let mut indices: Vec<usize> = (0..n).collect();
     indices.sort_by(|&a, &b| {
         values[a]
@@ -304,13 +323,28 @@ pub fn spearman(x: &[f64], y: &[f64]) -> (f64, f64) {
 /// # Returns
 ///
 /// `top_mean - bottom_mean`, or NaN if inputs are invalid.
+///
+/// # NaN handling
+///
+/// Returns NaN if any element of `scores` or `returns` is NaN. Sorting
+/// with NaN values present would scatter them through the quantile
+/// groups (since `partial_cmp` returns `None` for NaN and the
+/// `Ordering::Equal` fallback is arbitrary), producing a numerically
+/// meaningless `top_mean - bottom_mean`. Callers who need to include
+/// NaN-valued positions must substitute a sentinel first.
 pub fn quintile_spread(scores: &[f64], returns: &[f64], n_quantiles: usize) -> f64 {
     let n = scores.len();
     if n != returns.len() || n < n_quantiles || n_quantiles == 0 {
         return f64::NAN;
     }
 
-    // Sort indices by score (ascending)
+    // NaN propagation: any NaN in either input produces NaN output.
+    if scores.iter().any(|v| v.is_nan()) || returns.iter().any(|v| v.is_nan()) {
+        return f64::NAN;
+    }
+
+    // Sort indices by score (ascending). With NaN ruled out above the
+    // Equal fallback is unreachable.
     let mut indices: Vec<usize> = (0..n).collect();
     indices.sort_by(|&a, &b| {
         scores[a]
@@ -433,6 +467,108 @@ mod tests {
         let returns = [0.01, 0.02];
         let spread = quintile_spread(&scores, &returns, 5);
         assert!(spread.is_nan());
+    }
+
+    // --- NaN propagation (N2-series numerical fix) -----------------------
+
+    #[test]
+    fn rankdata_nan_input_propagates() {
+        let ranks = rankdata(&[1.0, f64::NAN, 2.0, 3.0]);
+        assert_eq!(ranks.len(), 4);
+        for (i, r) in ranks.iter().enumerate() {
+            assert!(r.is_nan(), "rankdata[{i}] = {r}, expected NaN");
+        }
+    }
+
+    #[test]
+    fn rankdata_multiple_nan_propagates() {
+        let ranks = rankdata(&[f64::NAN, f64::NAN, f64::NAN]);
+        assert!(ranks.iter().all(|r| r.is_nan()));
+    }
+
+    #[test]
+    fn rankdata_positive_infinity_is_ordered_not_nan() {
+        // +Inf is not NaN; it should rank at the top, not trigger NaN
+        // propagation.
+        let ranks = rankdata(&[1.0, 2.0, f64::INFINITY, 3.0]);
+        assert!(ranks.iter().all(|r| !r.is_nan()), "infinity ≠ NaN");
+        assert!(ranks[2] > ranks[0], "+Inf should rank above finite values");
+        assert!(ranks[2] > ranks[3], "+Inf should rank above finite values");
+    }
+
+    #[test]
+    fn spearman_nan_input_propagates_to_result() {
+        let x = [1.0, 2.0, 3.0, f64::NAN, 5.0];
+        let y = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let (r, p) = spearman(&x, &y);
+        assert!(r.is_nan(), "spearman r on NaN input should be NaN, got {r}");
+        assert!(p.is_nan(), "spearman p on NaN input should be NaN, got {p}");
+    }
+
+    #[test]
+    fn spearman_nan_in_either_input_propagates() {
+        let finite = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let with_nan = [1.0, 2.0, f64::NAN, 4.0, 5.0];
+        let (rx, _) = spearman(&with_nan, &finite);
+        let (ry, _) = spearman(&finite, &with_nan);
+        assert!(rx.is_nan(), "NaN in x must propagate");
+        assert!(ry.is_nan(), "NaN in y must propagate");
+    }
+
+    #[test]
+    fn quintile_spread_nan_score_propagates() {
+        let mut scores: Vec<f64> = (1..=10).map(|i| i as f64).collect();
+        scores[3] = f64::NAN;
+        let returns: Vec<f64> = (1..=10).map(|i| i as f64 * 0.01).collect();
+        let spread = quintile_spread(&scores, &returns, 5);
+        assert!(spread.is_nan(), "NaN score must propagate, got {spread}");
+    }
+
+    #[test]
+    fn quintile_spread_nan_return_propagates() {
+        let scores: Vec<f64> = (1..=10).map(|i| i as f64).collect();
+        let mut returns: Vec<f64> = (1..=10).map(|i| i as f64 * 0.01).collect();
+        returns[7] = f64::NAN;
+        let spread = quintile_spread(&scores, &returns, 5);
+        assert!(spread.is_nan(), "NaN return must propagate, got {spread}");
+    }
+
+    // Proptest: any NaN anywhere in the input must produce an all-NaN
+    // rankdata output. Exhaustively random coverage beyond the hand-
+    // picked unit tests above.
+    proptest::proptest! {
+        #[test]
+        fn prop_rankdata_nan_anywhere_produces_all_nan(
+            len in 1usize..50,
+            nan_idx in 0usize..50,
+            values in proptest::collection::vec(-1_000.0f64..1_000.0, 1..50),
+        ) {
+            let mut xs = values;
+            let len = len.min(xs.len());
+            xs.truncate(len);
+            let nan_idx = nan_idx % xs.len();
+            xs[nan_idx] = f64::NAN;
+
+            let ranks = rankdata(&xs);
+            proptest::prop_assert_eq!(ranks.len(), xs.len());
+            for r in &ranks {
+                proptest::prop_assert!(r.is_nan());
+            }
+        }
+
+        #[test]
+        fn prop_rankdata_finite_input_produces_no_nan(
+            values in proptest::collection::vec(-1_000.0f64..1_000.0, 2..50),
+        ) {
+            let ranks = rankdata(&values);
+            for (i, r) in ranks.iter().enumerate() {
+                proptest::prop_assert!(
+                    !r.is_nan(),
+                    "ranks[{}] = {} on finite input {:?}",
+                    i, r, values
+                );
+            }
+        }
     }
 
     #[test]
