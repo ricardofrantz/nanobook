@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Threaded client order IDs into IBKR `orderRef` and Binance `newClientOrderId`
   - Added optional `client_order_id` arguments to Python broker order submission
 
+### Changed
+
+- **BREAKING: config typo rejection**:
+  - Rebalancer target/config structs and risk config now reject unknown fields during deserialization
+  - Typos such as `max_leverage_pct` now fail at parse time instead of silently falling back to defaults
+
 ### Deprecated
 
 - **GARCH naming**:
