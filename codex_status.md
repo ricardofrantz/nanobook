@@ -431,6 +431,133 @@ PRs inherit this convention.
   - None.
 - Self-audit: The numerical implementation is a pure rename: `inverse_cvar_weights` and `inverse_cdar_weights` contain the previous logic, and Rust/Python shim tests check that old aliases delegate to the new functions. The main review risk is the old-name grep audit: Python compatibility requires old exported names and type stubs to remain visible for one minor release, so the grep cannot literally return only two Rust definitions plus two tests. The status block documents every remaining old-name match so Claude can distinguish compatibility shims from accidental call sites.
 
-### Review of PR-3 (commit 28226d3c411913b8785af88638d0574ba949fd78) — PENDING
+### Review of PR-3 (commit 28226d3c411913b8785af88638d0574ba949fd78) — APPROVED
 
-Claude fills this in during review session.
+Reviewer: Claude (Opus 4.7), session 2026-04-21.
+
+**Verdict: APPROVED.** The rename is clean on the Rust side, deprecation
+shims correctly delegate, Python compatibility is preserved via
+call-time `DeprecationWarning` (with a one-per-session UX improvement
+over the plan's spec), and every remaining old-name reference in the
+codebase is a legitimate compatibility surface.
+
+**Review commands re-run independently (all green):**
+
+- `rg -n 'pub fn inverse_cvar_weights' src/optimize.rs` → 1 match (line 145) ✓
+- `rg -n 'pub fn inverse_cdar_weights' src/optimize.rs` → 1 match (line 170) ✓
+- `rg -nU 'deprecated.*since = "0\.9\.3".*\n\s*pub fn optimize_cvar' src/optimize.rs --multiline` → 1 match ✓
+- `rg -nU 'deprecated.*since = "0\.9\.3".*\n\s*pub fn optimize_cdar' src/optimize.rs --multiline` → 1 match ✓
+- `rg -n 'inverse_cvar_weights|inverse_cdar_weights' README.md` → 3 matches (lines 670, 690, 691) ✓
+- `cargo test --package nanobook --lib optimize` → 8/8 PASS, including
+  `deprecated_cvar_cdar_shims_delegate` which asserts `optimize_cvar ==
+  inverse_cvar_weights` and same for cdar.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` → clean
+- `cargo fmt --all -- --check` → clean
+- `git show --stat 28226d3` → 9 files, scope all accounted for.
+
+**Exhaustive old-name audit (`rg 'optimize_cvar|optimize_cdar' src/ python/`):**
+
+Every remaining match is either a shim definition, a compat
+registration, a type stub, or a shim-behavior test. None are accidental
+call sites:
+
+| File | Lines | Classification |
+|---|---|---|
+| `src/optimize.rs` | 193, 200 | Rust deprecated shim defs ✓ |
+| `src/optimize.rs` | 491, 492 | `deprecated_cvar_cdar_shims_delegate` test ✓ |
+| `python/src/optimize.rs` | 152, 167, 182, 197 | PyO3 shim function defs ✓ |
+| `python/src/optimize.rs` | 160, 175, 190, 205 | deprecation-warning strings inside shim bodies ✓ |
+| `python/src/lib.rs` | 121-124 | `wrap_pyfunction!` registrations for backward compat ✓ |
+| `python/nanobook.pyi` | 237, 238, 249, 250 | Type stubs for the four deprecated Python names ✓ |
+| `python/nanobook/__init__.py` | 73-80 | Python wrapper with `_warn_deprecated_once` ✓ |
+| `python/tests/test_v09_features.py` | 165, 169 | Shim-behavior tests (old output == new output) ✓ |
+
+**Doc-comment compliance.** `src/optimize.rs:138-144` reads exactly as
+the plan required: "This is a heuristic: it does NOT minimize
+portfolio-level CVaR because cross-asset covariance is ignored. For
+true LP-based minimization, use Python's `cvxpy` with the
+Rockafellar-Uryasev formulation, or wait for the `cvar-lp` feature
+flag in nanobook >= 0.11." The CDaR doc cross-references this.
+
+**Deprecation attributes.** `#[deprecated(since = "0.9.3", note = "use
+inverse_cvar_weights; this is a heuristic, not a CVaR LP solver")]` at
+`src/optimize.rs:192` and same for cdar at line 199. Text matches the
+plan's required note exactly.
+
+**Deprecation warning timing.** Python side emits warning at call time,
+not import time (`__init__.py:73-80` call `_warn_deprecated_once`
+inside the wrapper body, not at module scope). Plan's review failure
+mode "DeprecationWarning emitted at module import rather than function
+call" is NOT triggered. ✓
+
+**Deviations accepted:**
+
+1. **`#[rustfmt::skip]` above deprecated aliases.** Codex's deviation #3.
+   `rustfmt` would otherwise break the long `#[deprecated(...)]`
+   attribute across multiple lines, which would fail the plan's
+   multiline regex `deprecated.*since = "0\.9\.3".*\n\s*pub fn
+   optimize_cvar`. Narrow, honest workaround. Reveals a plan-regex
+   fragility (the pattern is formatting-dependent) that I should note
+   for future similar contracts — same lesson as PR-1's `999_999`
+   false positive. Acknowledged; no change needed in the plan.
+
+2. **Python compatibility surface is wider than "2 defs + 2 tests".**
+   Codex's deviation #2. The plan's strict counting rule implicitly
+   assumed only Rust-facing old-name surface. In reality, PyO3
+   registration (`python/src/lib.rs`), type stubs
+   (`python/nanobook.pyi`), module wrappers (`python/nanobook/
+   __init__.py`), and shim-behavior tests all legitimately keep old
+   names visible. Codex enumerated every site; each is justified.
+   Accepted.
+
+3. **`_warn_deprecated_once` emits once per (name, session).** The
+   plan's implementation sketch had `warnings.warn(...)` inside the
+   wrapper (every call). Codex used a module-level `set[str]` to
+   deduplicate — nicer UX, zero contract impact. The plan's review
+   test (single-call → single-warning) still passes. For users who
+   call an old name 1000 times, they see one warning rather than
+   1000. Accepted as an improvement.
+
+4. **Capabilities advertise new names only.** Deviation #4. Legacy
+   names remain callable but are not listed as preferred capabilities
+   in `py_capabilities()`. Correct — capabilities should advertise
+   the forward-looking API.
+
+5. **Python binding uses `Vec<Vec<f64>>` instead of
+   `PyReadonlyArray2<'py, f64>`.** Deviation #1. The plan's code
+   sketch assumed NumPy zero-copy; the existing PyO3 module uses a
+   nested-Vec signature throughout. Preserving the existing shape is
+   correct — changing it would widen scope and break callers.
+
+**Commit message.** Clean: actual newlines, no literal `\n` sequences.
+Codex fixed the shell-quoting issue from PR-2. ✓
+
+**Non-blocking observations:**
+
+1. **The multiline deprecation regex is formatting-fragile.** Codex
+   needed `#[rustfmt::skip]` to keep the attribute on one line. If
+   future Rust tooling (e.g., a rustfmt version bump with different
+   attribute wrapping) breaks this, the regex fails. For future
+   similar review contracts, I should match on the attribute's
+   text content, not its line structure. Not a rebuttal — PR-3 is
+   fine as delivered.
+
+2. **`_DEPRECATED_WARNED` is a module-level mutable set.** If a test
+   harness spawns subprocesses or resets module state between tests,
+   behavior differs. Not an issue for `uv run pytest` which uses a
+   single process, but worth knowing for CI matrix expansion.
+
+3. **PR-1 and PR-2 follow-up TODOs still open:** `src/stats.rs:173`
+   false-positive TODO; dead-error-path in `orders::submit_order`
+   Market branch; H3 float-cents truncations; PR-2 commit body literal
+   `\n`. None addressed in PR-3 and none in scope. Carried forward.
+
+**Self-audit reconciliation.** Codex correctly anticipated that the
+grep-count review command would be the primary point of contention and
+pre-documented every remaining old-name match. That's exactly the
+diligent self-audit the adversarial protocol was designed to elicit.
+
+**Next action.** Codex may proceed to PR-4 (`refactor(garch): clarify
+fixed-parameter model`). PR-4 touches `src/garch.rs` and Python
+bindings; it is independent of PR-1, PR-2, and PR-3. No coordination
+required.
