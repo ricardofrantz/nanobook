@@ -1,8 +1,8 @@
 # Codex Execution Status
 
 Current phase: P0 — v0.9.3 Honesty Release
-Last updated: 2026-04-21 15:16
-Current PR: PR-5 (COMPLETED — awaiting review)
+Last updated: 2026-04-21 16:40
+Current PR: PR-6 (COMPLETED — awaiting review)
 
 ## Preflight Note — 2026-04-21 12:45
 
@@ -919,5 +919,58 @@ leave it.
 
 **P0 progress.** 5/6 PRs approved. Remaining: PR-6. P0 on track for
 the 2-week milestone.
+
+Claude fills this in during review session.
+
+## PR-6: docs(release): v0.9.3 honesty release notes + version bump
+
+- Started: 2026-04-21 16:00
+- Completed: 2026-04-21 16:40
+- Commit SHA: `bc4c48f160ebbd19ab849e7b3902d2c4e3a87ad1`
+- Files touched: 12 files (+133/-50)
+- Diff stat:
+  - `CHANGELOG.md` | 79 changed
+  - `Cargo.lock` | 11 changed
+  - `Cargo.toml` | 2 changed
+  - `README.md` | 21 changed
+  - `benches/README.md` | 40 insertions
+  - `broker/Cargo.toml` | 4 changed
+  - `python/Cargo.toml` | 5 changed
+  - `python/build.rs` | 3 insertions
+  - `python/pyproject.toml` | 2 changed
+  - `python/uv.lock` | 2 changed
+  - `rebalancer/Cargo.toml` | 8 changed
+  - `risk/Cargo.toml` | 6 changed
+- Review commands (Codex's run):
+  - `rg -n '^version = "0\.9\.3"' Cargo.toml python/Cargo.toml` → PASS (2 matches)
+  - `rg -n '^version = "0\.4\.0"' broker/Cargo.toml` → PASS
+  - `rg -n '^version = "0\.4\.1"' risk/Cargo.toml` → PASS
+  - `rg -n '^version = "0\.5\.0"' rebalancer/Cargo.toml` → PASS
+  - `rg -n '^version = "0\.9\.3"' python/pyproject.toml` → PASS
+  - `rg -nU '\[0\.9\.3\].*Honesty Release' CHANGELOG.md` → PASS
+  - `rg -n 'Security-C1|IBKR market-order' CHANGELOG.md` → PASS
+  - `rg -n 'client_order_id|Security-H4' CHANGELOG.md` → PASS
+  - `rg -n 'inverse_cvar_weights' CHANGELOG.md` → PASS
+  - `rg -n 'garch_ewma_forecast' CHANGELOG.md` → PASS
+  - `rg -n 'deny_unknown_fields' CHANGELOG.md` → PASS
+  - `rg -nU 'What nanobook is NOT' README.md` → PASS
+  - `test -f benches/README.md && echo exists` → PASS (`exists`)
+  - `cargo build --release --workspace` → PASS
+  - `cargo test --workspace --all-features` → PASS
+  - `cargo clippy --workspace --all-targets --all-features -- -D warnings` → PASS
+  - `cargo fmt --all -- --check` → PASS
+  - `cargo test --workspace` → PASS
+  - `cd python && maturin develop --release && uv run pytest tests/ -q && cd ..` → PASS (`116 passed, 32 skipped`)
+  - `cargo deny check` → PASS (`advisories ok, bans ok, licenses ok, sources ok`; warning-only unmatched license allowances)
+- Deviations from contract:
+  1. `Cargo.lock` and `python/uv.lock` changed because this repository now tracks lockfiles and version bumps must be reflected there.
+  2. `python/build.rs` and `pyo3-build-config = "0.27"` were added because direct `cargo build --release --workspace` failed on macOS when linking the PyO3 extension outside maturin. The build script calls `pyo3_build_config::add_extension_module_link_args()`, after which the PR-6 release build command passed.
+  3. Internal path dependency version constraints were updated to match the bumped crate versions (`nanobook 0.9.3`, `nanobook-broker 0.4.0`, `nanobook-risk 0.4.1`) so published crates point at the release versions rather than older constraints.
+  4. Existing PR-2 and PR-5 commit bodies still contain literal `\n` sequences and stripped backticks. I did not rebase or amend history because this turn requested only PR-6 and the plan forbids rewriting history without explicit direction. The PR-6 commit body itself is clean and was created with `git commit -F .git/PR6_COMMIT_MSG`.
+- TODOs discovered (out of scope):
+  - If Ricardo wants cosmetically clean history before tagging, use an interactive rebase to repair PR-2 and PR-5 commit bodies before creating the v0.9.3 tag. No code changes are required for that.
+- Self-audit: The release-prep diff intentionally consolidates all previous P0 user-facing notes into a dated `[0.9.3]` block and leaves `[Unreleased]` empty. The main review risk is the added `python/build.rs`, which is not in the plan's file list but is required to satisfy the plan's own `cargo build --release --workspace` command on macOS with PyO3 extension-module linking. All review-command-visible version, changelog, README, benchmark README, build, test, clippy, and deny checks pass.
+
+### Review of PR-6 (commit bc4c48f160ebbd19ab849e7b3902d2c4e3a87ad1) — PENDING
 
 Claude fills this in during review session.
