@@ -37,6 +37,7 @@ itch = ["persistence", "dep:memmap2"]
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1.5"
+serde_json = "1"  # reference-parity golden-fixture tests
 
 [[bin]]
 name = "lob"
@@ -54,3 +55,10 @@ required-features = ["portfolio"]
 [[bench]]
 name = "stops"
 harness = false
+
+[[test]]
+name = "reference_parity"
+# Uses portfolio::metrics::compute_metrics. Indicator-only tests would
+# work unconditionally, but gating the whole target keeps the Cargo
+# configuration simple — enable via --all-features or --features portfolio.
+required-features = ["portfolio"]
