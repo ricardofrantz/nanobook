@@ -25,9 +25,10 @@
 //! - `atr_matches_talib`               — initial scaffolding (N10).
 //! - `sharpe_matches_quantstats`       — initial scaffolding (N10).
 //! - `max_drawdown_matches_quantstats` — initial scaffolding (N10).
-//! - `cvar_historical_matches_empirical` — added by N2 (default method).
+//! - `cvar_historical_matches_empirical`  — added by N2 (default method).
 //! - `cvar_parametric_matches_quantstats` — added by N2 (legacy method).
-//! - `sortino_matches_quantstats`      — added by N4 (ddof=0 fix).
+//! - `sortino_matches_quantstats`         — added by N4 (ddof=0 default).
+//! - `sortino_ddof1_matches_scaled_ddof0` — added by N4 (legacy path).
 //!
 //! Related regression tests in other files:
 //!
@@ -303,5 +304,65 @@ fn cvar_parametric_matches_quantstats() {
     assert!(
         diff <= 1e-9,
         "cvar(ParametricNormal): ours={ours}, quantstats={expected}, diff={diff}"
+    );
+}
+
+/// Annualized Sortino (ddof=0, default in v0.10) must agree with
+/// `quantstats.stats.sortino` at 1e-9.
+///
+/// `compute_metrics.sortino` routes through `sortino(..., ddof=0)` by
+/// default. The ddof=1 variant (Bessel-corrected, v0.9 behavior) is
+/// not pinned here — callers who need it pass `ddof=1` explicitly and
+/// can derive the expected value with `sqrt(n/(n-1))` scaling.
+#[test]
+fn sortino_matches_quantstats() {
+    use nanobook::portfolio::metrics::sortino;
+
+    let g = golden();
+    let returns = f64_vec(&g, &["inputs", "returns"]);
+    let expected = f64_scalar(&g, &["quantstats", "sortino_annual_252"]);
+
+    // Direct API.
+    let ours_direct = sortino(&returns, 0.0, 252.0, 0);
+    let diff = (ours_direct - expected).abs();
+    assert!(
+        diff <= 1e-9,
+        "sortino(ddof=0) direct: ours={ours_direct}, quantstats={expected}, diff={diff}"
+    );
+
+    // The Metrics struct routes through this method too.
+    let metrics = nanobook::portfolio::metrics::compute_metrics(&returns, 252.0, 0.0)
+        .expect("non-empty return series");
+    let diff = (metrics.sortino - expected).abs();
+    assert!(
+        diff <= 1e-9,
+        "metrics.sortino (ddof=0 default): ours={}, quantstats={expected}, diff={diff}",
+        metrics.sortino
+    );
+}
+
+/// Bessel-corrected Sortino (ddof=1, legacy v0.9 behavior) must relate
+/// to the ddof=0 result by exactly `sqrt(n/(n-1))`.
+///
+/// This pins the opt-in legacy path at bit-level.
+#[test]
+fn sortino_ddof1_matches_scaled_ddof0() {
+    use nanobook::portfolio::metrics::sortino;
+
+    let g = golden();
+    let returns = f64_vec(&g, &["inputs", "returns"]);
+    let n = returns.len() as f64;
+
+    // ddof=1 uses / (n-1), ddof=0 uses / n, so downside_dev ratio is
+    // sqrt(n / (n-1)); Sortino is inversely proportional to downside_dev,
+    // so ratio is sqrt((n-1)/n).
+    let s0 = sortino(&returns, 0.0, 252.0, 0);
+    let s1 = sortino(&returns, 0.0, 252.0, 1);
+    let ratio = s1 / s0;
+    let expected_ratio = ((n - 1.0) / n).sqrt();
+    let diff = (ratio - expected_ratio).abs();
+    assert!(
+        diff <= 1e-12,
+        "sortino ddof ratio: got s1/s0={ratio}, expected sqrt((n-1)/n)={expected_ratio}, diff={diff}"
     );
 }

@@ -115,27 +115,11 @@ pub fn compute_metrics(returns: &[f64], periods_per_year: f64, risk_free: f64) -
         0.0
     };
 
-    // Downside deviation (only negative excess returns)
-    let downside_variance = if n > 1 {
-        returns
-            .iter()
-            .map(|&r| {
-                let excess = r - risk_free;
-                if excess < 0.0 { excess.powi(2) } else { 0.0 }
-            })
-            .sum::<f64>()
-            / (n - 1) as f64
-    } else {
-        0.0
-    };
-    let downside_dev = downside_variance.sqrt();
-
-    // Sortino ratio (annualized)
-    let sortino = if downside_dev > 0.0 {
-        excess_mean * periods_per_year.sqrt() / downside_dev
-    } else {
-        0.0
-    };
+    // Sortino ratio (annualized). v0.10 default is ddof=0, matching
+    // `quantstats.stats.sortino` and the standard practitioner
+    // convention. v0.9 used ddof=1 (Bessel correction); callers who
+    // need that value can use `sortino(returns, rf, periods, 1)`.
+    let sortino = sortino(returns, risk_free, periods_per_year, 0);
 
     // Max drawdown
     let max_drawdown = compute_max_drawdown(returns);
@@ -329,6 +313,56 @@ fn cvar_parametric(returns: &[f64], alpha: f64) -> f64 {
             .unwrap_or(&0.0);
     }
     tail_sum / tail_count as f64
+}
+
+/// Annualized Sortino ratio with configurable downside-deviation
+/// degrees-of-freedom correction.
+///
+/// `ddof = 0` (used by [`compute_metrics`] from v0.10): downside
+/// variance = `sum(min(excess_i, 0)²) / n`. Matches
+/// `quantstats.stats.sortino` and the pandas `.std(ddof=0)` convention.
+///
+/// `ddof = 1`: Bessel-corrected downside variance uses `/ (n - 1)`.
+/// This is the v0.9 default and the pandas `.std()` default.
+///
+/// # Returns
+///
+/// Annualized Sortino ratio. Returns `0.0` if:
+/// - `returns` is empty.
+/// - `ddof >= returns.len()` (would divide by zero or negative).
+/// - No return has strictly negative excess over `risk_free`
+///   (downside deviation is zero).
+///
+/// # Notes
+///
+/// Excess returns are computed as `r - risk_free` per period. Downside
+/// deviation uses only excess returns strictly below zero — gains are
+/// penalised neither positively nor negatively.
+pub fn sortino(returns: &[f64], risk_free: f64, periods_per_year: f64, ddof: u32) -> f64 {
+    let n = returns.len();
+    if n == 0 || (ddof as usize) >= n {
+        return 0.0;
+    }
+
+    let mean = returns.iter().sum::<f64>() / n as f64;
+    let excess_mean = mean - risk_free;
+
+    let downside_sum: f64 = returns
+        .iter()
+        .map(|&r| {
+            let excess = r - risk_free;
+            if excess < 0.0 { excess.powi(2) } else { 0.0 }
+        })
+        .sum();
+
+    let denom = (n - ddof as usize) as f64;
+    let downside_dev = (downside_sum / denom).sqrt();
+
+    if downside_dev > 0.0 {
+        excess_mean * periods_per_year.sqrt() / downside_dev
+    } else {
+        0.0
+    }
 }
 
 /// Inverse of the standard normal CDF (probit function).
