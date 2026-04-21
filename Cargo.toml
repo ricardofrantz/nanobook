@@ -62,3 +62,9 @@ name = "reference_parity"
 # work unconditionally, but gating the whole target keeps the Cargo
 # configuration simple — enable via --all-features or --features portfolio.
 required-features = ["portfolio"]
+
+[[test]]
+name = "catastrophic_cancellation"
+# Uses portfolio::metrics::{rolling_sharpe, rolling_volatility}. Same
+# rationale as reference_parity: gate on portfolio.
+required-features = ["portfolio"]

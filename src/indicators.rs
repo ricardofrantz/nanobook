@@ -60,10 +60,22 @@ fn sma(values: &[f64], period: usize) -> Vec<f64> {
     out
 }
 
-/// Population standard deviation over a rolling window.
+/// Population standard deviation (ddof=0) over a rolling window.
 ///
-/// Uses O(N) running sum/sum-of-squares instead of O(N*K) re-summation.
 /// Returns NaN for the lookback period.
+///
+/// # Numerical notes
+///
+/// Earlier implementations used an O(1) sliding state with the formula
+/// `sum_sq / k - mean^2`. This formula suffers catastrophic cancellation
+/// on high-mean, low-variance series (e.g., a $1000 stock with sub-cent
+/// moves): both terms are large and nearly equal, so their difference
+/// loses most of its precision to rounding. The `.max(0.0)` guard then
+/// silently clamps the (now slightly negative) cancelled variance to
+/// zero, so `rolling_std_pop` returned exactly 0 — and Bollinger bands
+/// collapsed to the middle band.
+///
+/// This rewrite recomputes Welford per window, O(window) per step.
 fn rolling_std_pop(values: &[f64], period: usize) -> Vec<f64> {
     let n = values.len();
     let mut out = vec![f64::NAN; n];
@@ -72,23 +84,10 @@ fn rolling_std_pop(values: &[f64], period: usize) -> Vec<f64> {
     }
 
     let k = period as f64;
-
-    // Seed: first window
-    let mut sum: f64 = values[..period].iter().sum();
-    let mut sum_sq: f64 = values[..period].iter().map(|v| v * v).sum();
-
-    let mean = sum / k;
-    out[period - 1] = (sum_sq / k - mean * mean).max(0.0).sqrt();
-
-    // Slide window: add new, remove old
-    for i in period..n {
-        let old = values[i - period];
-        let new = values[i];
-        sum += new - old;
-        sum_sq += new * new - old * old;
-
-        let mean = sum / k;
-        out[i] = (sum_sq / k - mean * mean).max(0.0).sqrt();
+    for i in (period - 1)..n {
+        let slice = &values[i + 1 - period..=i];
+        let (_mean, m2) = crate::stats::welford_mean_m2(slice);
+        out[i] = (m2 / k).max(0.0).sqrt();
     }
     out
 }
