@@ -184,9 +184,9 @@ pub use error::ValidationError;
 pub use event::{ApplyResult, Event};
 pub use exchange::Exchange;
 pub use level::Level;
-pub use matching::MatchResult;
+pub use matching::{MatchResult, StpPolicy};
 pub use multi_exchange::MultiExchange;
-pub use order::{Order, OrderStatus};
+pub use order::{Order, OrderOwner, OrderStatus};
 pub use price_levels::PriceLevels;
 pub use result::{
     CancelError, CancelResult, ModifyError, ModifyResult, StopSubmitResult, SubmitResult,

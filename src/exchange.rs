@@ -9,6 +9,8 @@ use crate::event::Event;
 use crate::{
     Order, OrderBook, OrderId, OrderStatus, Price, Quantity, Side, TimeInForce, Trade,
     error::ValidationError,
+    matching::StpPolicy,
+    order::OrderOwner,
     result::{
         CancelError, CancelResult, ModifyError, ModifyResult, StopSubmitResult, SubmitResult,
     },
@@ -35,6 +37,8 @@ pub struct Exchange {
     pub(crate) stop_book: StopBook,
     /// Last trade price (for stop order triggers)
     pub(crate) last_trade_price: Option<Price>,
+    /// Self-trade prevention policy; applied when owners match.
+    pub(crate) stp_policy: StpPolicy,
     /// Event log for replay (only with "event-log" feature)
     #[cfg(feature = "event-log")]
     pub(crate) events: Vec<crate::event::Event>,
@@ -42,15 +46,35 @@ pub struct Exchange {
 
 impl Exchange {
     /// Create a new exchange with an empty order book.
+    ///
+    /// Self-trade prevention defaults to [`StpPolicy::Off`]. Use
+    /// [`Self::with_stp_policy`] to enable it.
     pub fn new() -> Self {
         Self {
             book: OrderBook::new(),
             trades: Vec::new(),
             stop_book: StopBook::new(),
             last_trade_price: None,
+            stp_policy: StpPolicy::Off,
             #[cfg(feature = "event-log")]
             events: Vec::new(),
         }
+    }
+
+    /// Set the self-trade prevention policy for this exchange.
+    ///
+    /// Builder form; consumes and returns `Self`. The policy is consulted
+    /// whenever an incoming and resting order both set `Some(owner)` with
+    /// equal values. Orders with `owner = None` always match normally.
+    pub fn with_stp_policy(mut self, policy: StpPolicy) -> Self {
+        self.stp_policy = policy;
+        self
+    }
+
+    /// Returns the currently configured self-trade prevention policy.
+    #[inline]
+    pub fn stp_policy(&self) -> StpPolicy {
+        self.stp_policy
     }
 
     // === Order Submission ===
@@ -94,6 +118,38 @@ impl Exchange {
         });
 
         let result = self.submit_limit_internal(side, price, quantity, tif);
+        if !result.trades.is_empty() {
+            let last_price = result.trades.last().unwrap().price;
+            self.last_trade_price = Some(last_price);
+            self.process_trade_triggers();
+        }
+        result
+    }
+
+    /// Submit a limit order with an `owner` tag for self-trade prevention.
+    ///
+    /// Semantically identical to [`Self::submit_limit`] except that the
+    /// incoming order carries `Some(owner)`; the exchange's configured
+    /// [`StpPolicy`] then governs whether it may match against resting
+    /// orders sharing the same owner. See [`Self::with_stp_policy`] for
+    /// policy configuration.
+    pub fn submit_limit_with_owner(
+        &mut self,
+        side: Side,
+        price: Price,
+        quantity: Quantity,
+        tif: TimeInForce,
+        owner: OrderOwner,
+    ) -> SubmitResult {
+        #[cfg(feature = "event-log")]
+        self.events.push(Event::SubmitLimit {
+            side,
+            price,
+            quantity,
+            time_in_force: tif,
+        });
+
+        let result = self.submit_limit_internal_with_owner(side, price, quantity, tif, Some(owner));
         if !result.trades.is_empty() {
             let last_price = result.trades.last().unwrap().price;
             self.last_trade_price = Some(last_price);
@@ -169,6 +225,19 @@ impl Exchange {
         quantity: Quantity,
         tif: TimeInForce,
     ) -> SubmitResult {
+        self.submit_limit_internal_with_owner(side, price, quantity, tif, None)
+    }
+
+    /// Internal: submit limit order without recording event, carrying an
+    /// optional owner tag for self-trade prevention.
+    pub(crate) fn submit_limit_internal_with_owner(
+        &mut self,
+        side: Side,
+        price: Price,
+        quantity: Quantity,
+        tif: TimeInForce,
+        owner: Option<OrderOwner>,
+    ) -> SubmitResult {
         // FOK: Check feasibility before doing anything
         if tif == TimeInForce::FOK && !self.book.can_fully_fill(side, price, quantity) {
             // Reject the order. We still consume an OrderId for consistency
@@ -188,19 +257,39 @@ impl Exchange {
 
         // Create the order
         let mut order = self.book.create_order(side, price, quantity, tif);
+        order.owner = owner;
         let order_id = order.id;
 
-        // Match against the book
-        let match_result = self.book.match_order(&mut order);
+        // Match against the book under the configured STP policy.
+        let policy = self.stp_policy;
+        let match_result = self.book.match_order_with_policy(&mut order, policy);
 
         // Record trades
         self.trades.extend(match_result.trades.iter().cloned());
 
         let filled = order.filled_quantity;
         let remaining = order.remaining_quantity;
+        let stp_cancelled = match_result.stp_cancelled;
 
-        // Handle remaining quantity based on TIF
-        let (status, resting, cancelled) = if remaining == 0 {
+        // Handle remaining quantity based on TIF + STP outcome.
+        //
+        // STP override: when the matcher cancelled (part of) the incoming
+        // order, any unfilled remainder must NOT rest on the book — even
+        // if TIF is GTC. The order terminates in Cancelled state.
+        let (status, resting, cancelled) = if stp_cancelled {
+            let status = if filled > 0 {
+                OrderStatus::PartiallyFilled
+            } else {
+                OrderStatus::Cancelled
+            };
+            order.status = status;
+            // The STP remainder is the difference between what the user
+            // submitted and what actually traded. Under DecrementAndCancel
+            // this equals the decremented quantity.
+            let cancelled_qty = quantity - filled;
+            self.book.orders.insert(order_id, order);
+            (status, 0, cancelled_qty)
+        } else if remaining == 0 {
             // Fully filled
             order.status = OrderStatus::Filled;
             self.book.orders.insert(order_id, order);
