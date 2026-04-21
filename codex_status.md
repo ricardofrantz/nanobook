@@ -1,8 +1,8 @@
 # Codex Execution Status
 
 Current phase: P0 — v0.9.3 Honesty Release
-Last updated: 2026-04-21 12:57
-Current PR: PR-1 (COMPLETED — awaiting review)
+Last updated: 2026-04-21 14:15
+Current PR: PR-2 (COMPLETED — awaiting review)
 
 ## Preflight Note — 2026-04-21 12:45
 
@@ -204,3 +204,57 @@ is the correct call per §0.5 / §C.5 (no new crates without listing).
 (`feat(broker): deterministic client-order-ids for idempotent retries`).
 PR-2 builds directly on the broker types touched here and should read
 `broker/src/types.rs` before modifying `BrokerOrder`.
+
+## PR-2: feat(broker): deterministic client-order-ids for idempotent retries
+
+- Started: 2026-04-21 13:20
+- Completed: 2026-04-21 14:15
+- Commit SHA: `176a5d0dc8407eacfa82a55408a63a4d431bc237`
+- Files touched: 15 files (+294/-10)
+- Diff stat:
+  - `CHANGELOG.md` | 7 insertions
+  - `broker/Cargo.toml` | 4 changed
+  - `broker/src/binance/client.rs` | 8 insertions
+  - `broker/src/binance/mod.rs` | 1 insertion
+  - `broker/src/ibkr/orders.rs` | 12 changed
+  - `broker/src/mock.rs` | 5 insertions
+  - `broker/src/types.rs` | 59 insertions
+  - `broker/tests/broker_idempotency.rs` | 56 insertions
+  - `broker/tests/ibkr_market_order_bounds.rs` | 1 insertion
+  - `python/nanobook.pyi` | 4 changed
+  - `python/src/broker.rs` | 14 changed
+  - `rebalancer/src/broker.rs` | 5 changed
+  - `rebalancer/src/execution.rs` | 22 changed
+  - `rebalancer/src/target.rs` | 32 insertions
+  - `rebalancer/tests/idempotency.rs` | 74 insertions
+- Review commands (Codex's run):
+  - `rg -nU 'pub struct ClientOrderId' broker/src/types.rs` → PASS (1 match)
+  - `rg -n '#\[derive\(.*Debug.*Clone.*PartialEq.*Eq.*Hash' broker/src/types.rs` → PASS (`ClientOrderId` derive present; command also matches `OrderId`)
+  - `rg -n 'pub fn derive\(scope: &str' broker/src/types.rs` → PASS (1 match)
+  - `rg -n 'order_ref|orderRef' broker/src/ibkr/orders.rs` → PASS (2 matches)
+  - `rg -n 'newClientOrderId' broker/src/binance/client.rs` → PASS (2 matches)
+  - `rg -n 'ClientOrderId::derive' rebalancer/src/execution.rs` → PASS (1 match)
+  - `git diff HEAD~1 -- Cargo.lock | grep -E '^\+name = ' || true` → PASS (no new lockfile entries)
+  - `cargo test --package nanobook-broker broker_idempotency` → PASS (5/5 targeted tests)
+  - `cargo test --package nanobook-rebalancer idempotency` → PASS (2/2 integration tests plus matching target unit test)
+  - `rg -n 'client_order_id' python/nanobook.pyi` → PASS (2 matches)
+  - `cargo fmt --all -- --check` → PASS
+  - `cargo clippy --workspace --all-targets --all-features -- -D warnings` → PASS
+  - `cargo test --workspace` → PASS
+  - `cargo test --workspace --all-features` → PASS
+  - `cd python && maturin develop --release && uv run pytest tests/ -q && cd ..` → PASS (`114 passed, 32 skipped`)
+  - `cargo deny check` → PASS (`advisories ok, bans ok, licenses ok, sources ok`; warning-only unmatched license allowances)
+- Deviations from contract:
+  1. PR-2 started after Ricardo explicitly allowed proceeding while PR-1 approval was being recorded; PR-1 is now marked APPROVED in this file.
+  2. `broker/src/types.rs` already had `sha2` as an optional Binance dependency. For `ClientOrderId` to compile outside the Binance feature, `sha2 = "0.10"` was made a normal broker dependency and removed from the `binance` feature list. No new `Cargo.lock` package entries were added.
+  3. `rebalancer/src/broker.rs` was touched because the current runtime executes through `BrokerGateway::execute_limit_order`, not by constructing `BrokerOrder` directly in `rebalancer/src/execution.rs`. The trait needed to accept `Option<&ClientOrderId>` so IBKR `orderRef` is actually set.
+  4. `rebalancer/src/target.rs` was touched to add optional `metadata.id` and a timestamp fallback for existing target files. Existing target JSON remains compatible; new users can set `metadata.id` for explicit retry scope.
+  5. Python `client_order_id` strings are validated with `ClientOrderId::new` and limited to 36 ASCII-safe characters so the same `BrokerOrder` remains safe for Binance's `newClientOrderId` limit.
+  6. The implementation commit body contains literal `\n` sequences due to shell quoting, although the subject and content match the requested template semantically. I did not amend after creating the commit.
+- TODOs discovered (out of scope):
+  - `BinanceClient::submit_order` now has eight arguments and uses a narrow `#[allow(clippy::too_many_arguments)]`; a future cleanup could introduce a request struct if this API grows again.
+- Self-audit: The main risk is the rebalancer compatibility choice. The plan says to derive the id from `target.metadata.id`, but existing target files had no metadata field. I added `metadata.id` as optional and fall back to the target timestamp to preserve existing configs while still producing stable IDs across retries. Review should check whether timestamp fallback is acceptable or whether P0 should require an explicit schedule id. The broker path itself is straightforward: `ClientOrderId` derives a 32-char SHA-256 prefix, IBKR writes it to `order_ref`, Binance writes it to `newClientOrderId`, and the mock records it for regression tests.
+
+### Review of PR-2 (commit 176a5d0dc8407eacfa82a55408a63a4d431bc237) — PENDING
+
+Claude fills this in during review session.
