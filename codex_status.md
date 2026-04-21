@@ -1,8 +1,8 @@
 # Codex Execution Status
 
 Current phase: P0 — v0.9.3 Honesty Release
-Last updated: 2026-04-21 14:43
-Current PR: PR-3 (COMPLETED — awaiting review)
+Last updated: 2026-04-21 14:57
+Current PR: PR-4 (COMPLETED — awaiting review)
 
 ## Preflight Note — 2026-04-21 12:45
 
@@ -561,3 +561,48 @@ diligent self-audit the adversarial protocol was designed to elicit.
 fixed-parameter model`). PR-4 touches `src/garch.rs` and Python
 bindings; it is independent of PR-1, PR-2, and PR-3. No coordination
 required.
+
+## PR-4: refactor(garch): clarify fixed-parameter model
+
+- Started: 2026-04-21 14:45
+- Completed: 2026-04-21 14:57
+- Commit SHA: `1a486ba85108805a0b51baacf6efa57ef5b8c59e`
+- Files touched: 9 files (+121/-39)
+- Diff stat:
+  - `CHANGELOG.md` | 4 insertions
+  - `README.md` | 6 changed
+  - `python/nanobook.pyi` | 2 insertions
+  - `python/nanobook/__init__.py` | 7 changed
+  - `python/src/garch.rs` | 52 changed
+  - `python/src/lib.rs` | 4 changed
+  - `python/tests/test_v09_features.py` | 16 changed
+  - `python/tests/test_v09_parity.py` | 4 changed
+  - `src/garch.rs` | 65 changed
+- Review commands (Codex's run):
+  - `rg -n 'pub fn garch_ewma_forecast' src/garch.rs` → PASS (1 match)
+  - `rg -nU 'deprecated.*since = "0\.9\.3".*\n\s*pub fn garch_forecast' src/garch.rs --multiline` → PASS (1 match)
+  - `rg -n 'α = 0\.08|alpha = 0\.08|α=0\.08|alpha=0\.08' src/garch.rs` → PASS (`alpha = 0.08` in module doc)
+  - `rg -n 'β = 0\.90|beta = 0\.90|β=0\.90|beta=0\.90' src/garch.rs` → PASS (`beta = 0.90` in module doc)
+  - `rg -nU 'if t \+ 1 >= j' src/garch.rs` → NO HITS
+  - `rg -n 'debug_assert!|returns\.len\(\) < q|assert!.*q' src/garch.rs` → PASS (`debug_assert!(t + 1 >= q, ...)`)
+  - `cargo test --package nanobook garch` → PASS (6/6 targeted GARCH tests)
+  - `cd python && maturin develop --release && uv run pytest tests/test_v09_features.py tests/test_v09_parity.py -q && cd ..` → PASS (13/13)
+  - Explicit Python warning check with `warnings.catch_warnings(record=True)` on `nanobook.garch_forecast(...)` → PASS (exactly one `DeprecationWarning`, result equals `garch_ewma_forecast`)
+  - `cd python && uv run pytest -W error::DeprecationWarning tests/ -q 2>&1 | grep -i 'deprecat' || true` → PASS (no uncaught deprecation warnings)
+  - `cargo fmt --all -- --check` → PASS
+  - `cargo clippy --workspace --all-targets --all-features -- -D warnings` → PASS
+  - `cargo test --workspace` → PASS
+  - `cargo test --workspace --all-features` → PASS
+  - `cd python && maturin develop --release && uv run pytest tests/ -q && cd ..` → PASS (`116 passed, 32 skipped`)
+  - `cargo deny check` → PASS (`advisories ok, bans ok, licenses ok, sources ok`; warning-only unmatched license allowances)
+- Deviations from contract:
+  1. The plan's signature sketch references an `InitMethod`; the current codebase uses a `mean: &str` mode (`"zero"` or `"constant"`). I preserved the existing public behavior and renamed the function shape in place.
+  2. The plan says to add a length check that errors or saturates if `returns.len() < q`; because the API returns `f64`, I saturated clamped `q` to the available return length after the existing short-input fallback. This keeps short inputs bounded and avoids introducing a new `Result` API in a rename PR.
+  3. Python compatibility necessarily leaves old `garch_forecast` / `py_garch_forecast` names in PyO3 registrations, package wrappers, stubs, and one shim-behavior test. They all emit call-time deprecation warnings or document the old callable surface for one minor release.
+  4. `#[rustfmt::skip]` was added above the Rust deprecated alias so the one-line deprecation attribute remains compatible with the review regex.
+- TODOs discovered (out of scope): none.
+- Self-audit: The core behavior is intended to be unchanged for normal inputs; the only numerical behavior that can change is when callers pass `q` larger than the available return history. Previously, the final forecast skipped out-of-range lags behind `if t + 1 >= j` while still allocating beta weights and omega using the larger `q`; now `q` saturates to available history so the final loop can be unconditional and safe. This is consistent with the plan's "length precondition" requirement but reviewers should check whether the large-`q` edge behavior is acceptable.
+
+### Review of PR-4 (commit 1a486ba85108805a0b51baacf6efa57ef5b8c59e) — PENDING
+
+Claude fills this in during review session.
