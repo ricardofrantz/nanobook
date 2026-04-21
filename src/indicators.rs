@@ -118,6 +118,14 @@ fn rsi_from_avgs(avg_gain: f64, avg_loss: f64) -> f64 {
 /// - When all gains are zero (flat price), returns 0.0 (not 50.0).
 /// - When all losses are zero (always up), returns 100.0.
 ///
+/// # Insufficient data
+///
+/// Returns a vector of `close.len()` NaN values when
+/// `close.len() <= period` or `period == 0`. At least `period + 1` prices
+/// are required to produce the first non-NaN RSI value (one extra point
+/// to compute the `period` price changes used for the initial
+/// gain/loss averages). Matches TA-Lib.
+///
 /// # Arguments
 ///
 /// * `close` — Closing prices.
@@ -260,6 +268,14 @@ pub fn macd(
 /// * `period` — SMA/stddev period (typically 20).
 /// * `num_std_up` — Number of standard deviations above SMA (typically 2.0).
 /// * `num_std_dn` — Number of standard deviations below SMA (typically 2.0).
+///
+/// # Zero-width bands
+///
+/// If `num_std_up == 0.0` the upper band equals the middle band
+/// (SMA) exactly; likewise for `num_std_dn == 0.0` and the lower band.
+/// No warning or error is emitted — this is a supported configuration
+/// for callers who want a plain SMA returned alongside only one band, or
+/// a bare SMA via `bbands(..., 0.0, 0.0)`.
 pub fn bbands(
     close: &[f64],
     period: usize,

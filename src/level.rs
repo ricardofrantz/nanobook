@@ -46,7 +46,10 @@ impl Level {
         self.total_quantity == 0
     }
 
-    /// Returns the number of orders at this level (including tombstones).
+    /// Returns the number of **active** orders at this level (tombstones
+    /// excluded). For the raw queue length including tombstones use
+    /// `self.orders.len()`; for the tombstone count alone use
+    /// [`tombstone_count`](Self::tombstone_count).
     #[inline]
     pub fn order_count(&self) -> usize {
         self.orders.len() - self.tombstone_count
