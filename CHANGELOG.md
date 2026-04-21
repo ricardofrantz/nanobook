@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **IBKR market-order encoding**:
+  - Removed the `$999,999.99` buy / `$0.01` sell limit-price shim
+  - Use true IBKR market orders when market orders are enabled
+  - Added a strict market-order rejection feature and quote-bounded fallback encoder
 - **Python 3.14 compatibility**:
   - Upgraded PyO3 bindings to a Python 3.14-compatible line
   - Updated Python binding internals for current PyO3 APIs (`attach` / `detach`, explicit `Py<PyAny>`)

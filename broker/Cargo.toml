@@ -13,6 +13,7 @@ documentation = "https://docs.rs/nanobook-broker"
 default = []
 ibkr = ["dep:ibapi", "dep:log"]
 binance = ["dep:reqwest", "dep:hmac", "dep:sha2", "dep:hex", "dep:serde", "dep:serde_json", "dep:log", "dep:zeroize"]
+strict-market-reject = ["ibkr"]
 
 [dependencies]
 nanobook = { version = "0.9.1", path = "..", features = ["serde"] }

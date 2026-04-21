@@ -1,5 +1,8 @@
 //! IBKR connection, position fetching, market data, and account summary.
 
+use std::collections::HashMap;
+use std::sync::Mutex;
+
 use ibapi::accounts::types::AccountGroup;
 use ibapi::accounts::{AccountSummaryResult, PositionUpdate};
 use ibapi::client::blocking::Client;
@@ -9,11 +12,15 @@ use log::{debug, info, warn};
 use nanobook::Symbol;
 
 use crate::error::BrokerError;
-use crate::types::{Account, Position, Quote};
+use crate::types::{Account, BestQuote, BrokerOrder, OrderId, Position, Quote};
+
+use super::market_data::best_quote_from_quote;
+use super::orders;
 
 /// Wraps the ibapi blocking client with convenience methods.
 pub struct IbkrClient {
     client: Client,
+    best_quotes: Mutex<HashMap<Symbol, BestQuote>>,
 }
 
 impl IbkrClient {
@@ -26,12 +33,38 @@ impl IbkrClient {
             .map_err(|e| BrokerError::Connection(format!("failed to connect to {address}: {e}")))?;
 
         info!("Connected (client_id={client_id})");
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            best_quotes: Mutex::new(HashMap::new()),
+        })
     }
 
     /// Get the underlying ibapi client (for order submission).
     pub fn inner(&self) -> &Client {
         &self.client
+    }
+
+    /// Submit an order using the current best-quote cache when available.
+    pub fn submit_order(&self, order: &BrokerOrder) -> Result<OrderId, BrokerError> {
+        let best_quote = self.cached_best_quote(&order.symbol)?;
+        orders::submit_order(&self.client, order, best_quote.as_ref())
+    }
+
+    fn cached_best_quote(&self, symbol: &Symbol) -> Result<Option<BestQuote>, BrokerError> {
+        let quotes = self
+            .best_quotes
+            .lock()
+            .map_err(|_| BrokerError::Other("best quote cache poisoned".into()))?;
+        Ok(quotes.get(symbol).copied())
+    }
+
+    fn cache_best_quote(&self, symbol: Symbol, quote: BestQuote) -> Result<(), BrokerError> {
+        let mut quotes = self
+            .best_quotes
+            .lock()
+            .map_err(|_| BrokerError::Other("best quote cache poisoned".into()))?;
+        quotes.insert(symbol, quote);
+        Ok(())
     }
 
     /// Fetch current positions from IBKR.
@@ -158,13 +191,19 @@ impl IbkrClient {
             return Err(BrokerError::Connection("no valid price received".into()));
         }
 
-        Ok(Quote {
+        let quote = Quote {
             symbol: *symbol,
             bid_cents,
             ask_cents,
             last_cents,
             volume: 0, // snapshot doesn't provide volume
-        })
+        };
+
+        if let Some(best_quote) = best_quote_from_quote(&quote) {
+            self.cache_best_quote(*symbol, best_quote)?;
+        }
+
+        Ok(quote)
     }
 
     /// Fetch bid/ask midpoint price for a symbol, in cents.

@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 use ibapi::client::blocking::Client;
 use ibapi::contracts::Contract;
 use ibapi::orders::order_builder::limit_order;
+#[cfg(not(feature = "strict-market-reject"))]
+use ibapi::orders::order_builder::market_order;
 use ibapi::orders::{Action as IbAction, CancelOrder, PlaceOrder};
 use log::{debug, info, warn};
 
@@ -32,8 +34,56 @@ pub enum OrderOutcome {
     Failed,
 }
 
+/// Encode a `BrokerOrder` into the `(limit_price_f64, qty_f64)` pair used by
+/// the quote-bounded fallback path.
+///
+/// Investigation note: `ibapi` 2.7 and 2.11 both expose true market orders via
+/// `order_builder::market_order` (`order_type = "MKT"`), and
+/// `OrderType::Market` does not require a limit price. Live IBKR market
+/// submissions therefore use true market orders. This encoder remains the
+/// bounded aggressive-limit helper for callers that explicitly choose a
+/// quote-bounded fallback.
+///
+/// # Errors
+/// - `BrokerError::NoQuoteForMarketOrder` if a market order is encoded without
+///   a cached NBBO quote.
+/// - `BrokerError::MarketOrderRejected` if `strict-market-reject` is enabled.
+pub fn encode_order(
+    order: &BrokerOrder,
+    best_quote: Option<&BestQuote>,
+) -> Result<(f64, f64), BrokerError> {
+    #[cfg(feature = "strict-market-reject")]
+    let _ = best_quote;
+
+    let quantity = order.quantity as f64;
+    match order.order_type {
+        #[cfg(feature = "strict-market-reject")]
+        BrokerOrderType::Market => Err(BrokerError::MarketOrderRejected),
+
+        #[cfg(not(feature = "strict-market-reject"))]
+        BrokerOrderType::Market => {
+            let quote = best_quote.ok_or_else(|| BrokerError::NoQuoteForMarketOrder {
+                symbol: order.symbol.to_string(),
+            })?;
+            const SLIP_BPS: f64 = 50.0;
+            let bps = SLIP_BPS / 10_000.0;
+            let price = match order.side {
+                BrokerSide::Buy => (quote.ask_cents as f64 / 100.0) * (1.0 + bps),
+                BrokerSide::Sell => (quote.bid_cents as f64 / 100.0) * (1.0 - bps),
+            };
+            Ok((price, quantity))
+        }
+
+        BrokerOrderType::Limit(price) => Ok((price.0 as f64 / 100.0, quantity)),
+    }
+}
+
 /// Submit an order via the IBKR API. Returns the broker-assigned OrderId.
-pub fn submit_order(client: &Client, order: &BrokerOrder) -> Result<OrderId, BrokerError> {
+pub fn submit_order(
+    client: &Client,
+    order: &BrokerOrder,
+    best_quote: Option<&BestQuote>,
+) -> Result<OrderId, BrokerError> {
     let contract = Contract::stock(order.symbol.as_str()).build();
 
     let ib_action = match order.side {
@@ -41,28 +91,37 @@ pub fn submit_order(client: &Client, order: &BrokerOrder) -> Result<OrderId, Bro
         BrokerSide::Sell => IbAction::Sell,
     };
 
-    let (limit_price, quantity) = match order.order_type {
-        BrokerOrderType::Limit(price) => (price.0 as f64 / 100.0, order.quantity as f64),
-        BrokerOrderType::Market => {
-            // Use a very high/low limit as a market-like order
-            let price = match order.side {
-                BrokerSide::Buy => 999_999.99,
-                BrokerSide::Sell => 0.01,
-            };
-            (price, order.quantity as f64)
+    let ib_order = match order.order_type {
+        #[cfg(feature = "strict-market-reject")]
+        BrokerOrderType::Market => return Err(BrokerError::MarketOrderRejected),
+
+        #[cfg(not(feature = "strict-market-reject"))]
+        BrokerOrderType::Market => market_order(ib_action, order.quantity as f64),
+
+        BrokerOrderType::Limit(_) => {
+            let (limit_price, quantity) = encode_order(order, best_quote)?;
+            limit_order(ib_action, quantity, limit_price)
         }
     };
-
-    let ib_order = limit_order(ib_action, quantity, limit_price);
 
     let order_id = client
         .next_valid_order_id()
         .map_err(|e| BrokerError::Order(format!("failed to get order id: {e}")))?;
 
-    info!(
-        "Submitting: {:?} {} {} @ ${:.2} (id={})",
-        order.side, order.quantity, order.symbol, limit_price, order_id
-    );
+    match order.order_type {
+        BrokerOrderType::Market => info!(
+            "Submitting: {:?} {} {} @ MKT (id={})",
+            order.side, order.quantity, order.symbol, order_id
+        ),
+        BrokerOrderType::Limit(price) => info!(
+            "Submitting: {:?} {} {} @ ${:.2} (id={})",
+            order.side,
+            order.quantity,
+            order.symbol,
+            price.0 as f64 / 100.0,
+            order_id
+        ),
+    }
 
     let _subscription = client
         .place_order(order_id, &contract, &ib_order)
