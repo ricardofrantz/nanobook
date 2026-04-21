@@ -30,8 +30,8 @@ fn capabilities() -> Vec<&'static str> {
         "optimize_min_variance",
         "optimize_max_sharpe",
         "optimize_risk_parity",
-        "optimize_cvar",
-        "optimize_cdar",
+        "inverse_cvar_weights",
+        "inverse_cdar_weights",
         "backtest_holdings",
     ]
 }
@@ -114,6 +114,10 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(optimize::py_optimize_max_sharpe, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::optimize_risk_parity, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::py_optimize_risk_parity, m)?)?;
+    m.add_function(wrap_pyfunction!(optimize::inverse_cvar_weights, m)?)?;
+    m.add_function(wrap_pyfunction!(optimize::py_inverse_cvar_weights, m)?)?;
+    m.add_function(wrap_pyfunction!(optimize::inverse_cdar_weights, m)?)?;
+    m.add_function(wrap_pyfunction!(optimize::py_inverse_cdar_weights, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::optimize_cvar, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::py_optimize_cvar, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::optimize_cdar, m)?)?;

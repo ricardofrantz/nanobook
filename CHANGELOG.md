@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Threaded client order IDs into IBKR `orderRef` and Binance `newClientOrderId`
   - Added optional `client_order_id` arguments to Python broker order submission
 
+### Deprecated
+
+- **Optimizer naming**:
+  - Renamed `optimize_cvar` / `optimize_cdar` to `inverse_cvar_weights` / `inverse_cdar_weights`
+  - Old names remain as deprecated shims for one minor release
+  - Migration: `sed -i 's/optimize_cvar/inverse_cvar_weights/g; s/optimize_cdar/inverse_cdar_weights/g' <your_files>`
+
 ## [0.9.2] - 2026-02-12
 
 ### Added

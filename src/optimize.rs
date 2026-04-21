@@ -135,8 +135,14 @@ pub fn optimize_risk_parity(returns: &[Vec<f64>]) -> Vec<f64> {
     normalize_long_only(w)
 }
 
-/// Long-only CVaR-minimization proxy using inverse tail-loss weighting.
-pub fn optimize_cvar(returns: &[Vec<f64>], alpha: f64) -> Vec<f64> {
+/// Compute long-only weights inversely proportional to each asset's per-asset
+/// CVaR.
+///
+/// This is a heuristic: it does NOT minimize portfolio-level CVaR because
+/// cross-asset covariance is ignored. For true LP-based minimization, use
+/// Python's `cvxpy` with the Rockafellar-Uryasev formulation, or wait for the
+/// `cvar-lp` feature flag in nanobook >= 0.11.
+pub fn inverse_cvar_weights(returns: &[Vec<f64>], alpha: f64) -> Vec<f64> {
     let Some((_rows, cols)) = matrix_shape(returns) else {
         return Vec::new();
     };
@@ -156,8 +162,12 @@ pub fn optimize_cvar(returns: &[Vec<f64>], alpha: f64) -> Vec<f64> {
     inverse_risk_weights(&risks)
 }
 
-/// Long-only CDaR-minimization proxy using inverse drawdown-tail weighting.
-pub fn optimize_cdar(returns: &[Vec<f64>], alpha: f64) -> Vec<f64> {
+/// Compute long-only weights inversely proportional to each asset's per-asset
+/// Conditional Drawdown at Risk (CDaR).
+///
+/// Same heuristic semantics as [`inverse_cvar_weights`]: this does NOT
+/// minimize portfolio-level CDaR because cross-asset covariance is ignored.
+pub fn inverse_cdar_weights(returns: &[Vec<f64>], alpha: f64) -> Vec<f64> {
     let Some((_rows, cols)) = matrix_shape(returns) else {
         return Vec::new();
     };
@@ -175,6 +185,20 @@ pub fn optimize_cdar(returns: &[Vec<f64>], alpha: f64) -> Vec<f64> {
         .collect();
 
     inverse_risk_weights(&risks)
+}
+
+/// Deprecated alias for [`inverse_cvar_weights`]; removed in v0.11.
+#[rustfmt::skip]
+#[deprecated(since = "0.9.3", note = "use `inverse_cvar_weights`; this is a heuristic, not a CVaR LP solver")]
+pub fn optimize_cvar(returns: &[Vec<f64>], alpha: f64) -> Vec<f64> {
+    inverse_cvar_weights(returns, alpha)
+}
+
+/// Deprecated alias for [`inverse_cdar_weights`]; removed in v0.11.
+#[rustfmt::skip]
+#[deprecated(since = "0.9.3", note = "use `inverse_cdar_weights`; this is a heuristic, not a CDaR LP solver")]
+pub fn optimize_cdar(returns: &[Vec<f64>], alpha: f64) -> Vec<f64> {
+    inverse_cdar_weights(returns, alpha)
 }
 
 fn matrix_shape(matrix: &[Vec<f64>]) -> Option<(usize, usize)> {
@@ -446,17 +470,26 @@ mod tests {
     }
 
     #[test]
-    fn cvar_weights_are_valid() {
+    fn inverse_cvar_weights_are_valid() {
         let r = sample_returns();
-        let w = optimize_cvar(&r, 0.95);
+        let w = inverse_cvar_weights(&r, 0.95);
         assert_valid_weights(&w, 3);
     }
 
     #[test]
-    fn cdar_weights_are_valid() {
+    fn inverse_cdar_weights_are_valid() {
         let r = sample_returns();
-        let w = optimize_cdar(&r, 0.95);
+        let w = inverse_cdar_weights(&r, 0.95);
         assert_valid_weights(&w, 3);
+    }
+
+    #[allow(deprecated)]
+    #[test]
+    fn deprecated_cvar_cdar_shims_delegate() {
+        let r = sample_returns();
+
+        assert_eq!(optimize_cvar(&r, 0.95), inverse_cvar_weights(&r, 0.95));
+        assert_eq!(optimize_cdar(&r, 0.95), inverse_cdar_weights(&r, 0.95));
     }
 
     #[test]
@@ -479,8 +512,8 @@ mod tests {
         let minvar = optimize_min_variance(&r);
         let maxsh = optimize_max_sharpe(&r, 0.0);
         let rp = optimize_risk_parity(&r);
-        let cvar = optimize_cvar(&r, 0.95);
-        let cdar = optimize_cdar(&r, 0.95);
+        let cvar = inverse_cvar_weights(&r, 0.95);
+        let cdar = inverse_cdar_weights(&r, 0.95);
 
         assert_close(
             &minvar,

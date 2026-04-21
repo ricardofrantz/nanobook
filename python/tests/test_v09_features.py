@@ -28,8 +28,8 @@ def test_capabilities_surface():
         "optimize_min_variance",
         "optimize_max_sharpe",
         "optimize_risk_parity",
-        "optimize_cvar",
-        "optimize_cdar",
+        "inverse_cvar_weights",
+        "inverse_cdar_weights",
         "backtest_holdings",
     }
     assert expected.issubset(caps)
@@ -49,8 +49,8 @@ def test_optimizers_return_valid_weights():
     minvar = nanobook.py_optimize_min_variance(r, symbols)
     maxsh = nanobook.py_optimize_max_sharpe(r, symbols, risk_free=0.0)
     rp = nanobook.py_optimize_risk_parity(r, symbols)
-    cvar = nanobook.py_optimize_cvar(r, symbols, alpha=0.95)
-    cdar = nanobook.py_optimize_cdar(r, symbols, alpha=0.95)
+    cvar = nanobook.py_inverse_cvar_weights(r, symbols, alpha=0.95)
+    cdar = nanobook.py_inverse_cdar_weights(r, symbols, alpha=0.95)
 
     _assert_long_only_weights(minvar, symbols)
     _assert_long_only_weights(maxsh, symbols)
@@ -147,9 +147,25 @@ def test_clean_aliases_equivalent():
     assert nanobook.optimize_risk_parity(r, symbols) == nanobook.py_optimize_risk_parity(
         r, symbols
     )
-    assert nanobook.optimize_cvar(r, symbols, alpha=0.95) == nanobook.py_optimize_cvar(
+    assert nanobook.inverse_cvar_weights(
         r, symbols, alpha=0.95
-    )
-    assert nanobook.optimize_cdar(r, symbols, alpha=0.95) == nanobook.py_optimize_cdar(
+    ) == nanobook.py_inverse_cvar_weights(r, symbols, alpha=0.95)
+    assert nanobook.inverse_cdar_weights(
         r, symbols, alpha=0.95
-    )
+    ) == nanobook.py_inverse_cdar_weights(r, symbols, alpha=0.95)
+
+
+def test_deprecated_optimizer_aliases_warn_once():
+    import pytest
+
+    symbols = ["AAPL", "MSFT", "NVDA"]
+    r = _sample_returns_matrix()
+
+    with pytest.warns(DeprecationWarning, match="inverse_cvar_weights"):
+        assert nanobook.optimize_cvar(r, symbols, alpha=0.95) == nanobook.inverse_cvar_weights(
+            r, symbols, alpha=0.95
+        )
+    with pytest.warns(DeprecationWarning, match="inverse_cdar_weights"):
+        assert nanobook.optimize_cdar(r, symbols, alpha=0.95) == nanobook.inverse_cdar_weights(
+            r, symbols, alpha=0.95
+        )
