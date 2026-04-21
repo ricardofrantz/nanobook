@@ -7,6 +7,33 @@
 
 use crate::{Order, OrderBook, Price, Quantity, Side, Trade};
 
+/// Self-trade prevention (STP) policy applied when the incoming and
+/// resting orders share the same [`OrderOwner`](crate::order::OrderOwner).
+///
+/// STP is only consulted when BOTH sides set a non-`None` owner AND the
+/// owners compare equal. If either side is `None`, matching proceeds
+/// normally regardless of policy.
+///
+/// References: CME Rule 536 (self-match prevention); NASDAQ OUCH 4.x STP spec.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum StpPolicy {
+    /// No self-trade prevention: same-owner orders cross like any other.
+    /// This is the default to preserve pre-STP behaviour.
+    #[default]
+    Off,
+    /// Cancel the incoming order's remainder; leave resting intact.
+    CancelNewest,
+    /// Cancel the resting order; incoming order re-attempts the match
+    /// against the next available counter-order.
+    CancelOldest,
+    /// Cancel whichever order has the smaller remaining quantity and
+    /// leave the larger order untouched. No trade is generated. If both
+    /// have equal remaining, the resting order is cancelled and the
+    /// incoming order continues matching against the next resting order.
+    DecrementAndCancel,
+}
+
 /// Result of matching an incoming order against the book.
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -15,6 +42,10 @@ pub struct MatchResult {
     pub trades: Vec<Trade>,
     /// Quantity that could not be filled
     pub remaining_quantity: Quantity,
+    /// True if self-trade prevention cancelled (part of) the incoming
+    /// order. When true, callers must treat any remainder as cancelled
+    /// regardless of TIF: a GTC remainder must NOT rest on the book.
+    pub stp_cancelled: bool,
 }
 
 impl MatchResult {
@@ -49,6 +80,9 @@ impl OrderBook {
 
     /// Match an incoming order against the book.
     ///
+    /// Equivalent to [`Self::match_order_with_policy`] with
+    /// [`StpPolicy::Off`]; same-owner orders will cross.
+    ///
     /// This is the core matching algorithm:
     /// 1. Find the best price on the opposite side
     /// 2. If prices cross, fill against resting orders (FIFO)
@@ -59,9 +93,21 @@ impl OrderBook {
     /// resting orders in the book. The incoming order is NOT added to
     /// the book — the caller decides whether to add it based on TIF.
     pub fn match_order(&mut self, incoming: &mut Order) -> MatchResult {
+        self.match_order_with_policy(incoming, StpPolicy::Off)
+    }
+
+    /// Match an incoming order against the book under a self-trade
+    /// prevention policy. See [`StpPolicy`] for the per-policy semantics
+    /// and [`Self::match_order`] for the core algorithm.
+    pub fn match_order_with_policy(
+        &mut self,
+        incoming: &mut Order,
+        policy: StpPolicy,
+    ) -> MatchResult {
         let mut result = MatchResult {
             trades: Vec::new(),
             remaining_quantity: incoming.remaining_quantity,
+            stp_cancelled: false,
         };
 
         // Match until no more crosses or order is filled
@@ -79,7 +125,12 @@ impl OrderBook {
             }
 
             // Match against orders at the best price level
-            self.match_at_price(incoming, best_price, &mut result);
+            self.match_at_price(incoming, best_price, policy, &mut result);
+
+            // If STP cancelled the incoming order, stop matching entirely.
+            if result.stp_cancelled {
+                break;
+            }
         }
 
         result.remaining_quantity = incoming.remaining_quantity;
@@ -87,7 +138,13 @@ impl OrderBook {
     }
 
     /// Match an incoming order against all orders at a specific price level.
-    fn match_at_price(&mut self, incoming: &mut Order, price: Price, result: &mut MatchResult) {
+    fn match_at_price(
+        &mut self,
+        incoming: &mut Order,
+        price: Price,
+        policy: StpPolicy,
+        result: &mut MatchResult,
+    ) {
         // Process orders at this price level until exhausted or incoming filled
         while incoming.remaining_quantity > 0 {
             // Get the front order at this price (skips tombstones)
@@ -97,9 +154,9 @@ impl OrderBook {
                 _ => break, // Level exhausted or only tombstones left
             };
 
-            // Get the resting order's remaining quantity
-            let resting_remaining = match self.get_order(resting_id) {
-                Some(o) => o.remaining_quantity,
+            // Get the resting order's remaining quantity and owner
+            let (resting_remaining, resting_owner) = match self.get_order(resting_id) {
+                Some(o) => (o.remaining_quantity, o.owner),
                 None => {
                     // Orphaned order ID in level — shouldn't happen, but handle gracefully
                     self.opposite_side_mut(incoming.side)
@@ -108,6 +165,42 @@ impl OrderBook {
                     continue;
                 }
             };
+
+            // Self-trade prevention: only kicks in when both sides set a
+            // non-None owner AND they compare equal AND policy != Off.
+            let stp_conflict = matches!(
+                (incoming.owner, resting_owner),
+                (Some(i), Some(r)) if i == r && policy != StpPolicy::Off
+            );
+
+            if stp_conflict {
+                match policy {
+                    StpPolicy::Off => unreachable!(),
+                    StpPolicy::CancelNewest => {
+                        // Cancel incoming remainder; leave resting intact.
+                        incoming.stp_decrement(incoming.remaining_quantity);
+                        result.stp_cancelled = true;
+                        return;
+                    }
+                    StpPolicy::CancelOldest => {
+                        // Cancel resting; incoming continues matching.
+                        self.cancel_order(resting_id);
+                        continue;
+                    }
+                    StpPolicy::DecrementAndCancel => {
+                        if incoming.remaining_quantity < resting_remaining {
+                            // Smaller = incoming: cancel incoming, leave resting.
+                            incoming.stp_decrement(incoming.remaining_quantity);
+                            result.stp_cancelled = true;
+                            return;
+                        } else {
+                            // Smaller (or equal) = resting: cancel resting, continue.
+                            self.cancel_order(resting_id);
+                            continue;
+                        }
+                    }
+                }
+            }
 
             // Calculate fill quantity
             let fill_qty = incoming.remaining_quantity.min(resting_remaining);

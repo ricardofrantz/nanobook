@@ -2,6 +2,21 @@
 
 use crate::{OrderId, Price, Quantity, Side, TimeInForce, Timestamp};
 
+/// Opaque identifier for the party that submitted an order.
+///
+/// Used by the matching engine for self-trade prevention (STP). Values
+/// are caller-assigned and opaque — the engine never interprets them,
+/// only compares them for equality. Any `u32` is a valid owner; callers
+/// can map it to a user id, account id, or desk id as they see fit.
+///
+/// An order with `owner = None` opts out of STP entirely: it will match
+/// against any counterparty regardless of policy.
+///
+/// See [`StpPolicy`](crate::matching::StpPolicy).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct OrderOwner(pub u32);
+
 /// Status of an order in its lifecycle.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -53,6 +68,8 @@ pub struct Order {
     pub time_in_force: TimeInForce,
     /// Current lifecycle status
     pub status: OrderStatus,
+    /// Owner for self-trade prevention; `None` opts out of STP.
+    pub owner: Option<OrderOwner>,
     /// Position index within the price level queue (for O(1) cancel)
     pub(crate) position_in_level: usize,
 }
@@ -80,7 +97,41 @@ impl Order {
             timestamp,
             time_in_force,
             status: OrderStatus::New,
+            owner: None,
             position_in_level: 0,
+        }
+    }
+
+    /// Attach an owner for self-trade prevention, consuming `self`.
+    ///
+    /// Convenience builder for the `Order::new(..).with_owner(OrderOwner(42))`
+    /// pattern.
+    #[inline]
+    pub fn with_owner(mut self, owner: OrderOwner) -> Self {
+        self.owner = Some(owner);
+        self
+    }
+
+    /// Decrement `remaining_quantity` without recording a fill.
+    ///
+    /// Used by the matching engine when self-trade prevention causes a
+    /// portion of the order to be cancelled without a trade being
+    /// generated (see [`crate::matching::StpPolicy::DecrementAndCancel`]).
+    /// Sets status to `Cancelled` when the remainder reaches zero.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `quantity > remaining_quantity`.
+    pub(crate) fn stp_decrement(&mut self, quantity: Quantity) {
+        assert!(
+            quantity <= self.remaining_quantity,
+            "stp_decrement {} exceeds remaining {}",
+            quantity,
+            self.remaining_quantity
+        );
+        self.remaining_quantity -= quantity;
+        if self.remaining_quantity == 0 {
+            self.status = OrderStatus::Cancelled;
         }
     }
 
