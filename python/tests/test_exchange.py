@@ -159,7 +159,21 @@ def test_trailing_stop_percentage():
     assert result.status == "Pending"
 
 
-def test_trailing_stop_atr():
+def test_trailing_stop_sma_abs_change():
+    """Canonical v0.10 name: SmaAbsChange (formerly misnamed Atr)."""
+    ex = nanobook.Exchange()
+    result = ex.submit_trailing_stop_market(
+        "sell", 9500, 100, "sma_abs_change", 2.0, atr_period=14
+    )
+    assert result.status == "Pending"
+
+
+def test_trailing_stop_legacy_atr_alias():
+    """The legacy 'atr' string still works as a deprecated alias in v0.10.
+
+    The underlying semantics are identical to 'sma_abs_change' — neither
+    is Wilder's ATR. See `nanobook.TrailMethod` docs.
+    """
     ex = nanobook.Exchange()
     result = ex.submit_trailing_stop_market(
         "sell", 9500, 100, "atr", 2.0, atr_period=14

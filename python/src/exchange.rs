@@ -148,9 +148,13 @@ impl PyExchange {
     ///     side: "buy" or "sell"
     ///     initial_stop_price: Starting stop price in cents
     ///     quantity: Number of shares
-    ///     trail_type: "fixed", "percentage", or "atr"
-    ///     trail_value: Offset in cents (fixed), fraction (percentage), or multiplier (atr)
-    ///     atr_period: ATR lookback period (only for trail_type="atr")
+    ///     trail_type: "fixed", "percentage", or "sma_abs_change".
+    ///         The legacy value "atr" is accepted as a deprecated alias
+    ///         for "sma_abs_change".
+    ///     trail_value: Offset in cents (fixed), fraction (percentage),
+    ///         or multiplier (sma_abs_change).
+    ///     atr_period: Lookback window for trail_type="sma_abs_change".
+    ///         The argument keeps the legacy name for continuity.
     #[pyo3(signature = (side, initial_stop_price, quantity, trail_type, trail_value, atr_period=None))]
     fn submit_trailing_stop_market(
         &mut self,
@@ -393,6 +397,21 @@ impl PyBookSnapshot {
 }
 
 /// Parse trail method from Python arguments.
+///
+/// Accepted `trail_type` values:
+/// - `"fixed"`: trail by a fixed offset in cents.
+/// - `"percentage"` / `"pct"`: trail by a fraction of the watermark.
+/// - `"sma_abs_change"`: trail by `trail_value × mean(|Δ price|)` over
+///   the last `atr_period` trade-price changes. This is NOT Wilder's
+///   ATR (the stop module has no OHLC data); it is the simple moving
+///   average of absolute trade-price changes.
+/// - `"atr"`: deprecated alias for `"sma_abs_change"`, accepted for
+///   backward compatibility with nanobook ≤ 0.9.3. Will be removed in
+///   a future release.
+///
+/// The `atr_period` argument keeps its name for continuity; it is the
+/// lookback window size and applies equally to `"sma_abs_change"` and
+/// the legacy `"atr"` alias.
 fn parse_trail_method(
     trail_type: &str,
     trail_value: f64,
@@ -401,17 +420,21 @@ fn parse_trail_method(
     match trail_type.to_ascii_lowercase().as_str() {
         "fixed" => Ok(TrailMethod::Fixed(trail_value as i64)),
         "percentage" | "pct" => Ok(TrailMethod::Percentage(trail_value)),
-        "atr" => {
+        "sma_abs_change" | "atr" => {
             let period = atr_period.ok_or_else(|| {
-                PyValueError::new_err("atr_period is required when trail_type='atr'")
+                PyValueError::new_err(
+                    "atr_period is required when trail_type='sma_abs_change' \
+                     (or the deprecated alias 'atr')",
+                )
             })?;
-            Ok(TrailMethod::Atr {
+            Ok(TrailMethod::SmaAbsChange {
                 multiplier: trail_value,
                 period,
             })
         }
         _ => Err(PyValueError::new_err(format!(
-            "Invalid trail_type '{trail_type}'. Use 'fixed', 'percentage', or 'atr'."
+            "Invalid trail_type '{trail_type}'. \
+             Use 'fixed', 'percentage', or 'sma_abs_change'."
         ))),
     }
 }

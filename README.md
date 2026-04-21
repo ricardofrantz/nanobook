@@ -492,9 +492,12 @@ exchange.submit_trailing_stop_market(Side::Sell, Price(98_00), 100, TrailMethod:
 // Percentage: trail by 5% from peak
 exchange.submit_trailing_stop_market(Side::Sell, Price(95_00), 100, TrailMethod::Percentage(0.05));
 
-// ATR-based: adaptive trailing using 2x ATR over 14-period window
+// Adaptive trail: 2x simple moving average of |Δ price| over the last
+// 14 trades. NOT Wilder's ATR (no OHLC available at the stop module);
+// for true Wilder ATR, pre-compute via `indicators::atr` on bar data
+// and pass the result as `TrailMethod::Fixed(offset_cents)`.
 exchange.submit_trailing_stop_market(Side::Sell, Price(95_00), 100,
-    TrailMethod::Atr { multiplier: 2.0, period: 14 });
+    TrailMethod::SmaAbsChange { multiplier: 2.0, period: 14 });
 ```
 
 Trailing stop-limit variant: `submit_trailing_stop_limit()` — same parameters plus `limit_price` and `TimeInForce`.
