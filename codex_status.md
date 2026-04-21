@@ -255,6 +255,137 @@ PR-2 builds directly on the broker types touched here and should read
   - `BinanceClient::submit_order` now has eight arguments and uses a narrow `#[allow(clippy::too_many_arguments)]`; a future cleanup could introduce a request struct if this API grows again.
 - Self-audit: The main risk is the rebalancer compatibility choice. The plan says to derive the id from `target.metadata.id`, but existing target files had no metadata field. I added `metadata.id` as optional and fall back to the target timestamp to preserve existing configs while still producing stable IDs across retries. Review should check whether timestamp fallback is acceptable or whether P0 should require an explicit schedule id. The broker path itself is straightforward: `ClientOrderId` derives a 32-char SHA-256 prefix, IBKR writes it to `order_ref`, Binance writes it to `newClientOrderId`, and the mock records it for regression tests.
 
-### Review of PR-2 (commit 176a5d0dc8407eacfa82a55408a63a4d431bc237) — PENDING
+### Review of PR-2 (commit 176a5d0dc8407eacfa82a55408a63a4d431bc237) — APPROVED
 
-Claude fills this in during review session.
+Reviewer: Claude (Opus 4.7), session 2026-04-21.
+
+**Verdict: APPROVED.** The `ClientOrderId` type is correctly defined,
+deterministically derived, threaded through both IBKR `orderRef` and
+Binance `newClientOrderId`, validated at the Python boundary, and
+tested in both the broker crate and the rebalancer crate. The
+`target.metadata.id` scope with timestamp fallback preserves idempotency
+across crash-retry.
+
+**Review commands re-run independently (all green):**
+
+- `rg -nU 'pub struct ClientOrderId' broker/src/types.rs` → 1 match (line 53) ✓
+- `rg -n 'pub fn derive\(scope: &str' broker/src/types.rs` → 1 match (line 56) ✓
+- `rg -n 'order_ref|orderRef' broker/src/ibkr/orders.rs` → 2 matches (lines 108, 161) ✓
+- `rg -n 'newClientOrderId' broker/src/binance/client.rs` → 2 matches (lines 143, 157) ✓
+- `rg -n 'ClientOrderId::derive' rebalancer/src/execution.rs` → 1 match (line 73) ✓
+- `rg -n 'client_order_id' python/nanobook.pyi` → 2 matches ✓
+- `git diff 55e6bb9..176a5d0 -- Cargo.lock | grep -E '^\+name = '` → no new lockfile entries ✓
+- `cargo test --package nanobook-broker --test broker_idempotency` → 5/5 PASS
+- `cargo test --package nanobook-rebalancer --test idempotency` → 2/2 PASS
+- `cargo test --workspace --all-features` → PASS
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` → clean
+- `cargo fmt --all -- --check` → clean
+- `git show --stat 176a5d0` → 15 files, all within scope or documented deviations.
+
+**Idempotency semantics — audited and correct.**
+
+The central design call was whether `TargetSpec::idempotency_scope()`
+preserves crash-retry idempotency when `metadata.id` is absent. It does:
+
+- `TargetSpec::timestamp` (`rebalancer/src/target.rs:13`) is a user-supplied
+  `DateTime<Utc>` parsed from `target.json`, NOT `SystemTime::now()`.
+- If the CLI crashes mid-rebalance and the user re-runs against the same
+  `target.json`, the file's `timestamp` is stable → `idempotency_scope`
+  returns the same RFC3339 string → `ClientOrderId::derive` returns the
+  same hex digest → broker-side dedup rejects the duplicate.
+- If the user regenerates `target.json` with a new timestamp, they
+  correctly get new `ClientOrderId`s — which is the right semantics for
+  a new decision batch, not a retry.
+
+The canonical form inside `ClientOrderId::derive` uses null separators
+(`scope || \0 || symbol || \0 || side || \0 || qty_le_bytes`), which
+prevents prefix-collision (e.g., `("ab", "c")` vs `("a", "bc")`). This
+is the right construction.
+
+32-char hex digest fits both Binance's 36-char `newClientOrderId` limit
+and IBKR's 40-char `orderRef` limit. Python-supplied strings are routed
+through `ClientOrderId::new` (`python/src/broker.rs:150-153`), which
+enforces 1..=36 ASCII-safe chars and raises `PyValueError` otherwise.
+
+**Deviations accepted:**
+
+1. **PR-2 started while PR-1 approval was being recorded.** Ricardo
+   explicitly authorized. Accepted.
+
+2. **`sha2` moved from optional Binance dep to normal broker dep.** The
+   plan said "Add `sha2 = "0.10"` to `broker/Cargo.toml` dependencies"
+   — which Codex did — but also removed it from the `binance` feature
+   list because `ClientOrderId::derive` is always available (not feature-
+   gated). Correct. Cargo.lock unchanged (sha2 was already a transitive
+   dependency). Accepted.
+
+3. **`rebalancer/src/broker.rs` touched.** The `BrokerGateway` trait
+   needed to accept `Option<&ClientOrderId>` so the IBKR `orderRef` is
+   actually set at submission time. Legitimate wiring; the contract's
+   reference to `rebalancer/src/execution.rs` implied this trait
+   adjustment. Accepted.
+
+4. **`rebalancer/src/target.rs` touched: added `metadata.id` and
+   timestamp fallback.** The contract said "If `target.metadata.id`
+   is not already in the TargetSpec, add it in this PR — it's a
+   minimal, forward-compatible config field." Codex did this with
+   `#[serde(default)]` so existing target.json files remain parseable;
+   the timestamp fallback preserves idempotency when `metadata.id` is
+   empty. Sound. Accepted.
+
+5. **Python `client_order_id` validation routed through
+   `ClientOrderId::new`.** Enforces charset + length. Matches the
+   broker-side expectations. Accepted.
+
+6. **Commit message body contains literal `\n` sequences** (line 3 of
+   `176a5d0` body). This is a real cosmetic defect: `git log --oneline
+   -B` shows the body as one long paragraph. Codex correctly refused to
+   amend per §C.10. Not a blocker. Ricardo may `git rebase -i` locally
+   to fix the commit message before v0.9.3 tagging if cosmetic polish
+   matters. I am NOT requesting a rebuttal because (a) §C.10 forbids
+   amending and (b) the content is semantically faithful to the
+   template. Flag for the release-prep PR (PR-6).
+
+**Non-blocking observations (follow-up candidates):**
+
+1. **Tests do not verify that `side` or `qty` changes produce different
+   IDs.** The canonical form includes them, so correctness is implied
+   by the construction, but explicit proptest coverage would strengthen
+   the contract. Add to PR-31 release-prep or a dedicated test pass.
+
+2. **`BinanceClient::submit_order` now takes 8 arguments** with a narrow
+   `#[allow(clippy::too_many_arguments)]`. Codex's TODO is correct;
+   consider a request-struct refactor when the Binance path grows
+   further.
+
+3. **`derive_client_order_id` lives in the rebalancer**
+   (`rebalancer/src/execution.rs:64-79`), not in `broker`. This is
+   the right layering — the rebalancer is the one that knows about
+   `RebalanceOrder` and `Action`. Noting for PR-14 (STP policy) which
+   may also need to thread `OrderOwner` through this call site.
+
+4. **`ClientOrderId` only records 16 of 32 SHA-256 bytes.** 128 bits of
+   entropy is more than enough for order-level collision resistance
+   within a single trading session (birthday collision at ~2^64 orders).
+   No concern.
+
+5. **PR-1 follow-up TODOs still open:** `src/stats.rs:173`
+   false-positive TODO; dead-error-path in `orders::submit_order`
+   Market branch; H3 float-cents truncations. None addressed in PR-2
+   and none in scope. Carried forward.
+
+**Self-audit reconciliation.** Codex's self-audit worried that the
+timestamp fallback might not preserve idempotency. It does, as explained
+above — the timestamp is a user-supplied field, not a live clock. The
+design is correct and matches the plan's intent. Codex was appropriately
+cautious but the worry was unfounded.
+
+**Next action:** Codex may proceed to PR-3
+(`refactor(optimize): rename CVaR/CDaR to honest names`). PR-3 is
+independent of PR-1 and PR-2; it touches `src/optimize.rs` and the
+Python bindings. No coordination with PR-1 or PR-2 required.
+
+**Plan grep-pattern tightening note:** the PR-1 false positive
+(`rg '999_999|999,999' src/` matching `0.999_999_999_999_809_93`) was
+resolved in the plan by anchoring to `999_999\.99|999,999\.99`. Future
+PRs inherit this convention.
