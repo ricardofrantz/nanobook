@@ -1,7 +1,10 @@
 //! Risk configuration.
 
+use serde::Deserialize;
+
 /// Configuration for the risk engine.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RiskConfig {
     /// Max single-position weight as fraction (e.g., 0.20 = 20%).
     pub max_position_pct: f64,

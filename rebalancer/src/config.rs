@@ -8,6 +8,7 @@ use crate::error::{Error, Result};
 
 /// Top-level configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub connection: ConnectionConfig,
     pub account: AccountConfig,
@@ -18,6 +19,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectionConfig {
     pub host: String,
     pub port: u16,
@@ -31,6 +33,7 @@ fn default_timeout() -> u64 {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AccountConfig {
     pub id: String,
     #[serde(rename = "type")]
@@ -38,13 +41,14 @@ pub struct AccountConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase", deny_unknown_fields)]
 pub enum AccountType {
     Cash,
     Margin,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionConfig {
     #[serde(default = "default_interval")]
     pub order_interval_ms: u64,
@@ -70,6 +74,7 @@ fn default_max_orders() -> usize {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RiskConfig {
     #[serde(default = "default_max_position")]
     pub max_position_pct: f64,
@@ -118,6 +123,7 @@ fn default_max_short() -> f64 {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CostConfig {
     #[serde(default = "default_commission")]
     pub commission_per_share: f64,
@@ -138,6 +144,7 @@ fn default_slippage() -> u32 {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LoggingConfig {
     #[serde(default = "default_log_dir")]
     pub dir: String,

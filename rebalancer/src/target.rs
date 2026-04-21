@@ -9,6 +9,7 @@ use crate::error::{Error, Result};
 
 /// A target portfolio specification from the optimizer/bot.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TargetSpec {
     pub timestamp: DateTime<Utc>,
     #[serde(default)]
@@ -20,6 +21,7 @@ pub struct TargetSpec {
 
 /// User-supplied target-schedule metadata.
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TargetMetadata {
     #[serde(default)]
     pub id: String,
@@ -27,6 +29,7 @@ pub struct TargetMetadata {
 
 /// A single target position: symbol + weight.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TargetPosition {
     pub symbol: String,
     pub weight: f64,
@@ -34,6 +37,7 @@ pub struct TargetPosition {
 
 /// Optional per-run constraint overrides.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Constraints {
     pub max_position_pct: Option<f64>,
     pub max_leverage: Option<f64>,
