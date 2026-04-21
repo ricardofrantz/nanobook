@@ -603,6 +603,148 @@ required.
 - TODOs discovered (out of scope): none.
 - Self-audit: The core behavior is intended to be unchanged for normal inputs; the only numerical behavior that can change is when callers pass `q` larger than the available return history. Previously, the final forecast skipped out-of-range lags behind `if t + 1 >= j` while still allocating beta weights and omega using the larger `q`; now `q` saturates to available history so the final loop can be unconditional and safe. This is consistent with the plan's "length precondition" requirement but reviewers should check whether the large-`q` edge behavior is acceptable.
 
-### Review of PR-4 (commit 1a486ba85108805a0b51baacf6efa57ef5b8c59e) — PENDING
+### Review of PR-4 (commit 1a486ba85108805a0b51baacf6efa57ef5b8c59e) — APPROVED
 
-Claude fills this in during review session.
+Reviewer: Claude (Opus 4.7), session 2026-04-21.
+
+**Verdict: APPROVED.** `garch_forecast` is renamed to
+`garch_ewma_forecast` with explicit "fixed parameters" documentation.
+The vacuous `if t + 1 >= j` guard is removed; `q` is saturated to
+`min(q, returns.len())` so both omega calculation and final forecast
+loop agree on the effective lag count. Deprecated shim delegates.
+Python compat wrapper emits call-time `DeprecationWarning` via the
+same `_warn_deprecated_once` pattern as PR-3.
+
+**Review commands re-run independently (all green):**
+
+- `rg -n 'pub fn garch_ewma_forecast' src/garch.rs` → 1 match (line 21) ✓
+- `rg -n 'alpha = 0\.08' src/garch.rs` → 2 matches (module doc line 5, code line 45) ✓
+- `rg -n 'beta = 0\.90' src/garch.rs` → 2 matches (module doc line 5, code line 46) ✓
+- `rg -nU 'if t \+ 1 >= j' src/garch.rs` → no hits (vacuous guard removed) ✓
+- `rg -n 'debug_assert!' src/garch.rs` → 1 match (line 88, length precondition) ✓
+- `cargo test --package nanobook --lib garch` → 6/6 PASS, including
+  `ewma_forecast_short_input_is_bounded`,
+  `deprecated_garch_forecast_shim_delegates`,
+  `invalid_input_falls_back`,
+  `ewma_forecast_handles_constant_mean_mode`.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` → clean
+- `git show --stat 1a486ba` → 9 files, scope all legitimate (see audit below).
+
+**Scope audit** (9 files, +121/-39):
+
+| File | Purpose | In-scope? |
+|---|---|---|
+| `src/garch.rs` | Core rename + vacuous guard removal + saturation | ✓ contract |
+| `CHANGELOG.md` | Release note | ✓ contract |
+| `README.md` | Example references | ✓ "if referenced" in plan |
+| `python/src/garch.rs` | PyO3 binding rename + compat shims | ✓ contract |
+| `python/src/lib.rs` | `wrap_pyfunction!` registrations (new + compat) | ✓ wiring |
+| `python/nanobook/__init__.py` | Python wrapper + `_warn_deprecated_once` | ✓ contract |
+| `python/nanobook.pyi` | Type stubs for new + old names | ✓ contract |
+| `python/tests/test_v09_features.py` | Updated to call new name | ✓ test maintenance |
+| `python/tests/test_v09_parity.py` | Updated to call new name | ✓ test maintenance |
+
+No out-of-scope edits.
+
+**The q-saturation behavior change — audited and correct.**
+
+Codex's self-audit flagged this as the main review risk. I re-verified:
+
+- `src/garch.rs:27-28`: `let p = p.clamp(1, 8).min(returns.len());` and
+  same for `q`. Both are now bounded above by available history.
+- Before PR-4: user-specified `q=8` against `returns.len()=3` would
+  compute `omega = (1 - α_sum(8) - β_sum(8)) * var0` using all 8 beta
+  weights, but the final forecast loop's `if t + 1 >= j` guard skipped
+  lags for `j > 3`. The math was inconsistent: omega reflected the
+  mean-reversion pull of 8 weights while the forecast only applied 3.
+- After PR-4: `q` saturates to 3, so `omega = (1 - α_sum(3) -
+  β_sum(3)) * var0` and the forecast loop applies all 3 weights. Math
+  is self-consistent.
+- The `debug_assert!(t + 1 >= q, ...)` at line 88 is a tautology given
+  the clamping (`q ≤ returns.len() = t ⟹ t + 1 > q`). It's
+  documentation of the precondition, not a runtime check. Harmless.
+
+This is a numerical behavior change for `q > returns.len()` callers,
+but the new behavior is MORE correct, not less. The plan said "errors
+or saturates"; Codex chose saturate — explicitly permitted. Acceptable.
+
+**Doc compliance.** `src/garch.rs:1-11` module header states:
+
+> Despite the historical name `garch_forecast`, this is NOT a
+> maximum-likelihood-fitted GARCH(p,q). The recursion uses fixed
+> parameters alpha = 0.08, beta = 0.90, and omega derived from the
+> sample variance.
+
+And points at the Python `arch` package + `garch-mle` feature flag for
+v0.11. Matches the plan's required disclosure.
+
+**Deprecation attribute.** `#[deprecated(since = "0.9.3", note = "use
+garch_ewma_forecast; parameters are fixed, not MLE-fit")]` at
+`src/garch.rs:103`. Matches plan template text.
+
+**Deprecation warning timing.** Python side (`__init__.py:53-55`) emits
+warning at call time, not import time. ✓
+
+**Capabilities.** `python/src/lib.rs:29` advertises
+`"garch_ewma_forecast"` as the capability name. Deprecated
+`garch_forecast` remains callable but not advertised. Correct.
+
+**Deviations accepted:**
+
+1. **`InitMethod` → `mean: &str`.** Deviation #1. The plan's code
+   sketch referenced an `InitMethod` enum; existing code uses a `mean:
+   &str` mode (`"zero"` or `"constant"`/`"mean"`). Codex preserved
+   the in-tree signature. Correct — changing it would widen scope
+   without benefit in a rename PR.
+
+2. **Saturate instead of error on `returns.len() < q`.** Deviation #2.
+   Plan offered both; Codex picked saturate. Saturation is the more
+   forgiving choice for small-history callers and keeps the rename PR
+   API-shape-preserving (no new `Result`). Numerical behavior change
+   documented above is correct.
+
+3. **Python compat surface.** Deviation #3. Same pattern as PR-3:
+   `py_garch_forecast` + `garch_forecast` + `.pyi` stubs + Python
+   wrapper + one shim-behavior test. All legitimate compatibility
+   surface for a one-minor deprecation window. Accepted.
+
+4. **`#[rustfmt::skip]` above deprecated alias.** Deviation #4. Same
+   narrow workaround as PR-3 to keep `#[deprecated(...)]` on one line
+   for the plan's multiline regex. Accepted; plan-regex fragility is a
+   known issue.
+
+**Commit message.** Clean (actual newlines). ✓
+
+**Non-blocking observations:**
+
+1. **`debug_assert!` is a tautology.** Given the clamping at line 28,
+   the assert can never fire. It functions as a contract comment, not
+   a runtime check. Not wrong, just redundant. Harmless.
+
+2. **The ARCH inner loop at line 81-85 also has `if t >= i` with `p ≤
+   t` guaranteed.** Same tautology as the debug_assert. Safe.
+
+3. **Small-history callers who relied on omega being computed with the
+   full user-specified `q`** (hypothetical; unlikely) will see a
+   behavior change. Unlikely to affect real users because the previous
+   behavior was arithmetically inconsistent.
+
+4. **PR-1/PR-2/PR-3 follow-up backlog unchanged:**
+   - `src/stats.rs:173` false-positive TODO (PR-1)
+   - Dead error path in `orders::submit_order` Market branch (PR-1)
+   - H3 float-cents truncations (PR-1 → PR-20)
+   - PR-2 commit body literal `\n` (PR-6 cleanup candidate)
+
+**Self-audit reconciliation.** Codex correctly identified the
+q-saturation as the review risk and transparently documented the
+numerical behavior change. The new behavior is more internally
+consistent than the old. The self-audit served its adversarial purpose.
+
+**Next action.** Codex may proceed to PR-5 (`feat(config):
+deny_unknown_fields on rebalancer + risk configs`). PR-5 touches
+`rebalancer/src/config.rs`, `rebalancer/src/target.rs`,
+`risk/src/config.rs`, and a new test file. Independent of PR-1..4.
+
+**P0 progress.** 4/6 PRs approved. Remaining: PR-5 (deny_unknown_fields)
+and PR-6 (v0.9.3 honesty release notes + version bump). P0 remains on
+the 2-week milestone.
