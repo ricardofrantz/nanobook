@@ -86,7 +86,21 @@ def main() -> int:
     qs_sharpe = qs.stats.sharpe(returns_series, rf=0.0, periods=252, annualize=True)
     qs_sortino = qs.stats.sortino(returns_series, rf=0.0, periods=252, annualize=True)
     qs_max_dd = qs.stats.max_drawdown(returns_series)
-    qs_cvar_95 = qs.stats.expected_shortfall(returns_series, confidence=0.95)
+    # quantstats's expected_shortfall is a *hybrid*: parametric-normal
+    # VaR threshold, then empirical mean of returns below it. Nanobook
+    # exposes this under CVaRMethod::ParametricNormal (the v0.9.3
+    # default). From v0.10, the default is CVaRMethod::Historical —
+    # pure empirical, matches the standard academic convention.
+    qs_cvar_95_parametric = qs.stats.expected_shortfall(
+        returns_series, confidence=0.95
+    )
+
+    # Pure empirical CVaR: sort, take the lowest ceil(n * alpha), mean.
+    # This is the new default (CVaRMethod::Historical) in v0.10.
+    alpha = 0.05
+    sorted_returns = np.sort(returns)
+    tail_n = int(np.ceil(N * alpha))
+    empirical_cvar_95 = float(sorted_returns[:tail_n].mean())
 
     # Reference library versions — recorded so future regenerations
     # can detect drift without re-running the script.
@@ -129,7 +143,13 @@ def main() -> int:
             "sharpe_annual_252": to_jsonable(qs_sharpe),
             "sortino_annual_252": to_jsonable(qs_sortino),
             "max_drawdown": to_jsonable(qs_max_dd),
-            "cvar_95": to_jsonable(qs_cvar_95),
+            "cvar_95_parametric": to_jsonable(qs_cvar_95_parametric),
+        },
+        "empirical": {
+            # Pure-empirical Historical CVaR at 95% confidence: mean of
+            # the lowest ceil(N * 0.05) returns. Matches nanobook's
+            # CVaRMethod::Historical (the v0.10 default).
+            "cvar_95": empirical_cvar_95,
         },
     }
 

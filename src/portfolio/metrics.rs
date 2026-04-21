@@ -153,8 +153,11 @@ pub fn compute_metrics(returns: &[f64], periods_per_year: f64, risk_free: f64) -
 
     // --- v0.8 extended metrics ---
 
-    // CVaR (95%): mean of worst 5% of returns
-    let cvar_95 = compute_cvar(returns, 0.05);
+    // CVaR (95%): mean of the worst 5% of returns. v0.10 default is
+    // historical (pure empirical); v0.9 used the parametric-normal
+    // hybrid. Users who need the parametric variant can call
+    // `cvar(returns, 0.05, CVaRMethod::ParametricNormal)` directly.
+    let cvar_95 = cvar(returns, 0.05, CVaRMethod::Historical);
 
     // Win rate
     let win_rate = winning_periods as f64 / n as f64;
@@ -235,31 +238,91 @@ fn compute_max_drawdown(returns: &[f64]) -> f64 {
     max_dd
 }
 
-/// Conditional Value at Risk (CVaR / Expected Shortfall).
+/// Method for computing Conditional Value at Risk (a.k.a. Expected
+/// Shortfall).
 ///
-/// Matches quantstats convention: parametric VaR via normal distribution,
-/// then mean of returns strictly below VaR.
-fn compute_cvar(returns: &[f64], alpha: f64) -> f64 {
+/// Different libraries use different conventions. This enum makes the
+/// choice explicit. `Historical` is the default from v0.10; earlier
+/// versions used `ParametricNormal` unconditionally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum CVaRMethod {
+    /// Pure empirical CVaR: sort the returns, take the lowest
+    /// `ceil(n * alpha)` values, return their mean.
+    ///
+    /// Matches the standard academic convention and scipy-style
+    /// percentile computations (`np.mean(np.sort(returns)[:ceil(n * alpha)])`).
+    /// This is the v0.10 default.
+    #[default]
+    Historical,
+
+    /// Hybrid estimator: compute a parametric VaR threshold assuming
+    /// returns are `N(mean, sample_var)`, then return the empirical
+    /// mean of returns strictly below that threshold.
+    ///
+    /// Matches `quantstats.stats.expected_shortfall` and nanobook's
+    /// v0.9 behavior. The result coincides with `Historical` for
+    /// well-behaved normal-ish samples but diverges on skewed,
+    /// heavy-tailed, or small-sample data.
+    ParametricNormal,
+}
+
+/// Conditional Value at Risk (a.k.a. Expected Shortfall) at tail
+/// probability `alpha`.
+///
+/// For `alpha = 0.05`, returns the loss-level average of the worst
+/// 5% of returns under the chosen [`CVaRMethod`]. Result is a
+/// negative-signed return when the tail is negative.
+///
+/// Returns `0.0` for empty input or `alpha` outside `(0, 1)`.
+pub fn cvar(returns: &[f64], alpha: f64, method: CVaRMethod) -> f64 {
     if returns.is_empty() || alpha <= 0.0 || alpha >= 1.0 {
         return 0.0;
     }
+    match method {
+        CVaRMethod::Historical => cvar_historical(returns, alpha),
+        CVaRMethod::ParametricNormal => cvar_parametric(returns, alpha),
+    }
+}
 
+/// Historical (empirical) CVaR: mean of the lowest `ceil(n * alpha)`
+/// returns. Non-finite inputs are filtered out before sorting.
+fn cvar_historical(returns: &[f64], alpha: f64) -> f64 {
+    let mut sorted: Vec<f64> = returns.iter().copied().filter(|r| r.is_finite()).collect();
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    sorted.sort_by(|a, b| a.partial_cmp(b).expect("finite values compare totally"));
+
+    let tail_n = ((sorted.len() as f64) * alpha).ceil() as usize;
+    let tail_n = tail_n.clamp(1, sorted.len());
+    sorted[..tail_n].iter().sum::<f64>() / tail_n as f64
+}
+
+/// Hybrid parametric-normal CVaR: compute a parametric VaR threshold
+/// assuming returns are `N(mean, sample_var)`, then take the empirical
+/// mean of returns strictly below that threshold. Matches quantstats
+/// and nanobook v0.9.
+fn cvar_parametric(returns: &[f64], alpha: f64) -> f64 {
     let n = returns.len() as f64;
     let mu = returns.iter().sum::<f64>() / n;
     let var_pop = returns.iter().map(|&r| (r - mu).powi(2)).sum::<f64>() / (n - 1.0);
     let sigma = var_pop.sqrt();
 
-    // Parametric VaR: norm.ppf(alpha, mu, sigma)
-    // ppf(0.05) for standard normal ≈ -1.6448536269514729
+    // Parametric VaR: norm.ppf(alpha, mu, sigma).
+    // ppf(0.05) for standard normal ≈ -1.6448536269514729.
     let z = norm_ppf(alpha);
     let var_threshold = mu + sigma * z;
 
-    // CVaR: mean of returns strictly below VaR (computed on iterator — no allocation)
     let (tail_sum, tail_count) = returns
         .iter()
         .filter(|&&r| r < var_threshold)
         .fold((0.0_f64, 0_usize), |(sum, cnt), &r| (sum + r, cnt + 1));
+
     if tail_count == 0 {
+        // Degenerate: no return crosses the parametric threshold. Fall
+        // back to the single minimum return so the result is still a
+        // meaningful loss level.
         return *returns
             .iter()
             .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
