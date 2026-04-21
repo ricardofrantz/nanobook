@@ -324,6 +324,17 @@ pub fn spearman(x: &[f64], y: &[f64]) -> (f64, f64) {
 ///
 /// `top_mean - bottom_mean`, or NaN if inputs are invalid.
 ///
+/// # Group sizing when `n` is not divisible by `n_quantiles`
+///
+/// Group size is `floor(n / n_quantiles)`. The top and bottom groups each
+/// contain exactly that many elements; any middle observations that would
+/// land in partially-filled interior quantiles are **excluded from the
+/// spread**. Example: `n = 23, n_quantiles = 5` → `group_size = 4`, so
+/// the bottom 4 and top 4 sorted-by-score observations define the spread
+/// and the middle 15 are ignored. This matches the convention in
+/// factor-research papers where only the extreme deciles/quintiles enter
+/// the long-short portfolio.
+///
 /// # NaN handling
 ///
 /// Returns NaN if any element of `scores` or `returns` is NaN. Sorting
