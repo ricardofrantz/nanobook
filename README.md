@@ -105,8 +105,8 @@ cost modeling, position tracking, and return computation at compiled speed
 with the GIL released.
 
 **v0.9 additions:** GARCH(1,1) forecasting, portfolio optimizers
-(min-variance, max-Sharpe, risk-parity, CVaR, CDaR), and trailing/fixed
-stop-loss simulation — all accessible from Python.
+(min-variance, max-Sharpe, risk-parity, inverse CVaR, inverse CDaR), and
+trailing/fixed stop-loss simulation — all accessible from Python.
 
 ### Optimizer Example
 
@@ -666,7 +666,8 @@ result = nanobook.py_backtest_weights(
 GIL is released during computation for maximum throughput.
 
 Clean aliases (no `py_` prefix) are exported for new integrations:
-`backtest_weights`, `capabilities`, `garch_forecast`, and `optimize_*`.
+`backtest_weights`, `capabilities`, `garch_forecast`,
+`inverse_cvar_weights`, `inverse_cdar_weights`, and other optimizer helpers.
 
 ### qtrade v0.4 Bridge Pattern
 
@@ -686,8 +687,8 @@ def has_nanobook_feature(name: str) -> bool:
         "optimize_min_variance": "py_optimize_min_variance",
         "optimize_max_sharpe": "py_optimize_max_sharpe",
         "optimize_risk_parity": "py_optimize_risk_parity",
-        "optimize_cvar": "py_optimize_cvar",
-        "optimize_cdar": "py_optimize_cdar",
+        "inverse_cvar_weights": "py_inverse_cvar_weights",
+        "inverse_cdar_weights": "py_inverse_cdar_weights",
         "backtest_holdings": "py_backtest_weights",
     }
     sym = symbol_map.get(name)

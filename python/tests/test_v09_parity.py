@@ -75,8 +75,8 @@ def test_optimizer_reference_targets():
     minvar = nanobook.py_optimize_min_variance(returns_matrix, symbols)
     maxsh = nanobook.py_optimize_max_sharpe(returns_matrix, symbols, risk_free=0.0)
     rp = nanobook.py_optimize_risk_parity(returns_matrix, symbols)
-    cvar = nanobook.py_optimize_cvar(returns_matrix, symbols, alpha=0.95)
-    cdar = nanobook.py_optimize_cdar(returns_matrix, symbols, alpha=0.95)
+    cvar = nanobook.py_inverse_cvar_weights(returns_matrix, symbols, alpha=0.95)
+    cdar = nanobook.py_inverse_cdar_weights(returns_matrix, symbols, alpha=0.95)
 
     _assert_weight_dict_close(
         minvar,
