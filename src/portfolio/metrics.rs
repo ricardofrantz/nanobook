@@ -70,12 +70,19 @@ impl std::fmt::Display for Metrics {
 /// # Arguments
 ///
 /// * `returns` — Slice of simple returns (e.g., `[0.01, -0.005, 0.02]`)
-/// * `periods_per_year` — Annualization factor (252 for daily, 12 for monthly)
+/// * `periods_per_year` — Annualization factor (252 for daily, 12 for monthly).
+///   Must be strictly positive and finite; otherwise `None` is returned.
 /// * `risk_free` — Risk-free rate per period (e.g., 0.04/252 for 4% annual)
 ///
-/// Returns `None` if `returns` is empty.
+/// Returns `None` if `returns` is empty or `periods_per_year` is not
+/// strictly positive and finite. The guard prevents silent `NaN`
+/// Sharpe/Sortino values from `periods_per_year.sqrt()` on
+/// non-positive or infinite inputs.
 pub fn compute_metrics(returns: &[f64], periods_per_year: f64, risk_free: f64) -> Option<Metrics> {
     if returns.is_empty() {
+        return None;
+    }
+    if !periods_per_year.is_finite() || periods_per_year <= 0.0 {
         return None;
     }
 
@@ -330,6 +337,7 @@ fn cvar_parametric(returns: &[f64], alpha: f64) -> f64 {
 /// Annualized Sortino ratio. Returns `0.0` if:
 /// - `returns` is empty.
 /// - `ddof >= returns.len()` (would divide by zero or negative).
+/// - `periods_per_year` is not strictly positive and finite.
 /// - No return has strictly negative excess over `risk_free`
 ///   (downside deviation is zero).
 ///
@@ -341,6 +349,9 @@ fn cvar_parametric(returns: &[f64], alpha: f64) -> f64 {
 pub fn sortino(returns: &[f64], risk_free: f64, periods_per_year: f64, ddof: u32) -> f64 {
     let n = returns.len();
     if n == 0 || (ddof as usize) >= n {
+        return 0.0;
+    }
+    if !periods_per_year.is_finite() || periods_per_year <= 0.0 {
         return 0.0;
     }
 
@@ -567,6 +578,35 @@ mod tests {
         let returns = vec![0.01, 0.02, 0.03];
         let m = compute_metrics(&returns, 252.0, 0.0).unwrap();
         assert!((m.max_drawdown).abs() < 1e-10);
+    }
+
+    /// Regression for N13: non-positive `periods_per_year` used to silently
+    /// produce `NaN` via `sqrt(≤0) / 0`. `compute_metrics` now rejects the
+    /// input by returning `None`.
+    #[test]
+    fn compute_metrics_rejects_nonpositive_periods_per_year() {
+        let returns = vec![0.01; 100];
+        assert!(compute_metrics(&returns, 0.0, 0.0).is_none());
+        assert!(compute_metrics(&returns, -1.0, 0.0).is_none());
+        assert!(compute_metrics(&returns, f64::NAN, 0.0).is_none());
+        assert!(compute_metrics(&returns, f64::INFINITY, 0.0).is_none());
+        // Sanity: strictly positive still works.
+        assert!(compute_metrics(&returns, 252.0, 0.0).is_some());
+    }
+
+    /// Regression for N13: standalone `sortino` returns `0.0` when
+    /// `periods_per_year` is non-positive or non-finite, instead of the
+    /// silent `NaN` produced by `sqrt` of a non-positive argument.
+    #[test]
+    fn sortino_returns_zero_on_nonpositive_periods_per_year() {
+        // Positive-biased series: strictly positive Sortino when ppy > 0.
+        let returns = vec![0.02, 0.01, -0.005, 0.015, -0.002, 0.012];
+        assert_eq!(sortino(&returns, 0.0, 0.0, 0), 0.0);
+        assert_eq!(sortino(&returns, 0.0, -1.0, 0), 0.0);
+        assert!(sortino(&returns, 0.0, f64::NAN, 0) == 0.0);
+        assert_eq!(sortino(&returns, 0.0, f64::INFINITY, 0), 0.0);
+        // Sanity: strictly positive ppy produces a non-zero Sortino.
+        assert!(sortino(&returns, 0.0, 252.0, 0) > 1e-12);
     }
 
     #[test]
