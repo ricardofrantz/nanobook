@@ -1,0 +1,12 @@
+# Pinned reference libraries for the parity golden-file harness.
+#
+# These versions produce tests/parity/golden.json and must not drift
+# without a deliberate regeneration. See tests/parity/README.md.
+#
+# System prerequisite on macOS: `brew install ta-lib`
+# System prerequisite on Ubuntu: `apt-get install libta-lib-dev`
+
+numpy>=1.26,<2.3
+scipy>=1.14,<1.16
+TA-Lib>=0.6,<0.7
+quantstats>=0.0.62,<0.1
