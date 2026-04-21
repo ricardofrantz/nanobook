@@ -338,9 +338,28 @@ fn norm_ppf(p: f64) -> f64 {
 
 /// Apply a function over a rolling window using O(N) running sum/sum-of-squares.
 ///
-/// `compute(sum, sum_sq, k)` receives the window's running sum, sum of squares,
-/// and window size as f64. It returns the value for that window position.
+/// For each window starting at index `window - 1`, computes `(mean, m2)`
+/// via Welford's online algorithm where `m2 = sum((x_i - mean)^2)`. The
+/// closure receives `(mean, m2, k)` and returns the output value. Callers
+/// pick the variance convention (population `m2 / k`, sample `m2 / (k - 1)`).
+///
 /// Positions before the first full window are filled with NaN.
+///
+/// # Numerical notes
+///
+/// Earlier versions maintained an O(1) sliding-sum state using
+/// `sum += new - old; sum_sq += new*new - old*old;` and derived variance
+/// via `sum_sq - sum^2/k`. That formula suffers catastrophic cancellation
+/// on high-mean, low-variance series: both `sum_sq` and `sum^2/k` can be
+/// large nearly-equal numbers whose difference is the (small) variance.
+/// Rounding collapses the difference to zero, and downstream `.max(0.0)`
+/// silently hides the error. On any stock trading above ~$500/share with
+/// sub-cent ticks, `rolling_std_pop` returned exactly 0.
+///
+/// This rewrite recomputes Welford fresh per window — O(window) per step,
+/// O(n*window) total. For typical financial windows (≤ 252) the overhead
+/// is negligible. Reverse-Welford (O(1) eviction) is avoided because it
+/// is itself unstable (Chan et al. 1983).
 fn rolling_window(
     values: &[f64],
     window: usize,
@@ -354,18 +373,10 @@ fn rolling_window(
 
     let k = window as f64;
 
-    // Seed first window
-    let mut sum: f64 = values[..window].iter().sum();
-    let mut sum_sq: f64 = values[..window].iter().map(|v| v * v).sum();
-    out[window - 1] = compute(sum, sum_sq, k);
-
-    // Slide window
-    for i in window..n {
-        let old = values[i - window];
-        let new = values[i];
-        sum += new - old;
-        sum_sq += new * new - old * old;
-        out[i] = compute(sum, sum_sq, k);
+    for i in (window - 1)..n {
+        let slice = &values[i + 1 - window..=i];
+        let (mean, m2) = crate::stats::welford_mean_m2(slice);
+        out[i] = compute(mean, m2, k);
     }
 
     out
@@ -382,9 +393,8 @@ fn rolling_window(
 /// * `periods_per_year` — Annualization factor (e.g., 252).
 pub fn rolling_sharpe(returns: &[f64], window: usize, periods_per_year: usize) -> Vec<f64> {
     let ppy_sqrt = (periods_per_year as f64).sqrt();
-    rolling_window(returns, window, |sum, sum_sq, k| {
-        let mean = sum / k;
-        let std = ((sum_sq - sum * sum / k) / (k - 1.0)).max(0.0).sqrt();
+    rolling_window(returns, window, |mean, m2, k| {
+        let std = (m2 / (k - 1.0)).max(0.0).sqrt();
         if std > 0.0 {
             mean * ppy_sqrt / std
         } else {
@@ -404,8 +414,8 @@ pub fn rolling_sharpe(returns: &[f64], window: usize, periods_per_year: usize) -
 /// * `periods_per_year` — Annualization factor (e.g., 252).
 pub fn rolling_volatility(returns: &[f64], window: usize, periods_per_year: usize) -> Vec<f64> {
     let ppy_sqrt = (periods_per_year as f64).sqrt();
-    rolling_window(returns, window, |sum, sum_sq, k| {
-        ((sum_sq - sum * sum / k) / (k - 1.0)).max(0.0).sqrt() * ppy_sqrt
+    rolling_window(returns, window, |_mean, m2, k| {
+        (m2 / (k - 1.0)).max(0.0).sqrt() * ppy_sqrt
     })
 }
 

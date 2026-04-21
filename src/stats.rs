@@ -7,6 +7,44 @@
 //!
 //! - SciPy `spearmanr`: <https://github.com/scipy/scipy/blob/main/scipy/stats/_correlation.py>
 //! - Average-rank tie-breaking follows the standard convention.
+//! - Welford 1962, "Note on a method for calculating corrected sums of squares
+//!   and products," *Technometrics* 4 (3): 419–420.
+
+// ---------------------------------------------------------------------------
+// Numerically-stable moment accumulation (Welford)
+// ---------------------------------------------------------------------------
+
+/// Compute `(mean, m2)` over a slice via Welford's online algorithm,
+/// where `m2 = sum_i (x_i - mean)^2` is the sum of squared deviations
+/// from the mean.
+///
+/// Callers pick the variance convention:
+/// - Population variance (ddof=0): `m2 / n`
+/// - Sample variance (ddof=1):     `m2 / (n - 1)`
+///
+/// Returns `(0.0, 0.0)` for empty slices and `(slice[0], 0.0)` for
+/// single-element slices.
+///
+/// This is used by rolling-window statistics to avoid the catastrophic
+/// cancellation that afflicts the naive `sum_sq - sum^2/n` formula on
+/// high-mean, low-variance series. For a series like
+/// `[1000.0 + 1e-9 * i]`, the naive formula returns variance ≈ 0 via
+/// rounding, and any downstream `.max(0.0).sqrt()` silently emits 0.
+/// Welford maintains `(mean, m2)` in a form that resists this loss.
+#[inline]
+pub(crate) fn welford_mean_m2(slice: &[f64]) -> (f64, f64) {
+    let mut mean = 0.0_f64;
+    let mut m2 = 0.0_f64;
+    let mut n = 0.0_f64;
+    for &x in slice {
+        n += 1.0;
+        let delta = x - mean;
+        mean += delta / n;
+        let delta2 = x - mean;
+        m2 += delta * delta2;
+    }
+    (mean, m2)
+}
 
 // ---------------------------------------------------------------------------
 // Ranking

@@ -14,17 +14,26 @@
 //! See `tests/parity/README.md` for the full drift policy.
 //!
 //! This module ships with the v0.10 "Hardening Release" as the
-//! measurement substrate for every numerical fix. New tests are added
-//! as individual numerical PRs land:
+//! measurement substrate for every numerical fix. Per-function
+//! reference comparisons live here; pure regression tests for
+//! specific bugs (e.g., catastrophic cancellation) live in their own
+//! test files alongside the fix that introduces them.
 //!
-//! - `rsi_matches_talib`            — initial scaffolding (this PR).
-//! - `atr_matches_talib`            — initial scaffolding (this PR).
-//! - `sharpe_matches_quantstats`    — initial scaffolding (this PR).
-//! - `max_drawdown_matches_quantstats` — initial scaffolding (this PR).
-//! - `sortino_matches_quantstats`   — added by N4 (ddof=0 fix).
+//! Tests in this file:
+//!
+//! - `rsi_matches_talib`               — initial scaffolding (N10).
+//! - `atr_matches_talib`               — initial scaffolding (N10).
+//! - `sharpe_matches_quantstats`       — initial scaffolding (N10).
+//! - `max_drawdown_matches_quantstats` — initial scaffolding (N10).
+//! - `sortino_matches_quantstats`      — added by N4 (ddof=0 fix).
 //! - `cvar_historical_matches_quantstats` — added by N2 (historical CVaR).
-//! - `rolling_std_catastrophic_cancellation_regression` — added by N1
-//!   (Welford).
+//!
+//! Related regression tests in other files:
+//!
+//! - `tests/catastrophic_cancellation.rs` — Welford rolling variance
+//!   (N1). Separate from this file because it has no scipy/talib/qs
+//!   reference; it asserts the output is not collapsed to zero on
+//!   pathological input.
 
 use std::path::PathBuf;
 
