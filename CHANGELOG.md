@@ -7,43 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+## [0.9.3] - 2026-04-21 - Honesty Release
 
-- **IBKR market-order encoding**:
-  - Removed the `$999,999.99` buy / `$0.01` sell limit-price shim
-  - Use true IBKR market orders when market orders are enabled
-  - Added a strict market-order rejection feature and quote-bounded fallback encoder
-- **Python 3.14 compatibility**:
-  - Upgraded PyO3 bindings to a Python 3.14-compatible line
-  - Updated Python binding internals for current PyO3 APIs (`attach` / `detach`, explicit `Py<PyAny>`)
-  - Aligned CI and wheel builds with Python 3.14 instead of relying on ABI3 forward-compatibility mode
-- **Reproducible tooling**:
-  - Track Rust and Python lockfiles for repeatable CI/test dependency resolution
-  - Pin the verified Python build backend and dev-test dependencies used by the Python 3.14 test gate
+### Fixed (Security)
 
-### Added
+- **IBKR market-order encoding** (`nanobook-broker` 0.4.0, Security-C1):
+  Market orders previously encoded as a `$999,999.99` buy / `$0.01` sell
+  aggressive limit. On halts, auction crosses, or dark-pool routes this
+  could fill at the nominal limit. The IBKR adapter now uses true market
+  orders when enabled and removes the sentinel-price shim. A quote-bounded
+  encoder remains for explicit fallback behavior, returning
+  `BrokerError::NoQuoteForMarketOrder` when no NBBO quote is available.
+  Strict rejection mode is available via `--features strict-market-reject`.
 
-- **Broker idempotency**:
-  - Added deterministic `ClientOrderId` derivation for broker-side order deduplication
-  - Threaded client order IDs into IBKR `orderRef` and Binance `newClientOrderId`
-  - Added optional `client_order_id` arguments to Python broker order submission
+### Changed (Breaking)
 
-### Changed
-
-- **BREAKING: config typo rejection**:
-  - Rebalancer target/config structs and risk config now reject unknown fields during deserialization
-  - Typos such as `max_leverage_pct` now fail at parse time instead of silently falling back to defaults
+- **`nanobook-broker` 0.4.0 (Security-H4)**:
+  `BrokerOrder` now carries an optional
+  `client_order_id: Option<ClientOrderId>`. Deterministic client order IDs
+  are derived from `(scope, symbol, side, qty)` and threaded into IBKR
+  `orderRef` and Binance `newClientOrderId` for broker-side deduplication
+  on retry.
+- **`nanobook-rebalancer` 0.5.0**:
+  Rebalancer target/config structs and risk config now use
+  `#[serde(deny_unknown_fields)]`. Typos in config files, for example
+  `max_leverage_pct` instead of `max_leverage`, now error at parse time
+  instead of silently using the default. Audit your config files.
 
 ### Deprecated
 
-- **GARCH naming**:
-  - Renamed `garch_forecast` to `garch_ewma_forecast`
-  - The old name implied an MLE-fitted GARCH model, but the implementation uses fixed EWMA-style parameters
-  - Old names remain as deprecated shims for one minor release
-- **Optimizer naming**:
-  - Renamed `optimize_cvar` / `optimize_cdar` to `inverse_cvar_weights` / `inverse_cdar_weights`
-  - Old names remain as deprecated shims for one minor release
-  - Migration: `sed -i 's/optimize_cvar/inverse_cvar_weights/g; s/optimize_cdar/inverse_cdar_weights/g' <your_files>`
+- `nanobook::optimize::optimize_cvar` / `optimize_cdar` are renamed to
+  `inverse_cvar_weights` / `inverse_cdar_weights`. The old names continue
+  to work with a `DeprecationWarning` / `#[deprecated]` attribute and will
+  be removed in 0.11. Migration:
+  `sed -i 's/optimize_cvar/inverse_cvar_weights/g; s/optimize_cdar/inverse_cdar_weights/g' <your_files>`.
+- `nanobook::garch::garch_forecast` is renamed to `garch_ewma_forecast`.
+  The old name gave the false impression of an MLE-fitted model; the
+  implementation uses fixed EWMA-style parameters.
+
+### Added
+
+- `nanobook-broker` 0.4.0: deterministic `ClientOrderId` tagged into IBKR
+  `orderRef` and Binance `newClientOrderId`.
+- `nanobook-broker` 0.4.0: `strict-market-reject` feature flag.
+- Python 3.14-compatible PyO3 bindings and CI/wheel coverage.
+- Tracked Rust and Python lockfiles for repeatable CI/test dependency
+  resolution.
+
+### Docs
+
+- Added "What nanobook is NOT" block in README to clarify scope versus
+  NautilusTrader, LEAN, Hummingbot, CCXT, vectorbt, and Riskfolio-Lib.
+- Added `benches/README.md` documenting exact latency-measurement
+  methodology and noting that README latency numbers are not end-to-end
+  live-trading latencies.
 
 ## [0.9.2] - 2026-02-12
 

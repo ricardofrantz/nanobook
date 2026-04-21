@@ -27,6 +27,25 @@ Python computes the strategy. nanobook handles everything else.
 └─────────────────────────────────────────────────┘
 ```
 
+## What nanobook is NOT
+
+- **Not a full trading platform.** For venue breadth, calendars, and
+  operator UIs, see [NautilusTrader](https://github.com/nautechsystems/nautilus_trader)
+  or [LEAN](https://github.com/QuantConnect/Lean).
+- **Not a connector zoo.** For broad crypto exchange coverage, see
+  [CCXT](https://github.com/ccxt/ccxt) or
+  [Hummingbot](https://github.com/hummingbot/hummingbot).
+- **Not a research framework.** For vectorized backtests and factor
+  research, see [vectorbt](https://github.com/polakowo/vectorbt) or
+  [Riskfolio-Lib](https://github.com/dcajasn/Riskfolio-Lib).
+- **Not FIX.** No FIX 4.4 / 5.0 adapter and none is planned.
+- **Not an OMS (yet).** Event-sourced OMS with deterministic replay is
+  on the v1.0 roadmap.
+
+nanobook is a compact Rust execution kernel for Python strategies:
+LOB matching, portfolio simulation, broker abstraction, pre-trade risk,
+and rebalancer, all in one MIT-licensed workspace.
+
 Python computes **what** to trade — factor rankings, signals, target weights.
 nanobook executes **how** — order routing, risk checks, portfolio simulation,
 and a deterministic matching engine. Clean separation: strategy logic stays
@@ -54,7 +73,7 @@ pip install nanobook
 
 ```toml
 [dependencies]
-nanobook = "0.9"
+nanobook = "0.9.3"
 ```
 
 **From source:**
