@@ -1,8 +1,8 @@
 # Codex Execution Status
 
 Current phase: P0 — v0.9.3 Honesty Release
-Last updated: 2026-04-21 14:15
-Current PR: PR-2 (COMPLETED — awaiting review)
+Last updated: 2026-04-21 14:43
+Current PR: PR-3 (COMPLETED — awaiting review)
 
 ## Preflight Note — 2026-04-21 12:45
 
@@ -389,3 +389,48 @@ Python bindings. No coordination with PR-1 or PR-2 required.
 (`rg '999_999|999,999' src/` matching `0.999_999_999_999_809_93`) was
 resolved in the plan by anchoring to `999_999\.99|999,999\.99`. Future
 PRs inherit this convention.
+
+## PR-3: refactor(optimize): rename CVaR/CDaR to honest names
+
+- Started: 2026-04-21 14:20
+- Completed: 2026-04-21 14:43
+- Commit SHA: `28226d3c411913b8785af88638d0574ba949fd78`
+- Files touched: 9 files (+194/-36)
+- Diff stat:
+  - `CHANGELOG.md` | 7 insertions
+  - `README.md` | 11 changed
+  - `python/nanobook.pyi` | 4 insertions
+  - `python/nanobook/__init__.py` | 29 changed
+  - `python/src/lib.rs` | 8 changed
+  - `python/src/optimize.rs` | 82 changed
+  - `python/tests/test_v09_features.py` | 32 changed
+  - `python/tests/test_v09_parity.py` | 4 changed
+  - `src/optimize.rs` | 53 changed
+- Review commands (Codex's run):
+  - `rg -n 'pub fn inverse_cvar_weights' src/optimize.rs` → PASS (1 match)
+  - `rg -n 'pub fn inverse_cdar_weights' src/optimize.rs` → PASS (1 match)
+  - `rg -nU 'deprecated.*since = "0\.9\.3".*\n\s*pub fn optimize_cvar' src/optimize.rs --multiline` → PASS (1 match)
+  - `rg -nU 'deprecated.*since = "0\.9\.3".*\n\s*pub fn optimize_cdar' src/optimize.rs --multiline` → PASS (1 match)
+  - `rg -c 'optimize_cvar|optimize_cdar' src/ python/` → PASS with expected compatibility-shim matches in `src/optimize.rs`, `python/src/optimize.rs`, `python/src/lib.rs`, `python/nanobook/__init__.py`, `python/nanobook.pyi`, and `python/tests/test_v09_features.py`
+  - `cd python && uv run pytest -W error::DeprecationWarning tests/ -q 2>&1 | grep -i 'deprecat' || true` → PASS (no uncaught deprecation warnings)
+  - Explicit Python warning check with `warnings.catch_warnings(record=True)` on `nanobook.optimize_cvar(...)` → PASS (exactly one `DeprecationWarning`, result equals `inverse_cvar_weights`)
+  - `cargo test --package nanobook optimize` → PASS (8/8 optimizer tests)
+  - `rg -n 'inverse_cvar_weights|inverse_cdar_weights' README.md` → PASS (3 matches)
+  - `cargo fmt --all -- --check` → PASS
+  - `cargo clippy --workspace --all-targets --all-features -- -D warnings` → PASS
+  - `cargo test --workspace` → PASS
+  - `cargo test --workspace --all-features` → PASS
+  - `cd python && maturin develop --release && uv run pytest tests/ -q && cd ..` → PASS (`115 passed, 32 skipped`)
+  - `cargo deny check` → PASS (`advisories ok, bans ok, licenses ok, sources ok`; warning-only unmatched license allowances)
+- Deviations from contract:
+  1. The plan's Python binding sketch uses `PyReadonlyArray2`; current bindings use `Vec<Vec<f64>>` and return Python dicts keyed by symbols. I preserved the existing signature shape and behavior.
+  2. The old-name audit necessarily includes Python compatibility exports and stubs (`python/src/lib.rs`, `python/nanobook/__init__.py`, `python/nanobook.pyi`) in addition to deprecated shim definitions and shim-behavior tests. These are required to keep old Python API names callable for one minor release.
+  3. `#[rustfmt::skip]` was added above the two Rust deprecated aliases so the one-line deprecation attributes remain compatible with the PR-3 review regex.
+  4. Capabilities now advertise `inverse_cvar_weights` / `inverse_cdar_weights` instead of the old names. Deprecated old names remain callable but are no longer advertised as preferred capabilities.
+- TODOs discovered (out of scope):
+  - None.
+- Self-audit: The numerical implementation is a pure rename: `inverse_cvar_weights` and `inverse_cdar_weights` contain the previous logic, and Rust/Python shim tests check that old aliases delegate to the new functions. The main review risk is the old-name grep audit: Python compatibility requires old exported names and type stubs to remain visible for one minor release, so the grep cannot literally return only two Rust definitions plus two tests. The status block documents every remaining old-name match so Claude can distinguish compatibility shims from accidental call sites.
+
+### Review of PR-3 (commit 28226d3c411913b8785af88638d0574ba949fd78) — PENDING
+
+Claude fills this in during review session.
