@@ -276,7 +276,7 @@ impl StopBook {
             // Compute trailing offset
             let offset = match &trail_method {
                 TrailMethod::Fixed(cents) => *cents,
-                TrailMethod::Percentage(pct) => (new_watermark.0 as f64 * pct) as i64,
+                TrailMethod::Percentage(pct) => (new_watermark.0 as f64 * pct).round() as i64,
                 TrailMethod::SmaAbsChange { multiplier, period } => {
                     self.compute_sma_abs_change_offset(*multiplier, *period)
                 }
@@ -676,6 +676,28 @@ mod tests {
         let order = book.get(OrderId(1)).unwrap();
         assert_eq!(order.watermark, Some(Price(200_00)));
         assert_eq!(order.stop_price, Price(196_00));
+    }
+
+    #[test]
+    fn trailing_stop_percentage_rounds_not_truncates() {
+        // Regression for N6: `as i64` truncates toward zero, biasing the
+        // trail tight by ≤1 cent. With watermark=1_11 (111) and pct=0.05,
+        // the true offset is 5.55 cents — must round to 6, not truncate to 5.
+        let mut book = StopBook::new();
+        book.insert(make_trailing_stop(
+            1,
+            Side::Sell,
+            1_00,
+            100,
+            1,
+            TrailMethod::Percentage(0.05),
+        ));
+
+        book.update_trailing_stops(Price(1_11));
+        let order = book.get(OrderId(1)).unwrap();
+        assert_eq!(order.watermark, Some(Price(1_11)));
+        // round(111 * 0.05) = round(5.55) = 6; stop = 111 - 6 = 105
+        assert_eq!(order.stop_price, Price(1_05));
     }
 
     #[test]
