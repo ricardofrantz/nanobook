@@ -11,9 +11,18 @@ use crate::error::{Error, Result};
 #[derive(Debug, Clone, Deserialize)]
 pub struct TargetSpec {
     pub timestamp: DateTime<Utc>,
+    #[serde(default)]
+    pub metadata: TargetMetadata,
     pub targets: Vec<TargetPosition>,
     #[serde(default)]
     pub constraints: Option<Constraints>,
+}
+
+/// User-supplied target-schedule metadata.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TargetMetadata {
+    #[serde(default)]
+    pub id: String,
 }
 
 /// A single target position: symbol + weight.
@@ -124,6 +133,15 @@ impl TargetSpec {
             .map(|t| (nanobook::Symbol::new(&t.symbol), t.weight))
             .collect()
     }
+
+    /// Stable idempotency scope for broker-side client order ids.
+    pub fn idempotency_scope(&self) -> String {
+        if self.metadata.id.trim().is_empty() {
+            self.timestamp.to_rfc3339()
+        } else {
+            self.metadata.id.clone()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -133,6 +151,7 @@ mod tests {
     fn valid_json() -> &'static str {
         r#"{
             "timestamp": "2026-02-08T15:30:00Z",
+            "metadata": { "id": "sched-2026-02-08" },
             "targets": [
                 { "symbol": "AAPL", "weight": 0.40 },
                 { "symbol": "MSFT", "weight": 0.30 },
@@ -149,6 +168,7 @@ mod tests {
         assert_eq!(spec.targets[0].symbol, "AAPL");
         assert_eq!(spec.targets[0].weight, 0.40);
         assert_eq!(spec.targets[2].weight, -0.10); // short
+        assert_eq!(spec.metadata.id, "sched-2026-02-08");
     }
 
     #[test]
@@ -260,5 +280,17 @@ mod tests {
         }"#;
         let spec = TargetSpec::from_json(json).unwrap();
         assert_eq!(spec.targets[1].weight, -0.20);
+    }
+
+    #[test]
+    fn missing_metadata_uses_timestamp_as_idempotency_scope() {
+        let json = r#"{
+            "timestamp": "2026-01-01T00:00:00Z",
+            "targets": [
+                { "symbol": "AAPL", "weight": 0.50 }
+            ]
+        }"#;
+        let spec = TargetSpec::from_json(json).unwrap();
+        assert_eq!(spec.idempotency_scope(), "2026-01-01T00:00:00+00:00");
     }
 }

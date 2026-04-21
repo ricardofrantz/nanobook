@@ -116,6 +116,7 @@ impl BinanceClient {
     }
 
     /// Submit a new order (POST /api/v3/order).
+    #[allow(clippy::too_many_arguments)]
     pub fn submit_order(
         &self,
         symbol: &str,
@@ -124,6 +125,7 @@ impl BinanceClient {
         quantity: &str,
         price: Option<&str>,
         time_in_force: Option<&str>,
+        client_order_id: Option<&str>,
     ) -> Result<OrderResponse, BrokerError> {
         validate_query_params(&[
             (symbol, "symbol"),
@@ -137,6 +139,9 @@ impl BinanceClient {
         if let Some(tif) = time_in_force {
             validate_query_param(tif, "timeInForce")?;
         }
+        if let Some(cid) = client_order_id {
+            validate_query_param(cid, "newClientOrderId")?;
+        }
 
         let timestamp = current_timestamp_ms();
         let mut query = format!(
@@ -147,6 +152,9 @@ impl BinanceClient {
         }
         if let Some(tif) = time_in_force {
             query.push_str(&format!("&timeInForce={tif}"));
+        }
+        if let Some(cid) = client_order_id {
+            query.push_str(&format!("&newClientOrderId={cid}"));
         }
 
         let signature = auth::sign(&query, &self.secret_key);

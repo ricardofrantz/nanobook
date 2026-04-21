@@ -14,6 +14,7 @@ fn mk_order(side: BrokerSide, order_type: BrokerOrderType) -> BrokerOrder {
         side,
         quantity: 100,
         order_type,
+        client_order_id: None,
     }
 }
 
