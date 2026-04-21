@@ -18,11 +18,23 @@ pub enum TrailMethod {
     Fixed(i64),
     /// Percentage of the watermark price (e.g., 0.02 = 2% trailing distance).
     Percentage(f64),
-    /// ATR-based: `multiplier × ATR(period)`.
+    /// Trail by `multiplier × mean(|Δ price|)` over the last `period`
+    /// trades.
     ///
-    /// ATR is computed internally from trade price changes.
-    /// `period` is the lookback window size for the moving average.
-    Atr { multiplier: f64, period: usize },
+    /// This is a simple moving average of absolute trade-price changes,
+    /// NOT Wilder's Average True Range. The stop module sees only trade
+    /// prices — no OHLC bars — so computing true range (which requires
+    /// `high`, `low`, and the previous `close`) is not possible here.
+    ///
+    /// In earlier versions this variant was named `Atr`, which was
+    /// misleading. Callers who need Wilder's smoothed ATR should
+    /// pre-compute it with [`crate::indicators::atr`] on their OHLC
+    /// data and pass the result as a [`TrailMethod::Fixed`] offset
+    /// (in cents) per update.
+    ///
+    /// `period` is the lookback window; zero disables the trail until
+    /// enough trades accumulate.
+    SmaAbsChange { multiplier: f64, period: usize },
 }
 
 /// Status of a stop order.
@@ -265,13 +277,13 @@ impl StopBook {
             let offset = match &trail_method {
                 TrailMethod::Fixed(cents) => *cents,
                 TrailMethod::Percentage(pct) => (new_watermark.0 as f64 * pct) as i64,
-                TrailMethod::Atr { multiplier, period } => {
-                    self.compute_atr_offset(*multiplier, *period)
+                TrailMethod::SmaAbsChange { multiplier, period } => {
+                    self.compute_sma_abs_change_offset(*multiplier, *period)
                 }
             };
 
             if offset <= 0 {
-                // ATR not ready yet -- update watermark only
+                // SmaAbsChange not ready yet -- update watermark only
                 self.orders
                     .get_mut(&id)
                     .expect("invariant: trailing order exists in book")
@@ -325,8 +337,19 @@ impl StopBook {
         }
     }
 
-    /// Compute ATR-based offset in cents.
-    fn compute_atr_offset(&self, multiplier: f64, period: usize) -> i64 {
+    /// Compute `multiplier × mean(|Δ price|)` offset in cents over the
+    /// last `period` recorded trade-price changes.
+    ///
+    /// Returns `0` when there is not yet any price-change history or
+    /// `period == 0`. Callers treat `offset <= 0` as "trail not yet
+    /// ready" and skip the update (the watermark still moves so the
+    /// next trade can trigger the update).
+    ///
+    /// This is NOT Wilder's ATR (see the [`TrailMethod::SmaAbsChange`]
+    /// doc); it is the simple moving average of absolute trade-price
+    /// changes, which is the only quantity computable from trade-price
+    /// history alone.
+    fn compute_sma_abs_change_offset(&self, multiplier: f64, period: usize) -> i64 {
         if self.price_changes.is_empty() || period == 0 {
             return 0;
         }
@@ -335,8 +358,8 @@ impl StopBook {
         } else {
             &self.price_changes
         };
-        let atr = window.iter().sum::<i64>() as f64 / window.len() as f64;
-        (atr * multiplier) as i64
+        let sma_abs_change = window.iter().sum::<i64>() as f64 / window.len() as f64;
+        (sma_abs_change * multiplier) as i64
     }
 
     /// Clear triggered and cancelled stop orders from history.
@@ -656,24 +679,24 @@ mod tests {
     }
 
     #[test]
-    fn trailing_stop_atr() {
+    fn trailing_stop_sma_abs_change() {
         let mut book = StopBook::new();
-        // Sell trailing stop: trail by 2x ATR(3)
+        // Sell trailing stop: trail by 2x SmaAbsChange(3)
         book.insert(make_trailing_stop(
             1,
             Side::Sell,
             90_00,
             100,
             1,
-            TrailMethod::Atr {
+            TrailMethod::SmaAbsChange {
                 multiplier: 2.0,
                 period: 3,
             },
         ));
 
-        // Feed price changes to build ATR history: 100, 102, 99, 101
+        // Feed price changes to build history: 100, 102, 99, 101
         // Changes: |102-100|=200, |99-102|=300, |101-99|=200
-        // ATR(3) = (200+300+200)/3 = 233 cents
+        // SmaAbsChange(3) = (200+300+200)/3 = 233 cents
         // Offset = 2.0 * 233 = 466 cents
         book.update_trailing_stops(Price(100_00));
         book.update_trailing_stops(Price(102_00));
@@ -682,7 +705,7 @@ mod tests {
 
         let order = book.get(OrderId(1)).unwrap();
         assert_eq!(order.watermark, Some(Price(102_00))); // highest seen
-        // ATR = (200+300+200)/3 ≈ 233, offset = 2*233 = 466
+        // mean(|Δ|) = (200+300+200)/3 ≈ 233, offset = 2*233 = 466
         // stop = 102_00 - 466 = 97_34
         // But stop only moves UP for sell, so check it moved from 90_00
         assert!(order.stop_price.0 > 90_00);
