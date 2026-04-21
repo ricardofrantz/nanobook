@@ -62,6 +62,22 @@ impl Exchange {
     /// - **GTC**: Rests on book until filled or cancelled
     /// - **IOC**: Cancelled (never rests)
     /// - **FOK**: If cannot fill entirely, order is rejected (no trades)
+    ///
+    /// # FOK rejection contract (ghost `OrderId`)
+    ///
+    /// An order rejected under `TimeInForce::FOK` (no full fill available)
+    /// returns a [`SubmitResult`] with a valid, monotonically-assigned
+    /// `order_id` and `status == OrderStatus::Cancelled`, but that id is
+    /// **not** retrievable via [`Self::get_order`] — the order is never
+    /// inserted into the book and is logically non-existent. The id is
+    /// consumed so the exchange's id sequence stays gap-free for
+    /// deterministic replay; callers must not treat it as a handle.
+    ///
+    /// Callers MUST branch on `result.status` (or check
+    /// `result.filled_quantity`, `result.cancelled_quantity`) before
+    /// calling `get_order(result.order_id)`. The invariant
+    /// "`status == Cancelled` with `filled_quantity == 0` ⇒
+    /// `get_order(order_id) == None`" holds for FOK rejections.
     pub fn submit_limit(
         &mut self,
         side: Side,
