@@ -6,7 +6,7 @@
 //! These tests use proptest to verify that key invariants hold
 //! across randomly generated scenarios.
 
-use nanobook::{Exchange, Price, Side, StopStatus, TimeInForce};
+use nanobook::{Exchange, OrderStatus, Price, Side, StopStatus, TimeInForce};
 use proptest::prelude::*;
 
 /// Generate a valid price (positive, reasonable range)
@@ -181,6 +181,63 @@ proptest! {
             result.filled_quantity == incoming_qty || result.filled_quantity == 0,
             "FOK partially filled: {} of {}",
             result.filled_quantity, incoming_qty
+        );
+    }
+
+    /// FOK rejection contract: a rejected FOK returns a valid monotonic
+    /// `order_id` whose status is `Cancelled`, but the id is NOT retrievable
+    /// via `get_order`. See `Exchange::submit_limit` doc.
+    #[test]
+    fn fok_rejected_id_is_ghost(
+        side in side_strategy(),
+        price in price_strategy(),
+        qty in quantity_strategy(),
+    ) {
+        let mut exchange = Exchange::new();
+
+        // Empty book on the opposite side => FOK cannot fill => rejected.
+        let result = exchange.submit_limit(side, price, qty, TimeInForce::FOK);
+
+        // Rejected with nothing filled and nothing resting.
+        prop_assert_eq!(result.status, OrderStatus::Cancelled);
+        prop_assert_eq!(result.filled_quantity, 0);
+        prop_assert_eq!(result.resting_quantity, 0);
+        prop_assert_eq!(result.cancelled_quantity, qty);
+        prop_assert!(result.trades.is_empty());
+
+        // The id was consumed (monotonic) but not stored.
+        prop_assert!(result.order_id.0 > 0, "FOK rejection should still burn an id");
+        prop_assert!(
+            exchange.get_order(result.order_id).is_none(),
+            "FOK-rejected id {:?} leaked into the book",
+            result.order_id
+        );
+    }
+
+    /// The ghost-id invariant also holds when there IS liquidity on the
+    /// opposite side but not enough to fully fill the FOK quantity.
+    #[test]
+    fn fok_rejected_against_insufficient_liquidity(
+        price in price_strategy(),
+        resting_qty in 1u64..100u64,
+        extra in 1u64..1000u64,
+    ) {
+        let mut exchange = Exchange::new();
+
+        // Resting ask with limited size.
+        exchange.submit_limit(Side::Sell, price, resting_qty, TimeInForce::GTC);
+
+        // FOK buy for strictly more than is available at or below `price`.
+        let want = resting_qty + extra;
+        let result = exchange.submit_limit(Side::Buy, price, want, TimeInForce::FOK);
+
+        prop_assert_eq!(result.status, OrderStatus::Cancelled);
+        prop_assert_eq!(result.filled_quantity, 0);
+        prop_assert_eq!(result.resting_quantity, 0);
+        prop_assert!(result.trades.is_empty());
+        prop_assert!(
+            exchange.get_order(result.order_id).is_none(),
+            "FOK-rejected id retrievable via get_order"
         );
     }
 
