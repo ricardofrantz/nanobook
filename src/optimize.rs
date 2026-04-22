@@ -4,6 +4,37 @@
 //! - invalid inputs return empty weights,
 //! - valid outputs are finite, non-negative, and sum to ~1.
 
+/// Errors returned by helpers in this module.
+///
+/// The high-level optimizers (`optimize_min_variance`, `optimize_max_sharpe`,
+/// etc.) swallow these and fall back to their own safe defaults; the error
+/// variants surface only through direct calls to low-level primitives
+/// like [`project_simplex`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum OptimizeError {
+    /// Empty input slice — no projection to compute.
+    EmptyInput,
+    /// The input vector has no positive finite component, so a simplex
+    /// projection would silently produce equal weights. Surfacing this as
+    /// an error prevents masking upstream convergence failures (e.g. an
+    /// optimizer that converged to a zero gradient).
+    DegenerateProjection,
+}
+
+impl core::fmt::Display for OptimizeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::EmptyInput => f.write_str("empty input"),
+            Self::DegenerateProjection => {
+                f.write_str("simplex projection is degenerate (no positive finite component)")
+            }
+        }
+    }
+}
+
+impl std::error::Error for OptimizeError {}
+
 /// Long-only minimum-variance optimization on the unit simplex.
 pub fn optimize_min_variance(returns: &[Vec<f64>]) -> Vec<f64> {
     let Some((_rows, cols)) = matrix_shape(returns) else {
@@ -22,7 +53,12 @@ pub fn optimize_min_variance(returns: &[Vec<f64>]) -> Vec<f64> {
         let sigma_w = mat_vec_mul(&cov, &w);
         let grad: Vec<f64> = sigma_w.iter().map(|g| 2.0 * g).collect();
         let candidate: Vec<f64> = w.iter().zip(&grad).map(|(wi, gi)| wi - lr * gi).collect();
-        let projected = project_simplex(&candidate);
+        // A degenerate projection means the gradient step landed on a
+        // zero/non-finite iterate — keep the last good weights.
+        let projected = match project_simplex(&candidate) {
+            Ok(p) => p,
+            Err(_) => break,
+        };
 
         if squared_distance(&projected, &w) < 1e-16 {
             w = projected;
@@ -71,7 +107,12 @@ pub fn optimize_max_sharpe(returns: &[Vec<f64>], risk_free: f64) -> Vec<f64> {
 
         // Gradient ascent on Sharpe objective, then project.
         let candidate: Vec<f64> = w.iter().zip(&grad).map(|(wi, gi)| wi + lr * gi).collect();
-        let projected = project_simplex(&candidate);
+        // A degenerate projection means the gradient step zeroed the
+        // iterate — keep the last good weights.
+        let projected = match project_simplex(&candidate) {
+            Ok(p) => p,
+            Err(_) => break,
+        };
 
         if squared_distance(&projected, &w) < 1e-16 {
             w = projected;
@@ -352,9 +393,27 @@ fn normalize_long_only(mut w: Vec<f64>) -> Vec<f64> {
     w
 }
 
-fn project_simplex(v: &[f64]) -> Vec<f64> {
+/// Euclidean projection onto the unit simplex `{ w ∈ ℝⁿ : wᵢ ≥ 0, Σwᵢ = 1 }`.
+///
+/// Implements Duchi et al. (2008), "Efficient Projections onto the
+/// ℓ₁-Ball for Learning in High Dimensions".
+///
+/// # Errors
+///
+/// - [`OptimizeError::EmptyInput`] if `v` is empty.
+/// - [`OptimizeError::DegenerateProjection`] if `v` has no positive
+///   finite component. Such input is mathematically projectable (the
+///   answer is `[1/n, …, 1/n]`), but returning equal-weights silently
+///   masks upstream bugs — e.g., a gradient step that zeroed the
+///   iterate or an input slice full of `NaN`. Surfacing the condition
+///   as an error lets callers decide whether to restart, fall back, or
+///   propagate.
+pub fn project_simplex(v: &[f64]) -> Result<Vec<f64>, OptimizeError> {
     if v.is_empty() {
-        return Vec::new();
+        return Err(OptimizeError::EmptyInput);
+    }
+    if !v.iter().any(|x| x.is_finite() && *x > 0.0) {
+        return Err(OptimizeError::DegenerateProjection);
     }
 
     let mut u = v.to_vec();
@@ -371,13 +430,13 @@ fn project_simplex(v: &[f64]) -> Vec<f64> {
         }
     }
 
-    if rho == 0 {
-        return equal_weights(v.len());
-    }
-
+    // rho >= 1 is guaranteed when at least one positive finite component
+    // exists: at i where u[i] is that positive value, u[i] - theta > 0
+    // because the first partial sum can never exceed i+1.
+    debug_assert!(rho > 0);
     let theta = (u[..rho].iter().sum::<f64>() - 1.0) / rho as f64;
     let projected: Vec<f64> = v.iter().map(|x| (x - theta).max(0.0)).collect();
-    normalize_long_only(projected)
+    Ok(normalize_long_only(projected))
 }
 
 fn inverse_risk_weights(risks: &[f64]) -> Vec<f64> {
@@ -579,6 +638,59 @@ mod tests {
 
         assert_eq!(optimize_cvar(&r, 0.95), inverse_cvar_weights(&r, 0.95));
         assert_eq!(optimize_cdar(&r, 0.95), inverse_cdar_weights(&r, 0.95));
+    }
+
+    /// N17 acceptance: degenerate input surfaces as an explicit error
+    /// rather than a silent equal-weight fallback.
+    #[test]
+    fn project_simplex_on_all_zeros_errors() {
+        assert!(matches!(
+            project_simplex(&[0.0, 0.0, 0.0]),
+            Err(OptimizeError::DegenerateProjection)
+        ));
+    }
+
+    #[test]
+    fn project_simplex_on_empty_errors() {
+        assert!(matches!(
+            project_simplex(&[]),
+            Err(OptimizeError::EmptyInput)
+        ));
+    }
+
+    #[test]
+    fn project_simplex_on_all_negative_errors() {
+        assert!(matches!(
+            project_simplex(&[-1.0, -0.5, -2.3]),
+            Err(OptimizeError::DegenerateProjection)
+        ));
+    }
+
+    #[test]
+    fn project_simplex_on_all_nan_errors() {
+        assert!(matches!(
+            project_simplex(&[f64::NAN, f64::NAN]),
+            Err(OptimizeError::DegenerateProjection)
+        ));
+    }
+
+    #[test]
+    fn project_simplex_valid_input_projects() {
+        // A point outside the simplex; Euclidean projection hits the
+        // simplex point closest to it.
+        let w = project_simplex(&[0.5, 0.5, 0.5]).unwrap();
+        let s: f64 = w.iter().sum();
+        assert!((s - 1.0).abs() < 1e-12, "sum={s}");
+        assert!(w.iter().all(|x| *x >= -1e-12));
+    }
+
+    #[test]
+    fn project_simplex_on_simplex_point_is_idempotent() {
+        let p = vec![0.25, 0.50, 0.25];
+        let w = project_simplex(&p).unwrap();
+        for (a, b) in w.iter().zip(p.iter()) {
+            assert!((a - b).abs() < 1e-12);
+        }
     }
 
     #[test]
