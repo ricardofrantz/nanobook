@@ -35,21 +35,97 @@ impl core::fmt::Display for OptimizeError {
 
 impl std::error::Error for OptimizeError {}
 
+/// Tunable parameters for the projected-gradient optimizers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OptimizerOptions {
+    /// Maximum projected-gradient iterations. Execution stops early if
+    /// the squared step distance drops below `tol`.
+    pub max_iters: usize,
+    /// Convergence tolerance on the squared L2 distance between
+    /// successive iterates (`‖wₖ₊₁ − wₖ‖²`).
+    pub tol: f64,
+}
+
+impl Default for OptimizerOptions {
+    /// Backward-compatible defaults: 350 iterations, `tol = 1e-16`.
+    /// In practice `1e-16` on the squared step rarely triggers on
+    /// daily-return data — the budget dominates. Tighten `max_iters`
+    /// for speed, loosen `tol` for early stopping.
+    fn default() -> Self {
+        Self {
+            max_iters: 350,
+            tol: 1e-16,
+        }
+    }
+}
+
+/// Weights plus diagnostics returned by the `_ex` optimizer variants.
+///
+/// `converged == true` iff the squared step between consecutive iterates
+/// fell below `OptimizerOptions.tol` before `max_iters` was reached. On
+/// a budget-exhausted run `converged == false` and `iters == max_iters`;
+/// the weights are still the last projected iterate (normalized).
+#[derive(Clone, Debug, PartialEq)]
+pub struct OptimizerResult {
+    /// Long-only simplex weights from the final iterate.
+    pub weights: Vec<f64>,
+    /// Number of inner-loop iterations actually performed.
+    pub iters: usize,
+    /// True if `final_step_squared < tol` triggered early termination.
+    pub converged: bool,
+    /// Squared L2 distance between the last two iterates. `f64::NAN`
+    /// when the loop exited before any iteration completed (e.g., a
+    /// single-asset shortcut or degenerate input).
+    pub final_step_squared: f64,
+}
+
 /// Long-only minimum-variance optimization on the unit simplex.
+///
+/// Backward-compatible wrapper around [`optimize_min_variance_ex`] with
+/// [`OptimizerOptions::default`]. Returns weights only — callers that
+/// need convergence diagnostics should call the `_ex` variant directly.
 pub fn optimize_min_variance(returns: &[Vec<f64>]) -> Vec<f64> {
+    optimize_min_variance_ex(returns, OptimizerOptions::default()).weights
+}
+
+/// Long-only minimum-variance optimization on the unit simplex, with
+/// convergence diagnostics.
+///
+/// Runs projected gradient descent on `½ wᵀΣw` under the simplex
+/// constraint. On invalid input (empty matrix, inconsistent row
+/// lengths, non-finite entries) returns an empty-weights result with
+/// `converged = false` and `iters = 0`. On single-asset input returns
+/// `[1.0]` with `converged = true`.
+pub fn optimize_min_variance_ex(
+    returns: &[Vec<f64>],
+    options: OptimizerOptions,
+) -> OptimizerResult {
     let Some((_rows, cols)) = matrix_shape(returns) else {
-        return Vec::new();
+        return OptimizerResult {
+            weights: Vec::new(),
+            iters: 0,
+            converged: false,
+            final_step_squared: f64::NAN,
+        };
     };
 
     if cols == 1 {
-        return vec![1.0];
+        return OptimizerResult {
+            weights: vec![1.0],
+            iters: 0,
+            converged: true,
+            final_step_squared: f64::NAN,
+        };
     }
 
     let cov = covariance_matrix(returns);
     let mut w = equal_weights(cols);
     let mut lr = 0.20_f64;
+    let mut iters = 0_usize;
+    let mut converged = false;
+    let mut last_step_sq = f64::NAN;
 
-    for _ in 0..350 {
+    for _ in 0..options.max_iters {
         let sigma_w = mat_vec_mul(&cov, &w);
         let grad: Vec<f64> = sigma_w.iter().map(|g| 2.0 * g).collect();
         let candidate: Vec<f64> = w.iter().zip(&grad).map(|(wi, gi)| wi - lr * gi).collect();
@@ -60,8 +136,13 @@ pub fn optimize_min_variance(returns: &[Vec<f64>]) -> Vec<f64> {
             Err(_) => break,
         };
 
-        if squared_distance(&projected, &w) < 1e-16 {
+        let step_sq = squared_distance(&projected, &w);
+        iters += 1;
+        last_step_sq = step_sq;
+
+        if step_sq < options.tol {
             w = projected;
+            converged = true;
             break;
         }
 
@@ -69,7 +150,12 @@ pub fn optimize_min_variance(returns: &[Vec<f64>]) -> Vec<f64> {
         lr *= 0.995;
     }
 
-    normalize_long_only(w)
+    OptimizerResult {
+        weights: normalize_long_only(w),
+        iters,
+        converged,
+        final_step_squared: last_step_sq,
+    }
 }
 
 /// Long-only maximum-Sharpe optimization on the unit simplex.
@@ -638,6 +724,84 @@ mod tests {
 
         assert_eq!(optimize_cvar(&r, 0.95), inverse_cvar_weights(&r, 0.95));
         assert_eq!(optimize_cdar(&r, 0.95), inverse_cdar_weights(&r, 0.95));
+    }
+
+    // ========================================================================
+    // N18: convergence diagnostics
+    // ========================================================================
+
+    #[test]
+    fn min_variance_ex_reports_converged_when_tol_triggers() {
+        // Generous tolerance: the very first step's squared distance
+        // will already be below it, so convergence fires on iter 1.
+        let r = sample_returns();
+        let opts = OptimizerOptions {
+            max_iters: 350,
+            tol: 1.0, // absurdly loose
+        };
+        let res = optimize_min_variance_ex(&r, opts);
+        assert!(
+            res.converged,
+            "should converge immediately under a huge tol"
+        );
+        assert_eq!(res.iters, 1);
+        assert_valid_weights(&res.weights, 3);
+    }
+
+    #[test]
+    fn min_variance_ex_reports_not_converged_when_budget_exhausted() {
+        // Tight tolerance: step size decays but never reaches 0 — the
+        // loop must burn the whole budget.
+        let r = sample_returns();
+        let opts = OptimizerOptions {
+            max_iters: 50,
+            tol: 0.0, // unreachable for projected gradient on the simplex
+        };
+        let res = optimize_min_variance_ex(&r, opts);
+        assert!(!res.converged, "tol=0 is unreachable; must exhaust budget");
+        assert_eq!(res.iters, 50);
+        assert!(res.final_step_squared.is_finite());
+        assert_valid_weights(&res.weights, 3);
+    }
+
+    #[test]
+    fn min_variance_wrapper_equals_ex_default() {
+        let r = sample_returns();
+        let w = optimize_min_variance(&r);
+        let res = optimize_min_variance_ex(&r, OptimizerOptions::default());
+        assert_eq!(w, res.weights, "wrapper must equal _ex with defaults");
+    }
+
+    #[test]
+    fn min_variance_ex_empty_input_returns_empty() {
+        let res = optimize_min_variance_ex(&[], OptimizerOptions::default());
+        assert!(res.weights.is_empty());
+        assert_eq!(res.iters, 0);
+        assert!(!res.converged);
+    }
+
+    /// Documents the plan's observation: at the default `tol = 1e-16`
+    /// on daily-return-scale data, the optimizer never early-stops and
+    /// exhausts the 350-iter budget. This test pins that behaviour so a
+    /// future convergence improvement is explicit rather than silent.
+    #[test]
+    fn min_variance_ex_exhausts_default_budget_on_sample_returns() {
+        let r = sample_returns();
+        let res = optimize_min_variance_ex(&r, OptimizerOptions::default());
+        assert!(
+            !res.converged,
+            "1e-16 tol shouldn't trigger on daily-scale data"
+        );
+        assert_eq!(res.iters, 350);
+    }
+
+    #[test]
+    fn min_variance_ex_single_asset_is_trivially_converged() {
+        let r = vec![vec![0.01], vec![-0.005], vec![0.02]];
+        let res = optimize_min_variance_ex(&r, OptimizerOptions::default());
+        assert_eq!(res.weights, vec![1.0]);
+        assert!(res.converged);
+        assert_eq!(res.iters, 0);
     }
 
     /// N17 acceptance: degenerate input surfaces as an explicit error
