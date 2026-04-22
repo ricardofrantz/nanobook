@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (Breaking, security)
 
+- **`nanobook_risk::RiskEngine::new` (S5)**: Signature changes
+  from `-> Self` (panicking) to `-> Result<Self, RiskError>`.
+  The old implementation panicked on invalid config — bad for
+  Python callers (kills the interpreter with a stack trace) and
+  for any code that loads configs from files. New
+  `RiskError::InvalidConfig(String)` carries the offending-field
+  message suitable for display to a user. Migration: callers
+  with static configs use `.expect("config")`; callers with
+  user-supplied configs propagate the error.
+  - `rebalancer::check_risk` routes the error into the existing
+    `RiskReport` failing-check channel (signature unchanged).
+  - `python.RiskEngine.__init__` now raises `ValueError` on
+    invalid config instead of panicking the interpreter.
+
 - **`Trade::notional` (S4)**: Signature changes from
   `-> i64` to `-> Result<i64, ValidationError>`. The old method
   silently wrapped on `price.0 * (quantity as i64)` overflow,

@@ -5,9 +5,11 @@
 
 pub mod checks;
 pub mod config;
+pub mod error;
 pub mod report;
 
 pub use config::RiskConfig;
+pub use error::RiskError;
 pub use report::{RiskCheck, RiskReport, RiskStatus};
 
 use nanobook::Symbol;
@@ -22,16 +24,21 @@ pub struct RiskEngine {
 impl RiskEngine {
     /// Create a new risk engine with the given config.
     ///
-    /// # Panics
+    /// Validation is performed once at construction — every
+    /// subsequent `check_order` / `check_batch` call can treat the
+    /// config as well-formed.
     ///
-    /// Panics if `config` fails validation (e.g., NaN fields, out-of-range values).
-    /// This is intentional — fail-fast at construction, not at check time.
-    #[track_caller]
-    pub fn new(config: RiskConfig) -> Self {
-        if let Err(msg) = config.validate() {
-            panic!("invalid RiskConfig: {msg}");
-        }
-        Self { config }
+    /// # Errors
+    ///
+    /// Returns [`RiskError::InvalidConfig`] if any field fails
+    /// [`RiskConfig::validate`] (NaN, out-of-range, or otherwise
+    /// nonsensical values). Callers with a statically-valid config
+    /// can use `.expect("config")`; callers that load configs from
+    /// files or untrusted input should propagate the error to the
+    /// user.
+    pub fn new(config: RiskConfig) -> Result<Self, RiskError> {
+        config.validate().map_err(RiskError::InvalidConfig)?;
+        Ok(Self { config })
     }
 
     /// Access the current config.
