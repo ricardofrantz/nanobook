@@ -103,7 +103,10 @@ impl IbkrClient {
             }
         }
 
-        info!("Fetched {} positions", positions.len());
+        // Demoted to debug in S7: the position count is a coarse
+        // signal of account activity and shouldn't appear in
+        // aggregated info-level logs.
+        debug!("Fetched {} positions", positions.len());
         Ok(positions)
     }
 
@@ -155,7 +158,11 @@ impl IbkrClient {
             )?,
         };
 
-        info!(
+        // Demoted to debug in S7: equity/cash/buying-power are
+        // financial PII and must not appear in aggregated info-level
+        // logs. Set `RUST_LOG=debug` locally if you need to see them
+        // while debugging.
+        debug!(
             "Account: equity=${:.2}, cash=${:.2}, buying_power=${:.2}",
             equity, cash, buying_power
         );
