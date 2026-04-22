@@ -55,6 +55,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   item): `src/portfolio/position.rs:95,104` have analogous
   `quantity * price` patterns that are not yet checked.
 
+### Changed (Docs)
+
+- **README performance claim (D2)**: The "120 ns submit /
+  8M ops/sec" figures were aspirational — v0.9.3 itself
+  measured 131 ns, and v0.10.0 measures ~155 ns after N8's
+  self-trade prevention added the `Order::owner` field and
+  a per-trade STP branch. The README now reports the measured
+  v0.10.0 numbers (~155 ns, ~6M ops/sec) with links to
+  `benches/README.md` (methodology) and
+  `benches/v0.10-comparison.md` (delta). `cargo doc
+  --all-features --no-deps -p nanobook -p nanobook-broker
+  -p nanobook-risk -p nanobook-rebalancer` runs clean under
+  `-D rustdoc::broken_intra_doc_links`; the python binding
+  is excluded because its `nanobook` lib name collides with
+  the main crate on docs output — tracked as a follow-up.
+
 ### Added
 
 - **`benches/v0.10-comparison.md` (D0)**: Pre-tag benchmark

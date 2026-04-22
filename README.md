@@ -6,9 +6,16 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![cargo-deny](https://img.shields.io/badge/cargo--deny-audited-brightgreen)](https://github.com/ricardofrantz/nanobook/actions/workflows/ci.yml)
 
-**Production-grade Rust execution infrastructure for automated trading.**
-Zero-allocation hot paths. No panics on external input.
-Python computes the strategy. nanobook handles everything else.
+**Rust execution layer for Python trading strategies.**
+
+nanobook is for traders and researchers who already generate signals or target
+weights in Python, but want execution mechanics handled by compiled,
+deterministic Rust code: portfolio accounting, transaction costs, stops,
+limit-order-book simulation, pre-trade risk checks, and optional IBKR
+rebalancing.
+
+Keep factor research, sizing, and scheduling in Python. Use nanobook for the
+stateful execution layer around it.
 
 ## Architecture
 
@@ -21,11 +28,19 @@ Python computes the strategy. nanobook handles everything else.
 │  ┌──────────┬──────────┬──────────┬──────────┐  │
 │  │  Broker  │   Risk   │Portfolio │   LOB    │  │
 │  │   IBKR   │  Engine  │Simulator │  Engine  │  │
-│  │  Binance │ PreTrade │ Backtest │ 8M ops/s │  │
+│  │  Binance │ PreTrade │ Backtest │ 6M ops/s │  │
 │  └──────────┴──────────┴──────────┴──────────┘  │
 │   Rebalancer CLI: weights → diff → execute      │
 └─────────────────────────────────────────────────┘
 ```
+
+## Use Cases
+
+- Backtest target-weight strategies from Python with Rust portfolio accounting.
+- Simulate rebalances, transaction costs, fixed/trailing stops, and portfolio metrics.
+- Test limit-order-book behavior with deterministic matching and event logs.
+- Run pre-trade risk checks for concentration, leverage, and short exposure.
+- Rebalance an IBKR account from a target-weight file with dry-run and audit logs.
 
 ## What nanobook is NOT
 
@@ -43,8 +58,8 @@ Python computes the strategy. nanobook handles everything else.
   on the v1.0 roadmap.
 
 nanobook is a compact Rust execution kernel for Python strategies:
-LOB matching, portfolio simulation, broker abstraction, pre-trade risk,
-and rebalancer, all in one MIT-licensed workspace.
+limit-order-book matching, portfolio simulation, broker abstraction, pre-trade
+risk, and rebalancer, all in one MIT-licensed workspace.
 
 Python computes **what** to trade — factor rankings, signals, target weights.
 nanobook executes **how** — order routing, risk checks, portfolio simulation,
@@ -55,7 +70,7 @@ in Python, execution runs in Rust.
 
 | Crate | Description |
 |-------|-------------|
-| `nanobook` | LOB matching engine, portfolio simulator, backtest bridge, GARCH, optimizers |
+| `nanobook` | Core Rust crate: deterministic LOB, portfolio simulator, metrics, backtest bridge, GARCH, optimizers |
 | `nanobook-broker` | Broker trait with IBKR and Binance adapters |
 | `nanobook-risk` | Pre-trade risk engine (position limits, leverage, short exposure) |
 | `nanobook-python` | PyO3 bindings for all layers |
@@ -199,15 +214,22 @@ rebalancer reconcile target.json
 
 ## Performance
 
-Single-threaded benchmarks (AMD Ryzen / Intel Core):
+Single-threaded benchmarks (macOS arm64, v0.10.0, stock clocks):
 
 | Operation | Latency | Throughput |
 |-----------|---------|------------|
-| Submit (no match) | 120 ns | 8.3M ops/sec |
-| Submit (with match) | ~200 ns | 5M ops/sec |
-| BBO query | ~1 ns | 1B ops/sec |
-| Cancel (tombstone) | 170 ns | 5.9M ops/sec |
-| L2 snapshot (10 levels) | ~500 ns | 2M ops/sec |
+| Submit (no match) | ~155 ns | ~6.4M ops/sec |
+| Submit (with match) | ~197 ns | ~5M ops/sec |
+| BBO query | ~1.1 ns | ~900M ops/sec |
+| Cancel (tombstone, deep queue) | ~385 ns | ~2.6M ops/sec |
+| L2 snapshot (10 levels) | ~255 ns | ~4M ops/sec |
+
+Numbers are criterion medians measured with `cargo bench --bench throughput`.
+Hardware, build flags, and background load all move these ±10-20 %. See
+`benches/README.md` for the methodology and `benches/v0.10-comparison.md`
+for the v0.9.3 → v0.10.0 delta (the v0.10.0 submit path pays a ~20 ns cost
+for the new self-trade-prevention field even with STP off — a future
+revision will lift the off-path check out of the matching loop).
 
 Single-threaded throughput is roughly equivalent to Numba (both compile to
 LLVM IR). Where Rust wins: zero cold-start, true parallelism via Rayon with
@@ -1093,23 +1115,26 @@ Single-threaded (AMD Ryzen / Intel Core):
 
 | Operation | Latency | Throughput | Complexity |
 |-----------|---------|------------|------------|
-| Submit (no match) | **120 ns** | 8.3M ops/sec | O(log P) |
-| Submit (with match) | ~200 ns | 5M ops/sec | O(log P + M) |
-| BBO query | **~1 ns** | 1B ops/sec | O(1) |
-| Cancel (tombstone) | **170 ns** | 5.9M ops/sec | **O(1)** |
-| L2 snapshot (10 levels) | ~500 ns | 2M ops/sec | O(D) |
+| Submit (no match) | **~155 ns** | ~6.4M ops/sec | O(log P) |
+| Submit (with match) | ~197 ns | ~5M ops/sec | O(log P + M) |
+| BBO query | **~1.1 ns** | ~900M ops/sec | O(1) |
+| Cancel (tombstone, deep queue) | ~385 ns | ~2.6M ops/sec | **O(1)** |
+| L2 snapshot (10 levels) | ~255 ns | ~4M ops/sec | O(D) |
 
-Where P = price levels, M = orders matched, D = depth.
+Where P = price levels, M = orders matched, D = depth. Numbers are from
+`benches/v0.10-comparison.md` on macOS arm64; expect ±10-20 % across
+hardware and build flags.
 
 ### Time Breakdown (Submit, No Match)
 
 ```
-submit_limit() ~120 ns:
+submit_limit() ~155 ns:
 ├── FxHashMap insert     ~30 ns   order storage
 ├── BTreeMap insert      ~30 ns   price level (O(log P))
 ├── VecDeque push         ~5 ns   FIFO queue
 ├── Event recording      ~10 ns   (optional, for replay)
-└── Overhead             ~45 ns   struct creation, etc.
+├── STP branch           ~20 ns   `owner` field + policy read (Off path)
+└── Overhead             ~60 ns   struct creation, dispatch, etc.
 ```
 
 ### Optimizations
@@ -1129,7 +1154,7 @@ Single-threaded throughput is roughly equivalent (both compile to LLVM IR). Wher
 
 | Library | Throughput | Order Types | Deterministic | Use Case |
 |---------|------------|-------------|:---:|----------|
-| **nanobook** | **8M ops/sec** | Limit, Market, Stops, GTC/IOC/FOK | **Yes** | Strategy backtesting |
+| **nanobook** | **~6M ops/sec** | Limit, Market, Stops, GTC/IOC/FOK | **Yes** | Strategy backtesting |
 | [limitbook](https://lib.rs/crates/limitbook) | 3-5M ops/sec | Limit, Market | No | General purpose |
 | [lobster](https://lib.rs/crates/lobster) | ~300K ops/sec | Limit, Market | No | Simple matching |
 | [OrderBook-rs](https://github.com/joaquinbejar/OrderBook-rs) | 200K ops/sec | Many (iceberg, peg, etc.) | No | Production HFT |
