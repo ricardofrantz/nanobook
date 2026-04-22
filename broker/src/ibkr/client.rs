@@ -12,7 +12,7 @@ use log::{debug, info, warn};
 use nanobook::Symbol;
 
 use crate::error::BrokerError;
-use crate::types::{Account, BestQuote, BrokerOrder, OrderId, Position, Quote};
+use crate::types::{Account, BestQuote, BrokerOrder, OrderId, Position, Quote, f64_cents_checked};
 
 use super::market_data::best_quote_from_quote;
 use super::orders;
@@ -81,7 +81,8 @@ impl IbkrClient {
                     let symbol_str = pos.contract.symbol.to_string();
                     if let Some(sym) = Symbol::try_new(&symbol_str) {
                         let qty = pos.position as i64;
-                        let avg_cost_cents = (pos.average_cost * 100.0) as i64;
+                        let avg_cost_cents =
+                            f64_cents_checked(pos.average_cost, "ibkr position.average_cost")?;
                         debug!(
                             "Position: {} qty={} avg_cost={:.2}",
                             sym, qty, pos.average_cost
@@ -122,7 +123,13 @@ impl IbkrClient {
             match result {
                 AccountSummaryResult::Summary(s) => {
                     debug!("Account: {}={} {}", s.tag, s.value, s.currency);
-                    let value: f64 = s.value.parse().unwrap_or(0.0);
+                    let value: f64 = s.value.parse().unwrap_or_else(|e| {
+                        warn!(
+                            "ibkr account summary {}: failed to parse {:?} as f64 ({}); using 0",
+                            s.tag, s.value, e
+                        );
+                        0.0
+                    });
                     match s.tag.as_str() {
                         "NetLiquidation" => equity = value,
                         "TotalCashValue" => cash = value,
@@ -135,10 +142,13 @@ impl IbkrClient {
         }
 
         let account = Account {
-            equity_cents: (equity * 100.0) as i64,
-            cash_cents: (cash * 100.0) as i64,
-            buying_power_cents: (buying_power * 100.0) as i64,
-            gross_position_value_cents: ((equity - cash) * 100.0) as i64,
+            equity_cents: f64_cents_checked(equity, "ibkr NetLiquidation")?,
+            cash_cents: f64_cents_checked(cash, "ibkr TotalCashValue")?,
+            buying_power_cents: f64_cents_checked(buying_power, "ibkr BuyingPower")?,
+            gross_position_value_cents: f64_cents_checked(
+                equity - cash,
+                "ibkr gross_position_value",
+            )?,
         };
 
         info!(
@@ -182,9 +192,18 @@ impl IbkrClient {
             }
         }
 
-        let bid_cents = bid.map(|b| (b * 100.0) as i64).unwrap_or(0);
-        let ask_cents = ask.map(|a| (a * 100.0) as i64).unwrap_or(0);
-        let last_cents = last.map(|l| (l * 100.0) as i64).unwrap_or(0);
+        let bid_cents = bid
+            .map(|b| f64_cents_checked(b, "ibkr tick.bid"))
+            .transpose()?
+            .unwrap_or(0);
+        let ask_cents = ask
+            .map(|a| f64_cents_checked(a, "ibkr tick.ask"))
+            .transpose()?
+            .unwrap_or(0);
+        let last_cents = last
+            .map(|l| f64_cents_checked(l, "ibkr tick.last"))
+            .transpose()?
+            .unwrap_or(0);
 
         // Require at least one valid price
         if bid_cents <= 0 && ask_cents <= 0 && last_cents <= 0 {
