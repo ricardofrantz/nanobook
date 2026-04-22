@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master, main]
+    branches: [main]
   pull_request:
-    branches: [master, main]
+    branches: [main]
 
 # Default to least privilege (I1). Jobs that need more (e.g.,
 # writing to the repo) must override at job scope. CI is read-only
