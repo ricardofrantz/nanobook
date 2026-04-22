@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [master, main]
 
+# Default to least privilege (I1). Jobs that need more (e.g.,
+# writing to the repo) must override at job scope. CI is read-only
+# by construction: it tests, lints, and reports results.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -106,14 +112,18 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Pin tool versions (I1). --locked also freezes the tool's
+      # own transitive deps, so the install is fully
+      # deterministic. Bump versions deliberately rather than
+      # letting CI silently pick up whatever is latest.
       - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
+        run: cargo install cargo-deny --version 0.19.4 --locked
 
       - name: Run cargo-deny
         run: cargo deny check
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        run: cargo install cargo-audit --version 0.22.1 --locked
 
       - name: Run cargo-audit
         run: cargo audit
@@ -132,7 +142,7 @@ jobs:
           key: coverage
 
       - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov --locked
+        run: cargo install cargo-llvm-cov --version 0.8.5 --locked
 
       - name: Generate coverage
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info

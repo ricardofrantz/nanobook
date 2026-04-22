@@ -111,3 +111,9 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          # Explicit for clarity (I1). PEP 740 attestations are
+          # generated automatically when `id-token: write` is set
+          # at the job level (above), but declaring the flag here
+          # makes the intent visible in the workflow without
+          # requiring a reader to know the default.
+          attestations: true
