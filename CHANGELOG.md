@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed (Security)
 
+- **`nanobook::itch` (S3)**: NASDAQ ITCH 5.0 message parser no
+  longer panics on malformed input. Every `try_into().unwrap()`
+  slice read was replaced with a fallible helper
+  (`read_u16_be`, `read_u32_be`, `read_u48_be`, `read_u64_be`)
+  that returns `io::Error` of kind `InvalidData` on a short
+  slice, carrying the field name. The existing `min_payload`
+  fast-fail gate is preserved. A proptest covers 1000 randomized
+  byte sequences and asserts the parser never panics — important
+  because ITCH data comes from external transports where a
+  panic is a DoS vector.
+
 - **`nanobook-broker` (S2)**: Float-to-cents conversions at every
   IBKR and Binance boundary are now NaN/overflow-safe. The pattern
   `(value * 100.0) as i64` silently produced `0` on `NaN`,
