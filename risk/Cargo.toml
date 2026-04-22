@@ -1,17 +1,17 @@
 [package]
 name = "nanobook-risk"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.85"
-description = "Pre-trade risk engine for nanobook"
+description = "Pre-trade risk checks for nanobook orders and target-weight rebalances"
 license = "MIT"
 repository = "https://github.com/ricardofrantz/nanobook"
 homepage = "https://github.com/ricardofrantz/nanobook"
 documentation = "https://docs.rs/nanobook-risk"
 
 [dependencies]
-nanobook = { version = "0.9.3", path = "..", features = ["serde"] }
-nanobook-broker = { version = "0.4.0", path = "../broker" }
+nanobook = { version = "0.10.0", path = "..", features = ["serde"] }
+nanobook-broker = { version = "0.5.0", path = "../broker" }
 rustc-hash = "2.1"
 serde = { version = "1", features = ["derive"] }
 

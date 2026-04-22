@@ -8,7 +8,7 @@ resolver = "2"
 
 [package]
 name = "nanobook"
-version = "0.9.3"
+version = "0.10.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Deterministic Rust execution engine for trading backtests: limit-order book, portfolio simulation, metrics, risk checks, and Python bindings"
