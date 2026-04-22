@@ -57,6 +57,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`benches/v0.10-comparison.md` (D0)**: Pre-tag benchmark
+  delta against the v0.9.3 release commit (`bc4c48f`). Nine
+  benchmarks crossed the plan's +5 % regression threshold;
+  the largest is `submit_no_match` at +18 %, attributable to
+  N8's Order-struct growth (`owner: Option<OrderOwner>`,
+  +8 bytes) and the per-trade STP branch in the matcher. The
+  README's "120 ns submit" claim was already aspirational in
+  v0.9.3 (measured 131 ns then, 155 ns now) — scheduled for
+  honesty revision under D2. Six benchmarks showed apparent
+  large speedups (30 to 56 %) that the report attributes to
+  noisy baseline measurement; flagged for re-bench on a
+  quiet machine.
+
 - **`fuzz/mutants-baseline.md` (I3)**: First mutation-testing
   baseline for the matching engine using `cargo-mutants` v27.0.0
   against `src/matching.rs`, `src/exchange.rs`, `src/level.rs`.
