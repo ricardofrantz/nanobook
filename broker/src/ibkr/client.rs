@@ -12,6 +12,7 @@ use log::{debug, info, warn};
 use nanobook::Symbol;
 
 use crate::error::BrokerError;
+use crate::parse::parse_f64_or_warn;
 use crate::types::{Account, BestQuote, BrokerOrder, OrderId, Position, Quote, f64_cents_checked};
 
 use super::market_data::best_quote_from_quote;
@@ -123,17 +124,20 @@ impl IbkrClient {
             match result {
                 AccountSummaryResult::Summary(s) => {
                     debug!("Account: {}={} {}", s.tag, s.value, s.currency);
-                    let value: f64 = s.value.parse().unwrap_or_else(|e| {
-                        warn!(
-                            "ibkr account summary {}: failed to parse {:?} as f64 ({}); using 0",
-                            s.tag, s.value, e
-                        );
-                        0.0
-                    });
+                    // Each known tag routes to its own destination AND its
+                    // own `field` label for the parse-failure warning, so
+                    // a malformed NetLiquidation vs. BuyingPower surfaces
+                    // distinguishably in logs.
                     match s.tag.as_str() {
-                        "NetLiquidation" => equity = value,
-                        "TotalCashValue" => cash = value,
-                        "BuyingPower" => buying_power = value,
+                        "NetLiquidation" => {
+                            equity = parse_f64_or_warn(&s.value, "ibkr account.NetLiquidation");
+                        }
+                        "TotalCashValue" => {
+                            cash = parse_f64_or_warn(&s.value, "ibkr account.TotalCashValue");
+                        }
+                        "BuyingPower" => {
+                            buying_power = parse_f64_or_warn(&s.value, "ibkr account.BuyingPower");
+                        }
                         _ => {}
                     }
                 }
