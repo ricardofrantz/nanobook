@@ -18,7 +18,7 @@ git commit -m "Release v0.2.0"
 
 # 3. Create and push tag
 git tag v0.2.0
-git push origin master
+git push origin main
 git push origin v0.2.0
 ```
 
