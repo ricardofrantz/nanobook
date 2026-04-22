@@ -8,14 +8,16 @@
 
 **Rust execution layer for Python trading strategies.**
 
-nanobook is for traders and researchers who already generate signals or target
-weights in Python, but want execution mechanics handled by compiled,
-deterministic Rust code: portfolio accounting, transaction costs, stops,
+nanobook is a small execution kernel for the part of a trading system that is
+easy to underestimate: state. Your Python code can keep doing research,
+signals, sizing, and scheduling. nanobook handles the execution mechanics around
+that strategy: portfolio accounting, transaction costs, stops, deterministic
 limit-order-book simulation, pre-trade risk checks, and optional IBKR
 rebalancing.
 
-Keep factor research, sizing, and scheduling in Python. Use nanobook for the
-stateful execution layer around it.
+Use it when you want to ask: "if my strategy emits these target weights, what
+exactly happens to cash, holdings, risk checks, order-book events, and audit
+logs?"
 
 ## Architecture
 
@@ -34,15 +36,44 @@ stateful execution layer around it.
 └─────────────────────────────────────────────────┘
 ```
 
-## Use Cases
+## What You Can Do
 
-- Backtest target-weight strategies from Python with Rust portfolio accounting.
-- Simulate rebalances, transaction costs, fixed/trailing stops, and portfolio metrics.
-- Test limit-order-book behavior with deterministic matching and event logs.
+- Turn a Python target-weight schedule into holdings, returns, equity curve,
+  stop events, and portfolio metrics.
+- Simulate transaction costs, fixed/trailing stops, and deterministic
+  limit-order-book execution.
+- Test order-book behavior with replayable events instead of ad hoc mocks.
 - Run pre-trade risk checks for concentration, leverage, and short exposure.
-- Rebalance an IBKR account from a target-weight file with dry-run and audit logs.
+- Rebalance an IBKR account from a target-weight file with dry-run, confirmation,
+  reconciliation, and audit logs.
+
+## Why It Is Worth a Look
+
+- The boundary is sharp: Python decides **what** to trade; Rust accounts for
+  **what happened**.
+- The core is deterministic: same inputs, same order matching, same portfolio
+  path, same replay.
+- The Python package is a native PyO3 extension, so heavy loops run outside the
+  GIL instead of turning into another slow Python backtester.
+- The test suite is aimed at the failure modes trading code usually hides:
+  edge cases, property tests, reference-parity fixtures, fuzz harnesses, and
+  mutation-testing notes.
+- The scope is intentionally narrow: execution mechanics, not a UI, not a
+  connector zoo, not a full research stack.
+
+## v0.10 Hardening
+
+- Checked arithmetic for trade notional and VWAP; NaN/overflow-safe broker conversions.
+- Fallible risk-engine construction instead of config-time panics.
+- `rustls` default TLS backend, zeroize-on-drop for Binance credentials, and scrubbed broker logs.
+- Audit logs constrained to the working directory, with `0o600` permissions on Unix.
+- cargo-fuzz harnesses for matching and ITCH, plus an 89.76 % mutation-testing
+  baseline for the matcher.
 
 ## What nanobook is NOT
+
+The narrow scope is intentional: nanobook should be easy to audit, embed, and
+replace if your system grows beyond it.
 
 - **Not a full trading platform.** For venue breadth, calendars, and
   operator UIs, see [NautilusTrader](https://github.com/nautechsystems/nautilus_trader)
@@ -88,7 +119,7 @@ pip install nanobook
 
 ```toml
 [dependencies]
-nanobook = "0.9.3"
+nanobook = "0.10.0"
 ```
 
 **From source:**
@@ -138,9 +169,9 @@ Your optimizer produces weights. `backtest_weights()` handles rebalancing,
 cost modeling, position tracking, and return computation at compiled speed
 with the GIL released.
 
-**v0.9 additions:** fixed-parameter EWMA-style GARCH forecasting, portfolio optimizers
-(min-variance, max-Sharpe, risk-parity, inverse CVaR, inverse CDaR), and
-trailing/fixed stop-loss simulation — all accessible from Python.
+Portfolio tools include fixed-parameter EWMA-style GARCH forecasting,
+optimizers (min-variance, max-Sharpe, risk-parity, inverse CVaR, inverse
+CDaR), and trailing/fixed stop-loss simulation — all accessible from Python.
 
 ### Optimizer Example
 
@@ -256,25 +287,19 @@ Engineering decisions that keep the system simple and fast:
 
 - **Single-threaded** — deterministic by design; same inputs always produce same outputs
 - **In-process** — no networking overhead; wrap externally if needed
-- **No compliance layer** — no self-trade prevention or circuit breakers (out of scope)
+- **Execution scope, not compliance** — deterministic STP policies are included; regulatory workflows and circuit breakers are out of scope
 - **No complex order types** — no iceberg or pegged orders
 
 ## Documentation
 
-- Full developer reference is merged below in this README (`## Full Reference (Merged from DOC.md)`).
+- Full developer reference is included below in this README (`## Full Reference`).
 - **[docs.rs](https://docs.rs/nanobook)** — Rust API docs
 
 ## License
 
 MIT
 
-## Full Reference (Merged from DOC.md)
-
-
-[![CI](https://github.com/ricardofrantz/nanobook/actions/workflows/ci.yml/badge.svg)](https://github.com/ricardofrantz/nanobook/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/nanobook.svg)](https://crates.io/crates/nanobook)
-[![docs.rs](https://docs.rs/nanobook/badge.svg)](https://docs.rs/nanobook)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+## Full Reference
 
 **Developer Reference** — Full API documentation for the nanobook workspace.
 
@@ -301,7 +326,7 @@ MIT
 - [Persistence & Serde](#persistence--serde)
 - [CLI Reference](#cli-reference)
 - [Performance](#performance)
-- [Comparison with Other Rust LOBs](#comparison-with-other-rust-lobs)
+- [Where nanobook Fits](#where-nanobook-fits)
 - [Design Constraints](#design-constraints)
 
 ---
@@ -310,7 +335,7 @@ MIT
 
 ```toml
 [dependencies]
-nanobook = "0.9"
+nanobook = "0.10.0"
 ```
 
 ```rust
@@ -546,7 +571,7 @@ Event types: `SubmitLimit`, `SubmitMarket`, `Cancel`, `Modify`.
 Disable for max performance:
 
 ```toml
-nanobook = { version = "0.9", default-features = false }
+nanobook = { version = "0.10.0", default-features = false }
 ```
 
 ---
@@ -864,7 +889,7 @@ Notes:
 ### Single Order Check
 
 ```rust
-let engine = RiskEngine::new(RiskConfig::default());
+let engine = RiskEngine::new(RiskConfig::default()).expect("valid risk config");
 let report = engine.check_order(
     &Symbol::new("AAPL"),
     BrokerSide::Buy,
@@ -1150,14 +1175,25 @@ Single-threaded throughput is roughly equivalent (both compile to LLVM IR). Wher
 
 ---
 
-## Comparison with Other Rust LOBs
+## Where nanobook Fits
 
-| Library | Throughput | Order Types | Deterministic | Use Case |
-|---------|------------|-------------|:---:|----------|
-| **nanobook** | **~6M ops/sec** | Limit, Market, Stops, GTC/IOC/FOK | **Yes** | Strategy backtesting |
-| [limitbook](https://lib.rs/crates/limitbook) | 3-5M ops/sec | Limit, Market | No | General purpose |
-| [lobster](https://lib.rs/crates/lobster) | ~300K ops/sec | Limit, Market | No | Simple matching |
-| [OrderBook-rs](https://github.com/joaquinbejar/OrderBook-rs) | 200K ops/sec | Many (iceberg, peg, etc.) | No | Production HFT |
+nanobook is not trying to replace a full trading platform. It is the execution
+kernel you can put under a Python strategy when you want deterministic accounting,
+matching, risk checks, and a cautious path to broker execution.
+
+| If you need... | Use... |
+|----------------|--------|
+| Python signal research with vectorized factor tooling | pandas, Polars, scipy, vectorbt, Riskfolio-Lib |
+| A broad venue/connector layer | CCXT, Hummingbot, or a dedicated broker stack |
+| A full platform with calendars, operator workflows, and many venues | NautilusTrader or LEAN |
+| A compact Rust execution layer around target weights | **nanobook** |
+| A standalone order-book crate only | A narrower LOB library may be enough |
+
+nanobook's measured LOB hot path is still fast (~155 ns submit/no-match on the
+v0.10 benchmark run), but the reason to use the project is the combination: LOB,
+portfolio accounting, metrics, risk, Python bindings, broker adapters, and a
+rebalancer in one small workspace. Benchmark on your own hardware before making
+latency-sensitive decisions.
 
 ---
 
@@ -1169,7 +1205,7 @@ Engineering decisions that keep the system simple and fast:
 |------------|-----------|
 | **Single-threaded** | Deterministic by design — same inputs always produce same outputs |
 | **In-process** | No networking overhead; wrap externally if needed |
-| **No compliance** | No self-trade prevention or circuit breakers (out of scope) |
+| **Execution scope, not compliance** | STP policies are supported; regulatory workflows and circuit breakers are out of scope |
 | **No complex orders** | No iceberg or pegged orders |
 | **Integer prices** | Fixed-point arithmetic avoids floating-point rounding |
 | **Statistics in Python** | Spearman/IC/t-stat belong in scipy/Polars — proven, mature |
