@@ -362,4 +362,69 @@ mod tests {
         level.pop_front(100);
         assert_eq!(level.total_quantity(), 0);
     }
+
+    // ========================================================================
+    // Mutation-testing regression tests (I3 survivors)
+    // ========================================================================
+
+    /// Regression for I3: `Level::raw_len` returning the literal
+    /// `1` survived the mutation suite because no test exercised
+    /// `raw_len()` on a queue of length > 1. The N16 proptest
+    /// relied on random price sparsity, which rarely produced
+    /// multi-order levels. Pin a direct multi-order assertion.
+    #[test]
+    fn raw_len_tracks_queue_size_across_pushes_and_tombstones() {
+        let mut level = Level::new(Price(100_00));
+        assert_eq!(level.raw_len(), 0);
+
+        level.push_back(OrderId(1), 10);
+        level.push_back(OrderId(2), 20);
+        level.push_back(OrderId(3), 30);
+        assert_eq!(level.raw_len(), 3);
+
+        // Tombstoning does not shrink raw_len — it just flips an
+        // in-queue entry to the sentinel id. That's the whole
+        // point of the structural invariant raw_len ==
+        // order_count + tombstone_count.
+        level.mark_tombstone(1, 20);
+        assert_eq!(level.raw_len(), 3);
+        assert_eq!(level.tombstone_count(), 1);
+        assert_eq!(level.order_count(), 2);
+
+        level.compact();
+        assert_eq!(level.raw_len(), 2);
+    }
+
+    /// Regression for I3: the tombstone-decrement branch inside
+    /// `Level::pop_front` (`self.tombstone_count -= 1`) was
+    /// mutation-surviving (`-= → +=`, `-= → /=`) because the
+    /// production code path always pre-strips tombstones via
+    /// `level.front()` before calling `pop_front(qty)`, so the
+    /// defensive branch was unreachable by the test suite.
+    ///
+    /// Exercise the defensive branch directly by placing a
+    /// tombstone at the head and calling `pop_front` without an
+    /// intervening `front()` call.
+    #[test]
+    fn pop_front_decrements_tombstone_count_when_head_is_tombstone() {
+        let mut level = Level::new(Price(100_00));
+        level.push_back(OrderId(1), 10);
+        level.push_back(OrderId(2), 20);
+
+        // Tombstone the head without calling `front()`.
+        level.mark_tombstone(0, 10);
+        assert_eq!(level.tombstone_count(), 1);
+        assert_eq!(level.raw_len(), 2);
+
+        // pop_front must traverse the head tombstone (decrementing
+        // tombstone_count) and return the real front (OrderId(2)).
+        let popped = level.pop_front(20);
+        assert_eq!(popped, Some(OrderId(2)));
+        assert_eq!(
+            level.tombstone_count(),
+            0,
+            "tombstone_count must decrement through the head-skip branch",
+        );
+        assert_eq!(level.raw_len(), 0);
+    }
 }

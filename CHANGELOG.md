@@ -57,6 +57,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fuzz/mutants-baseline.md` (I3)**: First mutation-testing
+  baseline for the matching engine using `cargo-mutants` v27.0.0
+  against `src/matching.rs`, `src/exchange.rs`, `src/level.rs`.
+  Kill rate **89.76 %** (114 / 127 testable mutants) — clears the
+  plan's ≥85 % bar. Six regression tests added this commit closed
+  7 of the 20 original survivors; the 13 remaining are all
+  accessor-equivalent mutations documented in the baseline
+  report. Reproduce with
+  `cargo mutants -p nanobook --file <file> --timeout 60
+  --jobs 4 --all-features`.
+
 - **`fuzz/` cargo-fuzz harness (I2)**: Two libFuzzer targets in a
   new nightly-only workspace isolated from the main workspace via
   `exclude = ["fuzz"]`.

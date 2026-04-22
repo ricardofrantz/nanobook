@@ -1230,6 +1230,32 @@ mod tests {
         assert_eq!(exchange.pending_stop_count(), 0);
     }
 
+    /// Regression for I3 (mutation survivor): the Sell-branch
+    /// comparison in `insert_stop_order` is symmetric to the Buy
+    /// branch but was uncovered by a dedicated test, letting a
+    /// mutation replacing `<=` with `>` in the Sell direction
+    /// slip through. Sell-stop immediate trigger fires when
+    /// `last_price <= stop_price` — the opposite direction of
+    /// the Buy case, by design.
+    #[test]
+    fn immediate_trigger_sell_stop_if_price_already_past() {
+        let mut exchange = Exchange::new();
+
+        // Establish last_trade_price at 100.
+        exchange.submit_limit(Side::Sell, Price(100_00), 50, TimeInForce::GTC);
+        exchange.submit_limit(Side::Buy, Price(100_00), 50, TimeInForce::GTC);
+        assert_eq!(exchange.last_trade_price(), Some(Price(100_00)));
+
+        // Resting bids so the triggered sell can fill.
+        exchange.submit_limit(Side::Buy, Price(95_00), 100, TimeInForce::GTC);
+
+        // Submit sell stop at 101 — last price (100) is already
+        // at or below, so the stop must fire immediately.
+        let result = exchange.submit_stop_market(Side::Sell, Price(101_00), 100);
+        assert_eq!(result.status, StopStatus::Triggered);
+        assert_eq!(exchange.pending_stop_count(), 0);
+    }
+
     #[test]
     fn stop_cascade() {
         let mut exchange = Exchange::new();
@@ -1398,5 +1424,64 @@ mod tests {
         let cancel = exchange.cancel(result.order_id);
         assert!(cancel.success);
         assert_eq!(exchange.pending_stop_count(), 0);
+    }
+
+    // ========================================================================
+    // Memory-management regression tests (I3 mutation survivors)
+    // ========================================================================
+
+    /// Regression for I3: `clear_trades` was a surviving mutant
+    /// (replace body with `()`) because no test asserted the
+    /// cleared state afterwards. Pin both the effect and the
+    /// idempotence.
+    #[test]
+    fn clear_trades_empties_trade_history() {
+        let mut exchange = Exchange::new();
+        exchange.submit_limit(Side::Sell, Price(100_00), 100, TimeInForce::GTC);
+        exchange.submit_limit(Side::Buy, Price(100_00), 100, TimeInForce::GTC);
+        assert!(
+            !exchange.trades().is_empty(),
+            "precondition: a trade must have occurred",
+        );
+
+        exchange.clear_trades();
+        assert!(exchange.trades().is_empty());
+
+        // Idempotent on empty state.
+        exchange.clear_trades();
+        assert!(exchange.trades().is_empty());
+    }
+
+    /// Regression for I3: `Exchange::compact` forwarding to
+    /// `OrderBook::compact` was unverified at the Exchange layer,
+    /// letting the `()` mutant survive. This test creates a
+    /// tombstone via cancel, then asserts compact removes it.
+    #[test]
+    fn compact_removes_tombstones_across_exchange() {
+        let mut exchange = Exchange::new();
+        let r1 = exchange.submit_limit(Side::Buy, Price(100_00), 100, TimeInForce::GTC);
+        exchange.submit_limit(Side::Buy, Price(100_00), 50, TimeInForce::GTC);
+
+        // O(1) cancel leaves a tombstone in the level queue.
+        assert!(exchange.cancel(r1.order_id).success);
+        let level = exchange
+            .book()
+            .bids()
+            .get_level(Price(100_00))
+            .expect("bid level still present");
+        assert_eq!(level.tombstone_count(), 1);
+
+        exchange.compact();
+
+        let level = exchange
+            .book()
+            .bids()
+            .get_level(Price(100_00))
+            .expect("bid level still present after compact");
+        assert_eq!(
+            level.tombstone_count(),
+            0,
+            "compact must remove the tombstone",
+        );
     }
 }

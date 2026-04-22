@@ -1,6 +1,10 @@
 # Rust
 /target/
 
+# cargo-mutants output (I3 baseline; regenerated on demand)
+/mutants.out/
+/mutants.log
+
 # IDE
 .idea/
 .vscode/
