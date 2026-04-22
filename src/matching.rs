@@ -324,6 +324,11 @@ mod tests {
         assert_eq!(result.trades.len(), 1);
         assert_eq!(result.filled_quantity(), 100);
         assert!(result.is_fully_filled());
+        // Regression for I3: without this negative assertion, the
+        // mutation `MatchResult::is_empty -> true` survived. Every
+        // pre-I3 test that inspected `is_empty` only asserted the
+        // positive case (empty book → empty result).
+        assert!(!result.is_empty());
 
         // Verify trade details
         let trade = &result.trades[0];
