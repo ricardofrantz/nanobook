@@ -22,19 +22,46 @@ pub struct AuditEvent {
 }
 
 /// Append-only audit logger.
+///
+/// # File permissions
+///
+/// On Unix, newly-created audit files are owner-read/write only
+/// (`mode 0o600`). The file records positions, equity, and order
+/// details — defending it from accidental world-readability via a
+/// lax umask is cheap and protects against leaks through shared
+/// filesystems, misconfigured backups, or inadvertent commits.
+///
+/// On Windows, permissions are inherited from the parent directory
+/// and are NOT restricted by nanobook. Users on shared Windows
+/// systems should set ACLs on the audit directory manually.
+///
+/// The mode is applied only on file *creation*. Pre-existing audit
+/// files keep their current permissions — if you need to tighten an
+/// existing file, remove it and let nanobook recreate it, or call
+/// `chmod 600 <path>` out of band.
 pub struct AuditLog {
     writer: BufWriter<std::fs::File>,
 }
 
 impl AuditLog {
     /// Open (or create) the audit log file for appending.
+    ///
+    /// On Unix, a freshly-created file receives mode `0o600`. See
+    /// the type-level doc for the Windows caveat.
     pub fn open(path: &Path) -> Result<Self> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        let mut opts = OpenOptions::new();
+        opts.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let file = opts.open(path)?;
 
         Ok(Self {
             writer: BufWriter::new(file),
@@ -230,5 +257,31 @@ mod tests {
         log.log_simple("test").unwrap();
 
         assert!(path.exists());
+    }
+
+    /// Regression for S7: on Unix, a newly-created audit file must
+    /// have mode `0o600` (owner read/write only). The low 9 bits
+    /// are the permission bits; higher bits encode file type and
+    /// sticky/setuid flags and should be masked off before the
+    /// comparison.
+    #[cfg(unix)]
+    #[test]
+    fn audit_log_is_0o600_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+
+        let mut log = AuditLog::open(&path).unwrap();
+        log.log_simple("test").unwrap();
+        drop(log); // flush and close
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "expected audit file mode 0o600, got {:o}",
+            mode & 0o777,
+        );
     }
 }

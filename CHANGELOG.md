@@ -42,6 +42,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed (Security)
 
+- **`nanobook-rebalancer` audit file (S7)**: The JSONL audit
+  file is now created with mode `0o600` on Unix (owner
+  read/write only), protecting the position / equity / order
+  trail from leaks through shared filesystems, misconfigured
+  backups, or lax umask defaults. The mode is applied at file
+  creation; pre-existing audit files keep their current
+  permissions. On Windows, permissions inherit from the parent
+  directory and are not restricted — the audit-file doc-comment
+  flags this.
+- **`nanobook-broker` IBKR logs (S7)**: Equity, cash,
+  buying-power, and position-count `info!` log lines are
+  demoted to `debug!`. Financial PII no longer flows to
+  aggregated info-level sinks by default; set `RUST_LOG=debug`
+  locally when you need the visibility. Connection-status
+  logs (`"Connecting to …"`, `"Connected (client_id=…)"`) stay
+  at `info!` since they carry no PII.
+
 - **`nanobook-broker` (S6)**: Consolidated the five inline
   "parse f64 string, warn on failure, fall back to 0" blocks
   introduced by S2 into a single `parse::parse_f64_or_warn`
