@@ -5,12 +5,12 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::{BufWriter, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 /// An audit event written to the JSONL trail.
 #[derive(Debug, Clone, Serialize)]
@@ -39,6 +39,7 @@ pub struct AuditEvent {
 /// files keep their current permissions — if you need to tighten an
 /// existing file, remove it and let nanobook recreate it, or call
 /// `chmod 600 <path>` out of band.
+#[derive(Debug)]
 pub struct AuditLog {
     writer: BufWriter<std::fs::File>,
 }
@@ -46,9 +47,33 @@ pub struct AuditLog {
 impl AuditLog {
     /// Open (or create) the audit log file for appending.
     ///
-    /// On Unix, a freshly-created file receives mode `0o600`. See
-    /// the type-level doc for the Windows caveat.
+    /// Validates that `path` canonicalizes to a location under the
+    /// current working directory — symlink-aware, so a symlink
+    /// escape like `./logs → /tmp/shared` is rejected. On Unix, a
+    /// freshly-created file receives mode `0o600`. See the
+    /// type-level doc for the Windows caveat.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::AuditPathOutsideWorkdir`] if `path` resolves
+    ///   outside CWD (including through a symlink).
+    /// - `Error::Audit(io::Error)` for filesystem-level failures
+    ///   (CWD unreadable, permission denied on create, etc.).
     pub fn open(path: &Path) -> Result<Self> {
+        let workdir = std::env::current_dir()?;
+        Self::open_in(path, &workdir)
+    }
+
+    /// Open (or create) the audit log file for appending, validating
+    /// that `path` resolves to a location under `workdir`.
+    ///
+    /// Use this variant when the "allowed root" is not the process
+    /// CWD — typical cases are tests working in a `tempdir` and a
+    /// future `--workdir` CLI flag. See [`Self::open`] for the
+    /// ergonomic default.
+    pub fn open_in(path: &Path, workdir: &Path) -> Result<Self> {
+        validate_audit_path(path, workdir)?;
+
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -86,6 +111,61 @@ impl AuditLog {
     pub fn log_simple(&mut self, event: &'static str) -> Result<()> {
         self.log(event, serde_json::json!({}))
     }
+}
+
+/// Walk `path` upward until finding an existing ancestor that
+/// `canonicalize`s, then rejoin the unresolved suffix. This lets
+/// callers pass an audit path whose target directory doesn't exist
+/// yet (common on first run), while still resolving any symlinks
+/// present in the existing prefix.
+fn canonicalize_as_far_as_possible(path: &Path) -> std::io::Result<PathBuf> {
+    // Fast path: whole thing exists.
+    if let Ok(p) = path.canonicalize() {
+        return Ok(p);
+    }
+
+    // Walk ancestors. For each step up, accumulate the stripped tail
+    // so we can rejoin it to the canonical prefix once we find one.
+    let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
+    let mut cursor = path;
+    loop {
+        match cursor.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => {
+                // Store the component we're stripping.
+                if let Some(name) = cursor.file_name() {
+                    tail.push(name);
+                }
+                if let Ok(canon) = parent.canonicalize() {
+                    let mut out = canon;
+                    for segment in tail.iter().rev() {
+                        out.push(segment);
+                    }
+                    return Ok(out);
+                }
+                cursor = parent;
+            }
+            // Reached the root (or an empty parent) without finding
+            // anything canonicalizable. Return the original path's
+            // canonicalize error so the caller sees a familiar
+            // `NotFound`.
+            _ => return path.canonicalize(),
+        }
+    }
+}
+
+/// Ensure `path` resolves to a filesystem location under `workdir`.
+/// `canonicalize` is symlink-aware, so the check also rejects
+/// symlinks in the existing portion of `path` that point outside
+/// `workdir`.
+fn validate_audit_path(path: &Path, workdir: &Path) -> Result<()> {
+    let canonical_path = canonicalize_as_far_as_possible(path)?;
+    let canonical_workdir = workdir.canonicalize()?;
+    if !canonical_path.starts_with(&canonical_workdir) {
+        return Err(Error::AuditPathOutsideWorkdir {
+            path: canonical_path,
+        });
+    }
+    Ok(())
 }
 
 /// Convenience: log a run start event.
@@ -229,7 +309,7 @@ mod tests {
         let path = dir.path().join("test_audit.jsonl");
 
         {
-            let mut log = AuditLog::open(&path).unwrap();
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
             log.log_simple("test_event").unwrap();
             log.log("test_data", serde_json::json!({"key": "value"}))
                 .unwrap();
@@ -253,10 +333,83 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("subdir").join("deep").join("audit.jsonl");
 
-        let mut log = AuditLog::open(&path).unwrap();
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
         log.log_simple("test").unwrap();
 
         assert!(path.exists());
+    }
+
+    // ========================================================================
+    // Sandboxing (S8)
+    // ========================================================================
+
+    /// A nonexistent audit directory under `workdir` is accepted —
+    /// the canonicalize-as-far-as-possible walk keeps the validation
+    /// useful on first run when `logs/` doesn't exist yet.
+    #[test]
+    fn sandboxing_accepts_nonexistent_path_under_workdir() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("does").join("not").join("exist.jsonl");
+
+        assert!(
+            AuditLog::open_in(&path, dir.path()).is_ok(),
+            "nonexistent path under workdir must be accepted"
+        );
+    }
+
+    /// An absolute path pointing outside `workdir` is rejected with
+    /// `AuditPathOutsideWorkdir`, not silently accepted.
+    #[test]
+    fn sandboxing_rejects_absolute_path_outside_workdir() {
+        let workdir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let path = outside.path().join("audit.jsonl");
+
+        let err = AuditLog::open_in(&path, workdir.path())
+            .expect_err("path outside workdir must be rejected");
+        assert!(
+            matches!(err, Error::AuditPathOutsideWorkdir { .. }),
+            "expected AuditPathOutsideWorkdir, got {err:?}",
+        );
+    }
+
+    /// Parent-traversal attempts like `workdir/../elsewhere` are
+    /// rejected because `canonicalize` resolves `..` before the
+    /// `starts_with` check.
+    #[test]
+    fn sandboxing_rejects_parent_traversal() {
+        let workdir = tempfile::tempdir().unwrap();
+        // Create an existing sibling directory that ../ would escape to.
+        let sibling = workdir.path().parent().unwrap().join("sibling-escape");
+        let _ = std::fs::create_dir_all(&sibling);
+        let path = sibling.join("audit.jsonl");
+
+        let err = AuditLog::open_in(&path, workdir.path())
+            .expect_err("parent-traversal must be rejected");
+        assert!(matches!(err, Error::AuditPathOutsideWorkdir { .. }));
+
+        let _ = std::fs::remove_dir_all(&sibling);
+    }
+
+    /// On Unix, a symlink inside `workdir` that points to a location
+    /// outside `workdir` is rejected — this is the primary attack
+    /// S8 closes. Not run on Windows: the stdlib's `canonicalize` on
+    /// Windows uses a different semantic (UNC long paths), and
+    /// symlinks require privileged dev-mode creation.
+    #[cfg(unix)]
+    #[test]
+    fn sandboxing_rejects_symlink_escape() {
+        let workdir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+
+        // Create `workdir/logs -> outside/`.
+        let symlink_path = workdir.path().join("logs");
+        std::os::unix::fs::symlink(outside.path(), &symlink_path).unwrap();
+
+        let audit_path = symlink_path.join("audit.jsonl");
+        let err = AuditLog::open_in(&audit_path, workdir.path())
+            .expect_err("symlink escape must be rejected");
+        assert!(matches!(err, Error::AuditPathOutsideWorkdir { .. }));
     }
 
     /// Regression for S7: on Unix, a newly-created audit file must
@@ -272,7 +425,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("audit.jsonl");
 
-        let mut log = AuditLog::open(&path).unwrap();
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
         log.log_simple("test").unwrap();
         drop(log); // flush and close
 

@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (Breaking, security)
 
+- **`nanobook-rebalancer` audit path sandboxing (S8)**:
+  `AuditLog::open` now refuses to write to a path that
+  canonicalizes outside the current working directory.
+  `canonicalize` is symlink-aware, so a `./logs → /tmp/shared`
+  symlink or a `../elsewhere` traversal is rejected with a new
+  `Error::AuditPathOutsideWorkdir { path }` variant. The primary
+  defense is against symlink-assisted audit-data exfiltration.
+  - `AuditLog::open_in(path, workdir)` is a new variant that
+    lets callers specify an explicit workdir (used by tests and
+    intended for a future `--workdir` CLI flag).
+  - Configs with an absolute `logging.dir` outside CWD will
+    error at audit open. Migration: move the audit directory
+    under CWD, or use a process-level workdir switch such as
+    `cd <config-root> && rebalancer …`.
+
 - **`nanobook_risk::RiskEngine::new` (S5)**: Signature changes
   from `-> Self` (panicking) to `-> Result<Self, RiskError>`.
   The old implementation panicked on invalid config — bad for
