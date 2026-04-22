@@ -26,7 +26,7 @@ logs?"
 │        Your Python Strategy  (private)          │
 │   Factors · Signals · Sizing · Scheduling       │
 ├─────────────────────────────────────────────────┤
-│            nanobook (Rust, open-source)          │
+│            nanobook (Rust, open-source)         │
 │  ┌──────────┬──────────┬──────────┬──────────┐  │
 │  │  Broker  │   Risk   │Portfolio │   LOB    │  │
 │  │   IBKR   │  Engine  │Simulator │  Engine  │  │
