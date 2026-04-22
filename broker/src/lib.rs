@@ -10,6 +10,12 @@ pub mod error;
 pub mod mock;
 pub mod types;
 
+/// Shared parsing helpers for broker REST responses. Compiled only
+/// when at least one HTTP-based adapter is active (IBKR's ibapi is
+/// binary, but its account-summary strings share the same concerns).
+#[cfg(any(feature = "binance", feature = "ibkr"))]
+pub(crate) mod parse;
+
 #[cfg(feature = "ibkr")]
 pub mod ibkr;
 

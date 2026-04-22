@@ -8,9 +8,9 @@ use nanobook::Symbol;
 
 use crate::Broker;
 use crate::error::BrokerError;
+use crate::parse::parse_f64_or_warn;
 use crate::types::*;
 use client::BinanceClient;
-use log::warn;
 
 /// Binance spot broker implementing the generic Broker trait.
 ///
@@ -57,18 +57,15 @@ impl BinanceBroker {
 
     /// Parse a decimal string to cents (e.g., "185.50" → 18550).
     ///
-    /// Returns `Ok(0)` when the string fails to parse — a warning is
-    /// logged so the misbehaving upstream field is visible in logs.
-    /// Once parsed, the `f64 → i64` conversion is NaN/overflow-safe
-    /// via [`f64_cents_checked`].
+    /// On parse failure, [`parse_f64_or_warn`] emits a
+    /// `log::warn!` naming the field and returns `0.0`, so the
+    /// whole function returns `Ok(0)` — a plausible zero that lets
+    /// error recovery continue. If the parsed `f64` is non-finite
+    /// or overflows `i64` after the ×100 scaling,
+    /// [`f64_cents_checked`] surfaces it as an explicit
+    /// `BrokerError`.
     fn parse_price_cents(s: &str, field: &'static str) -> Result<i64, BrokerError> {
-        let val: f64 = match s.parse() {
-            Ok(v) => v,
-            Err(e) => {
-                warn!("binance {field}: failed to parse {s:?} as f64 ({e}); using 0");
-                return Ok(0);
-            }
-        };
+        let val = parse_f64_or_warn(s, field);
         f64_cents_checked(val, field)
     }
 }
@@ -92,20 +89,8 @@ impl Broker for BinanceBroker {
 
         let mut positions = Vec::with_capacity(info.balances.len());
         for b in &info.balances {
-            let free: f64 = b.free.parse().unwrap_or_else(|_| {
-                warn!(
-                    "binance balance.free: failed to parse {:?}; using 0",
-                    b.free
-                );
-                0.0
-            });
-            let locked: f64 = b.locked.parse().unwrap_or_else(|_| {
-                warn!(
-                    "binance balance.locked: failed to parse {:?}; using 0",
-                    b.locked
-                );
-                0.0
-            });
+            let free = parse_f64_or_warn(&b.free, "binance balance.free");
+            let locked = parse_f64_or_warn(&b.locked, "binance balance.locked");
             let total = free + locked;
             if total <= 0.0 {
                 continue;
@@ -138,20 +123,8 @@ impl Broker for BinanceBroker {
             .iter()
             .filter(|b| b.asset == self.quote_asset)
             .map(|b| {
-                let free: f64 = b.free.parse().unwrap_or_else(|_| {
-                    warn!(
-                        "binance balance.free: failed to parse {:?}; using 0",
-                        b.free
-                    );
-                    0.0
-                });
-                let locked: f64 = b.locked.parse().unwrap_or_else(|_| {
-                    warn!(
-                        "binance balance.locked: failed to parse {:?}; using 0",
-                        b.locked
-                    );
-                    0.0
-                });
+                let free = parse_f64_or_warn(&b.free, "binance balance.free");
+                let locked = parse_f64_or_warn(&b.locked, "binance balance.locked");
                 free + locked
             })
             .sum();

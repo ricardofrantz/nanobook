@@ -42,6 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed (Security)
 
+- **`nanobook-broker` (S6)**: Consolidated the five inline
+  "parse f64 string, warn on failure, fall back to 0" blocks
+  introduced by S2 into a single `parse::parse_f64_or_warn`
+  helper. All warn messages now share a uniform shape
+  (`"{field}: failed to parse {raw:?} as f64 ({err}); using 0"`)
+  making log-scraping and alert rules simpler. Field tags are
+  module-qualified (`"binance balance.free"`,
+  `"ibkr account.NetLiquidation"`) so a malformed integration
+  partner is identifiable at a glance. No behavior change.
+
 - **`nanobook::itch` (S3)**: NASDAQ ITCH 5.0 message parser no
   longer panics on malformed input. Every `try_into().unwrap()`
   slice read was replaced with a fallible helper
