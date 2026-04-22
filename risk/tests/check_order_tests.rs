@@ -26,6 +26,7 @@ fn engine() -> RiskEngine {
         max_trade_usd: 50_000.0,
         ..RiskConfig::default()
     })
+    .expect("test RiskConfig is valid")
 }
 
 // ============================================================================
@@ -145,7 +146,8 @@ fn short_not_allowed_fails() {
         max_position_pct: 0.25,
         allow_short: false,
         ..RiskConfig::default()
-    });
+    })
+    .expect("test RiskConfig is valid");
     let report = eng.check_order(
         &aapl(),
         BrokerSide::Sell,
@@ -213,6 +215,7 @@ fn large_order_fails_order_value() {
         max_order_value_cents: 10_000,
         ..RiskConfig::default()
     })
+    .expect("test RiskConfig is valid")
     .check_order(
         &aapl(),
         BrokerSide::Buy,
@@ -239,6 +242,7 @@ fn large_order_passes_order_value_boundary() {
         max_order_value_cents: 10_000,
         ..RiskConfig::default()
     })
+    .expect("test RiskConfig is valid")
     .check_order(
         &aapl(),
         BrokerSide::Buy,
@@ -266,6 +270,7 @@ fn check_order_reports_expected_check_names() {
         max_order_value_cents: 10_000,
         ..RiskConfig::default()
     })
+    .expect("test RiskConfig is valid")
     .check_order(
         &aapl(),
         BrokerSide::Buy,
@@ -367,12 +372,34 @@ fn boundary_values_validate() {
     assert!(config.validate().is_ok());
 }
 
+/// Regression for S5: `RiskEngine::new` no longer panics on an
+/// invalid config. It now returns `RiskError::InvalidConfig(msg)`
+/// whose message includes the offending field name — important so
+/// users loading configs from files get an actionable error instead
+/// of a stack trace.
 #[test]
-#[should_panic(expected = "invalid RiskConfig")]
-fn risk_engine_panics_on_invalid_config() {
+fn risk_engine_returns_err_on_invalid_config() {
     let config = RiskConfig {
         max_position_pct: f64::NAN,
         ..RiskConfig::default()
     };
-    RiskEngine::new(config);
+    let err = RiskEngine::new(config).expect_err("NaN max_position_pct should reject");
+    match err {
+        nanobook_risk::RiskError::InvalidConfig(msg) => {
+            assert!(
+                msg.contains("max_position_pct"),
+                "error should mention the offending field, got {msg:?}"
+            );
+        }
+    }
+}
+
+/// A valid config round-trips to `Ok`. Sanity test to bracket the
+/// invalid-config case.
+#[test]
+fn risk_engine_accepts_valid_config() {
+    assert!(
+        RiskEngine::new(RiskConfig::default()).is_ok(),
+        "default RiskConfig must be valid"
+    );
 }

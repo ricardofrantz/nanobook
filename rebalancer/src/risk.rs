@@ -64,7 +64,10 @@ pub fn check_risk(
     current_qty: &FxHashMap<Symbol, i64>,
     config: &RiskConfig,
 ) -> RiskReport {
-    let engine = RiskEngineImpl::new(adapt_config(config));
+    let engine = match RiskEngineImpl::new(adapt_config(config)) {
+        Ok(e) => e,
+        Err(e) => return validation_failure(e.to_string()),
+    };
     let account = Account {
         equity_cents,
         buying_power_cents: equity_cents,

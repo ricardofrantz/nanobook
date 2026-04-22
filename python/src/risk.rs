@@ -53,7 +53,7 @@ impl PyRiskEngine {
         max_trade_usd: f64,
         max_order_value_cents: i64,
         max_batch_value_cents: i64,
-    ) -> Self {
+    ) -> PyResult<Self> {
         let config = RiskConfig {
             max_position_pct,
             max_leverage,
@@ -65,9 +65,9 @@ impl PyRiskEngine {
             max_batch_value_cents,
             ..RiskConfig::default()
         };
-        Self {
-            inner: RustRiskEngine::new(config),
-        }
+        let inner = RustRiskEngine::new(config)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(Self { inner })
     }
 
     /// Check a single order against risk limits.
