@@ -57,6 +57,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed (Security)
 
+- **`nanobook-broker` credential scrubbing (S9)**:
+  `BinanceBroker` and its internal `BinanceClient` now derive
+  [`zeroize::ZeroizeOnDrop`](https://docs.rs/zeroize/latest/zeroize/trait.ZeroizeOnDrop.html).
+  On drop, the heap bytes backing `api_key` and `secret_key` are
+  overwritten with zeros before the allocator can reclaim them,
+  closing the post-free memory-inspection window. Replaces the
+  ad-hoc `impl Drop` on `BinanceClient` with the idiomatic
+  derive. `#[zeroize(skip)]` is applied to non-credential fields
+  (reqwest client, base URL, testnet flag, quote asset) — the
+  reqwest `Client` has no `Zeroize` impl and holds no secrets.
+  - New `broker/README.md` documents the three things
+    zeroization does NOT protect against: runtime reads,
+    intermediate buffers in crypto libraries, and the PyO3
+    `&str → PyString` caveat. Recommends passing credentials
+    via environment variables on the Rust side to avoid
+    transiting a `PyString` at all.
+  - `IbkrClient` is deliberately NOT `ZeroizeOnDrop` — TWS
+    authenticates at the socket layer via `(host, port,
+    client_id)` and no credentials live in process memory.
+
 - **`nanobook-rebalancer` audit file (S7)**: The JSONL audit
   file is now created with mode `0o600` on Unix (owner
   read/write only), protecting the position / equity / order
