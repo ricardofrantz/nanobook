@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (Breaking, security)
+
+- **`nanobook-broker` (S1)**: Default TLS backend is now `rustls`
+  (pure Rust, no `openssl` transitive dependency). The `binance`
+  feature no longer activates `native-tls-vendored` on its own.
+  New mutually-independent feature flags `rustls` (default) and
+  `native-tls` select the backend.
+  - Migration:
+    - Default users get rustls — no action needed.
+    - Callers that relied on system OpenSSL (custom CA bundles via
+      `OPENSSL_CONF`, enterprise roots managed through OpenSSL)
+      should build with
+      `--no-default-features --features "binance native-tls"`.
+    - The removal of `native-tls-vendored` also drops the vendored
+      OpenSSL source tree from every broker build, so openssl CVEs
+      no longer require a broker rebuild-and-republish.
+
 ## [0.9.3] - 2026-04-21 - Honesty Release
 
 ### Fixed (Security)
