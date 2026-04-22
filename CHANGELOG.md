@@ -57,6 +57,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed (Security)
 
+- **GitHub Actions hardening (I1)**:
+  - `ci.yml` and `release.yml` now declare
+    `permissions: contents: read` at workflow scope; jobs that
+    need elevated permissions (e.g., `release` needing
+    `contents: write`) override at job scope. Least-privilege
+    by default, regardless of the org's baseline `GITHUB_TOKEN`
+    policy.
+  - Tool installs are pinned:
+    `cargo install cargo-deny --version 0.19.4 --locked`,
+    `cargo install cargo-audit --version 0.22.1 --locked`,
+    `cargo install cargo-llvm-cov --version 0.8.5 --locked`.
+    Supply-chain attacks via a compromised publisher account
+    can no longer slip into CI via a floating version.
+  - `release.yml`'s `cargo publish || true` is replaced with a
+    version-gated helper that skips only when crates.io already
+    reports the current version, and surfaces all other errors
+    (network, auth, malformed manifest).
+  - `wheels.yml` now declares `attestations: true` on the PyPI
+    publish step for readability; the default was already
+    `true` under trusted publishing, but making it explicit
+    signals intent.
+
 - **`nanobook-broker` credential scrubbing (S9)**:
   `BinanceBroker` and its internal `BinanceClient` now derive
   [`zeroize::ZeroizeOnDrop`](https://docs.rs/zeroize/latest/zeroize/trait.ZeroizeOnDrop.html).

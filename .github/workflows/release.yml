@@ -5,6 +5,12 @@ on:
     tags:
       - 'v*'
 
+# Default to least privilege (I1). The `release` job overrides to
+# `contents: write` locally to create the GitHub Release; the
+# `build` and `publish-crate` jobs stay read-only.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -123,11 +129,35 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Version-gated publish (I1). Replaces `|| true`, which used
+      # to mask real publish failures (network, auth, malformed
+      # manifest) alongside the intended "already uploaded" case.
+      # Now: we only skip when crates.io reports the exact version
+      # we're about to publish; every other kind of failure
+      # surfaces and fails the job.
+      #
+      # Order matters: nanobook is the base crate, others depend
+      # on it. Publish in dependency order so the crates.io index
+      # resolves correctly.
       - name: Publish workspace
         run: |
-          cargo publish -p nanobook || true
-          cargo publish -p nanobook-broker || true
-          cargo publish -p nanobook-risk || true
-          cargo publish -p nanobook-rebalancer || true
+          set -euo pipefail
+          publish_if_new() {
+            local pkg="$1"
+            local current
+            current="$(cargo pkgid -p "$pkg" | sed -E 's/.*[@#]([0-9]+\.[0-9]+\.[0-9]+.*)/\1/')"
+            local published
+            published="$(cargo search "$pkg" --limit 1 | head -1 | sed -nE 's/.*"([0-9]+\.[0-9]+\.[0-9]+[^"]*)".*/\1/p')"
+            if [ "$current" = "$published" ]; then
+              echo "$pkg $current already published — skipping"
+              return 0
+            fi
+            echo "publishing $pkg $current (crates.io has $published)"
+            cargo publish -p "$pkg"
+          }
+          publish_if_new nanobook
+          publish_if_new nanobook-broker
+          publish_if_new nanobook-risk
+          publish_if_new nanobook-rebalancer
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
