@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (Breaking, security)
+
+- **`Trade::notional` (S4)**: Signature changes from
+  `-> i64` to `-> Result<i64, ValidationError>`. The old method
+  silently wrapped on `price.0 * (quantity as i64)` overflow,
+  turning a large positive product into a negative `i64` (via
+  two's-complement wrap) and propagating a financially-absurd
+  value into P&L and risk accounting. The new implementation uses
+  `checked_mul`; overflow becomes a new
+  `ValidationError::NotionalOverflow { price, quantity }` variant
+  that carries the offending operands.
+- **`Trade::vwap`**: Signature unchanged (`-> Option<Price>`),
+  but the internal notional sum is now checked at both the
+  per-trade product and the running-sum stage. Any overflow
+  returns `None` instead of wrapping silently.
+- **Out of scope for this commit** (flagged for a follow-up S
+  item): `src/portfolio/position.rs:95,104` have analogous
+  `quantity * price` patterns that are not yet checked.
+
 ### Fixed (Security)
 
 - **`nanobook::itch` (S3)**: NASDAQ ITCH 5.0 message parser no

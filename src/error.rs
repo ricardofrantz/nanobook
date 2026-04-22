@@ -10,6 +10,12 @@ pub enum ValidationError {
     ZeroQuantity,
     /// Price must be greater than zero for limit orders.
     ZeroPrice,
+    /// `price × quantity` overflowed `i64` and no meaningful notional
+    /// value can be produced. Returning an error rather than wrapping
+    /// prevents a financially-absurd value (e.g., a large positive
+    /// product that wraps to negative) from propagating to P&L
+    /// accounting, risk checks, or log output.
+    NotionalOverflow { price: i64, quantity: u64 },
 }
 
 impl fmt::Display for ValidationError {
@@ -17,6 +23,10 @@ impl fmt::Display for ValidationError {
         match self {
             ValidationError::ZeroQuantity => write!(f, "quantity must be greater than zero"),
             ValidationError::ZeroPrice => write!(f, "price must be greater than zero"),
+            ValidationError::NotionalOverflow { price, quantity } => write!(
+                f,
+                "notional overflow: price={price} * quantity={quantity} exceeds i64 range"
+            ),
         }
     }
 }
