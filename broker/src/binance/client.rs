@@ -49,18 +49,20 @@ fn check_response(
 }
 
 /// Blocking Binance REST client.
+///
+/// `api_key` and `secret_key` are scrubbed in memory when this
+/// struct drops via the [`ZeroizeOnDrop`](zeroize::ZeroizeOnDrop)
+/// derive. `client` (reqwest handle) and `base_url` are marked
+/// `#[zeroize(skip)]` — the reqwest handle has no `Zeroize` impl
+/// and holds no secrets; the URL is public.
+#[derive(zeroize::ZeroizeOnDrop)]
 pub struct BinanceClient {
+    #[zeroize(skip)]
     client: Client,
     api_key: String,
     secret_key: String,
+    #[zeroize(skip)]
     base_url: String,
-}
-
-impl Drop for BinanceClient {
-    fn drop(&mut self) {
-        zeroize::Zeroize::zeroize(&mut self.api_key);
-        zeroize::Zeroize::zeroize(&mut self.secret_key);
-    }
 }
 
 impl BinanceClient {

@@ -19,6 +19,15 @@ use super::market_data::best_quote_from_quote;
 use super::orders;
 
 /// Wraps the ibapi blocking client with convenience methods.
+///
+/// Unlike `BinanceBroker`, `IbkrClient` holds no credentials —
+/// IBKR authentication happens at the TWS/Gateway socket layer
+/// via `(host, port, client_id)` rather than via API-key strings
+/// in process memory. There is nothing this struct owns that
+/// benefits from `ZeroizeOnDrop`, so the derive is deliberately
+/// absent. If a future refactor adds a secret-bearing field,
+/// re-evaluate: ibapi's `Client` does not implement `Zeroize` and
+/// would need `#[zeroize(skip)]`.
 pub struct IbkrClient {
     client: Client,
     best_quotes: Mutex<HashMap<Symbol, BestQuote>>,

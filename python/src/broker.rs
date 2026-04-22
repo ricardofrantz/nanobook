@@ -231,6 +231,11 @@ mod binance_binding {
     ///     quote = broker.quote("BTC")
     ///     broker.disconnect()
     ///
+    /// `api_key`/`secret_key` scrubbing relies on dropping the
+    /// inner `BinanceBroker`, which derives `ZeroizeOnDrop` (S9).
+    /// No explicit derive on `PyBinanceBroker` itself — PyO3 runs
+    /// Drop when Python refcount hits zero, which triggers the
+    /// inner's Drop chain transitively.
     #[pyclass(name = "BinanceBroker")]
     pub struct PyBinanceBroker {
         inner: nanobook_broker::binance::BinanceBroker,

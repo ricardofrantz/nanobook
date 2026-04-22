@@ -15,13 +15,34 @@ use client::BinanceClient;
 /// Binance spot broker implementing the generic Broker trait.
 ///
 /// Uses REST API for all operations. Blocking (sync) via reqwest::blocking.
+///
+/// `api_key` and `secret_key` are scrubbed in memory on drop via
+/// [`ZeroizeOnDrop`](zeroize::ZeroizeOnDrop). `testnet` and
+/// `quote_asset` carry no secrets and are marked
+/// `#[zeroize(skip)]`; `client: Option<BinanceClient>` is also
+/// skipped because `BinanceClient` already scrubs its own copy of
+/// the credentials on drop.
+///
+/// ## PyO3 caveat
+///
+/// Scrubbing the Rust-side copies of the credentials does NOT
+/// scrub the originals if they came in through PyO3 as `&str`
+/// parameters — those live in a `PyString` owned by the Python
+/// interpreter and are out of Rust's reach. Pass credentials via
+/// environment variables (read on the Rust side from
+/// `std::env::var`) to keep them from ever transiting a
+/// `PyString`. See `broker/README.md` for details.
+#[derive(zeroize::ZeroizeOnDrop)]
 pub struct BinanceBroker {
     api_key: String,
     secret_key: String,
+    #[zeroize(skip)]
     testnet: bool,
+    #[zeroize(skip)]
     client: Option<BinanceClient>,
     /// Symbol → Binance trading pair mapping.
     /// nanobook symbols are like "BTC", Binance needs "BTCUSDT".
+    #[zeroize(skip)]
     quote_asset: String,
 }
 
