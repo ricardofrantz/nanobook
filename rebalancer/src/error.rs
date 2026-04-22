@@ -46,6 +46,16 @@ pub enum Error {
 
     #[error("audit log error: {0}")]
     Audit(#[from] std::io::Error),
+
+    /// The canonicalized audit path does not sit under the allowed
+    /// working directory. Raised to stop a misconfigured or
+    /// malicious `logging.dir` from redirecting audit data through
+    /// symlinks to arbitrary filesystem locations.
+    #[error(
+        "audit path {path} resolves outside the working directory — \
+         update `logging.dir` to a directory under CWD"
+    )]
+    AuditPathOutsideWorkdir { path: PathBuf },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
