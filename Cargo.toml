@@ -1,5 +1,9 @@
 [workspace]
 members = [".", "python", "rebalancer", "broker", "risk"]
+# `fuzz/` is its own nightly-only workspace (libfuzzer-sys requires
+# rustc nightly). Exclude it so stable `cargo build --workspace`
+# does not attempt to compile fuzz targets.
+exclude = ["fuzz"]
 resolver = "2"
 
 [package]
@@ -7,7 +11,7 @@ name = "nanobook"
 version = "0.9.3"
 edition = "2024"
 rust-version = "1.85"
-description = "Production-grade Rust execution infrastructure for automated trading: LOB engine, portfolio simulator, broker abstraction, risk engine"
+description = "Deterministic Rust execution engine for trading backtests: limit-order book, portfolio simulation, metrics, risk checks, and Python bindings"
 license = "MIT"
 repository = "https://github.com/ricardofrantz/nanobook"
 homepage = "https://github.com/ricardofrantz/nanobook"

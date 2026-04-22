@@ -55,6 +55,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   item): `src/portfolio/position.rs:95,104` have analogous
   `quantity * price` patterns that are not yet checked.
 
+### Added
+
+- **`fuzz/` cargo-fuzz harness (I2)**: Two libFuzzer targets in a
+  new nightly-only workspace isolated from the main workspace via
+  `exclude = ["fuzz"]`.
+  - `fuzz_submit` drives a fresh `Exchange` with arbitrary
+    `SubmitLimit`, `SubmitMarket`, `Cancel`, and `Modify`
+    actions; asserts no panic, book never crossed, and order
+    IDs strictly monotonic with submission order (including
+    FOK-rejected ghost IDs per N7).
+  - `fuzz_itch` drains arbitrary bytes through `ItchParser` up
+    to 64 messages per input; asserts the S3 "never panic on
+    malformed input" contract under coverage-guided
+    exploration.
+  - Both targets run clean for 50k iterations each in local
+    smoke testing; designed for long local soaks and NOT
+    CI-gated. `fuzz/README.md` documents manual invocation.
+
 ### Fixed (Security)
 
 - **GitHub Actions hardening (I1)**:

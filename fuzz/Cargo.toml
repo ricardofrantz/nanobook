@@ -1,0 +1,35 @@
+[package]
+name = "nanobook-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# `fuzz/` is its own one-crate workspace so it is isolated from the
+# main nanobook workspace (cargo-fuzz / libfuzzer-sys require a
+# nightly toolchain).
+[workspace]
+members = []
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+nanobook = { path = "..", features = ["event-log", "itch", "persistence"] }
+
+# Individual fuzz targets are declared here so `cargo fuzz list`
+# discovers them and `cargo fuzz build` compiles them separately.
+[[bin]]
+name = "fuzz_submit"
+path = "fuzz_targets/fuzz_submit.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_itch"
+path = "fuzz_targets/fuzz_itch.rs"
+test = false
+doc = false
+bench = false
