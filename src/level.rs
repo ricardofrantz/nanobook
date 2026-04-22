@@ -67,6 +67,14 @@ impl Level {
         self.tombstone_count
     }
 
+    /// Returns the raw queue length, including tombstones. Useful for
+    /// asserting the structural invariant
+    /// `raw_len() == order_count() + tombstone_count()`.
+    #[inline]
+    pub fn raw_len(&self) -> usize {
+        self.orders.len()
+    }
+
     /// Returns the OrderId at the front of the queue (next to fill).
     /// Skips tombstones.
     pub fn front(&mut self) -> Option<OrderId> {

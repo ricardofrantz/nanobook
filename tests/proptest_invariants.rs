@@ -550,6 +550,55 @@ proptest! {
             prop_assert!(trade.price.0 > 0, "non-positive trade price");
         }
     }
+
+    // ========================================================================
+    // LEVEL ACCOUNTING INVARIANTS (N16)
+    // ========================================================================
+
+    /// After any sequence of submits and cancels, every level on both
+    /// sides satisfies `raw_len() == order_count() + tombstone_count()`.
+    /// This is the structural ledger identity the matching engine relies
+    /// on when iterating queues and reconciling tombstones; it must hold
+    /// regardless of whether the orphan-recovery fallback was exercised.
+    #[test]
+    fn level_accounting_identity_holds_after_random_ops(
+        orders in prop::collection::vec(
+            (side_strategy(), price_strategy(), quantity_strategy(), tif_strategy()),
+            1..80,
+        ),
+        cancel_bits in prop::collection::vec(prop::bool::ANY, 1..80),
+    ) {
+        let mut exchange = Exchange::new();
+        let mut submitted_ids: Vec<nanobook::OrderId> = Vec::new();
+
+        for ((side, price, qty, tif), should_cancel) in
+            orders.iter().copied().zip(cancel_bits.iter().copied().cycle())
+        {
+            let res = exchange.submit_limit(side, price, qty, tif);
+            if res.resting_quantity > 0 && should_cancel {
+                // O(1) cancel → tombstones the entry in its level.
+                exchange.cancel(res.order_id);
+            }
+            submitted_ids.push(res.order_id);
+        }
+
+        for (_price, level) in exchange.book().bids().iter_best_to_worst() {
+            prop_assert_eq!(
+                level.raw_len(),
+                level.order_count() + level.tombstone_count(),
+                "bids level accounting: raw_len={} order_count={} tombstone_count={}",
+                level.raw_len(), level.order_count(), level.tombstone_count()
+            );
+        }
+        for (_price, level) in exchange.book().asks().iter_best_to_worst() {
+            prop_assert_eq!(
+                level.raw_len(),
+                level.order_count() + level.tombstone_count(),
+                "asks level accounting: raw_len={} order_count={} tombstone_count={}",
+                level.raw_len(), level.order_count(), level.tombstone_count()
+            );
+        }
+    }
 }
 
 // ============================================================================
