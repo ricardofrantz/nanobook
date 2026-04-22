@@ -1,6 +1,6 @@
 [package]
 name = "nanobook-broker"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Broker abstraction and IBKR/Binance adapters for nanobook execution workflows"
@@ -22,7 +22,7 @@ native-tls = ["reqwest?/native-tls"]
 strict-market-reject = ["ibkr"]
 
 [dependencies]
-nanobook = { version = "0.9.3", path = "..", features = ["serde"] }
+nanobook = { version = "0.10.0", path = "..", features = ["serde"] }
 thiserror = "2.0"
 sha2 = "0.10"
 

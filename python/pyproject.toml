@@ -4,9 +4,9 @@ build-backend = "maturin"
 
 [project]
 name = "nanobook"
-version = "0.9.3"
+version = "0.10.0"
 requires-python = ">=3.11"
-description = "Deterministic limit order book, portfolio simulator, and matching engine"
+description = "Rust-backed Python package for target-weight backtests, portfolio metrics, deterministic order-book simulation, and pre-trade risk checks"
 license = "MIT"
 authors = [{ name = "Ricardo Frantz" }]
 readme = "README.md"

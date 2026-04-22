@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-04-22 - Hardening Release
+
+This release focuses on security hardening, supply-chain
+improvements, test-rigor uplift, and honesty in the published
+performance claims. No new user-facing features — every change
+is either a safety improvement, a defense-in-depth layer, or a
+correctness regression test.
+
+**Workspace version bumps:**
+- `nanobook` 0.9.3 → 0.10.0
+- `nanobook-broker` 0.4.0 → 0.5.0 (breaking: default TLS flip,
+  `Trade::notional` signature)
+- `nanobook-risk` 0.4.1 → 0.5.0 (breaking: `RiskEngine::new`
+  returns `Result`)
+- `nanobook-rebalancer` 0.5.0 → 0.6.0 (breaking: audit-path
+  sandboxing rejects out-of-workdir configs)
+
+**Scope of work in this release:**
+- **N-series (numerical / correctness)**: N1-N19. Welford
+  variance, CVaR/Sortino defaults, FOK ghost-id contract, STP
+  policy, trace-relative ridge, `periods_per_year` guard,
+  `project_simplex` fallibility, `min_variance` convergence
+  diagnostics, reference-parity golden fixture, and a
+  deny_unknown_fields audit.
+- **S-series (security)**: S1-S9. Rustls default, NaN/overflow-
+  safe f64 conversions, ITCH `io::Error` in place of `unwrap`,
+  checked price × quantity, `RiskEngine::new` fallibility,
+  broker parse-or-warn consolidation, PII log demotion +
+  `0o600` audit file, audit path sandboxing, zeroize-on-drop
+  for broker credentials.
+- **I-series (infra / supply chain)**: I1-I3. CI permissions
+  lockdown + pinned tool versions, cargo-fuzz harness for
+  matching + ITCH, cargo-mutants baseline at 89.76 %.
+- **D-series (delivery)**: D0, D1, D2. Pre-tag bench
+  comparison, this release commit, README honesty-revise.
+
+For per-item migration notes and detailed rationale, see the
+consolidated entries below.
+
 ### Changed (Breaking, security)
 
 - **`nanobook-rebalancer` audit path sandboxing (S8)**:
