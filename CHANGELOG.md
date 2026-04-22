@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (Security)
+
+- **`nanobook-broker` (S2)**: Float-to-cents conversions at every
+  IBKR and Binance boundary are now NaN/overflow-safe. The pattern
+  `(value * 100.0) as i64` silently produced `0` on `NaN`,
+  `i64::MAX` on `+Inf`, and `i64::MIN` on `-Inf`; garbage upstream
+  fields became plausible-looking positions and balances
+  downstream. A new `broker::types::f64_cents_checked` (and
+  `f64_to_fixed_checked` for other scales like satoshis) rejects
+  non-finite and out-of-range inputs as
+  `BrokerError::NonFiniteValue` / `BrokerError::ValueOutOfRange`,
+  each carrying the upstream field name. Rounding switches from
+  truncation to `f64::round` for consistency with N6 and to avoid
+  a systematic downward bias on positive money.
+
 ### Changed (Breaking, security)
 
 - **`nanobook-broker` (S1)**: Default TLS backend is now `rustls`

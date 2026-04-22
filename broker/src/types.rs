@@ -7,6 +7,53 @@ use sha2::{Digest, Sha256};
 
 use crate::error::BrokerError;
 
+/// Convert an `f64` value to a fixed-point `i64` at the given `scale`,
+/// rejecting `NaN`, `±Inf`, and values whose scaled magnitude does not
+/// fit in `i64`.
+///
+/// `field` is baked into the error message so callers can grep logs
+/// for the specific upstream field that misbehaved.
+///
+/// Rounding follows `f64::round` (half-away-from-zero), matching the
+/// convention used elsewhere for dollar→cents conversion. Truncation
+/// (the default behavior of `as i64`) produces a systematic downward
+/// bias for positive money and is avoided intentionally.
+///
+/// # Errors
+///
+/// - [`BrokerError::NonFiniteValue`] if `value` is `NaN` or `±Inf`.
+/// - [`BrokerError::ValueOutOfRange`] if `value * scale` falls outside
+///   the closed interval `[i64::MIN, i64::MAX]`.
+pub fn f64_to_fixed_checked(
+    value: f64,
+    scale: f64,
+    field: &'static str,
+) -> Result<i64, BrokerError> {
+    if !value.is_finite() {
+        return Err(BrokerError::NonFiniteValue { field, value });
+    }
+    let rounded = (value * scale).round();
+    // `i64::MAX as f64` rounds UP to `2^63`, which is one past the
+    // maximum `i64`. Use half-open `[i64::MIN, 2^63)` to both include
+    // `i64::MIN` (exactly representable) and exclude the unrepresentable
+    // positive bound. Checking the ROUNDED value avoids a corner case
+    // where `scaled < 2^63` but `scaled.round() == 2^63` in floating
+    // point — which would otherwise let `as i64` saturate silently.
+    const MAX_EXCLUSIVE: f64 = i64::MAX as f64;
+    const MIN_INCLUSIVE: f64 = i64::MIN as f64;
+    if !(MIN_INCLUSIVE..MAX_EXCLUSIVE).contains(&rounded) {
+        return Err(BrokerError::ValueOutOfRange { field, value });
+    }
+    Ok(rounded as i64)
+}
+
+/// Shorthand for [`f64_to_fixed_checked(value, 100.0, field)`]. Use
+/// for dollar / USDT / fiat amounts scaled to cents.
+#[inline]
+pub fn f64_cents_checked(value: f64, field: &'static str) -> Result<i64, BrokerError> {
+    f64_to_fixed_checked(value, 100.0, field)
+}
+
 /// Broker-level position (the real-world counterpart, not the LOB position).
 #[derive(Debug, Clone)]
 pub struct Position {

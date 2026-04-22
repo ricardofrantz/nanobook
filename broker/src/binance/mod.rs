@@ -10,6 +10,7 @@ use crate::Broker;
 use crate::error::BrokerError;
 use crate::types::*;
 use client::BinanceClient;
+use log::warn;
 
 /// Binance spot broker implementing the generic Broker trait.
 ///
@@ -55,9 +56,20 @@ impl BinanceBroker {
     }
 
     /// Parse a decimal string to cents (e.g., "185.50" → 18550).
-    fn parse_price_cents(s: &str) -> i64 {
-        let val: f64 = s.parse().unwrap_or(0.0);
-        (val * 100.0) as i64
+    ///
+    /// Returns `Ok(0)` when the string fails to parse — a warning is
+    /// logged so the misbehaving upstream field is visible in logs.
+    /// Once parsed, the `f64 → i64` conversion is NaN/overflow-safe
+    /// via [`f64_cents_checked`].
+    fn parse_price_cents(s: &str, field: &'static str) -> Result<i64, BrokerError> {
+        let val: f64 = match s.parse() {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("binance {field}: failed to parse {s:?} as f64 ({e}); using 0");
+                return Ok(0);
+            }
+        };
+        f64_cents_checked(val, field)
     }
 }
 
@@ -78,28 +90,40 @@ impl Broker for BinanceBroker {
         let client = self.require_client()?;
         let info = client.account_info()?;
 
-        let positions = info
-            .balances
-            .iter()
-            .filter_map(|b| {
-                let free: f64 = b.free.parse().unwrap_or(0.0);
-                let locked: f64 = b.locked.parse().unwrap_or(0.0);
-                let total = free + locked;
-                if total <= 0.0 {
-                    return None;
-                }
-                let sym = Symbol::try_new(&b.asset)?;
-                // Crypto positions are always positive (long), quantity in smallest unit
-                let qty = (total * 1e8) as i64; // satoshis for BTC, etc.
-                Some(Position {
-                    symbol: sym,
-                    quantity: qty,
-                    avg_cost_cents: 0,     // Binance doesn't track avg cost
-                    market_value_cents: 0, // would need live prices
-                    unrealized_pnl_cents: 0,
-                })
-            })
-            .collect();
+        let mut positions = Vec::with_capacity(info.balances.len());
+        for b in &info.balances {
+            let free: f64 = b.free.parse().unwrap_or_else(|_| {
+                warn!(
+                    "binance balance.free: failed to parse {:?}; using 0",
+                    b.free
+                );
+                0.0
+            });
+            let locked: f64 = b.locked.parse().unwrap_or_else(|_| {
+                warn!(
+                    "binance balance.locked: failed to parse {:?}; using 0",
+                    b.locked
+                );
+                0.0
+            });
+            let total = free + locked;
+            if total <= 0.0 {
+                continue;
+            }
+            let Some(sym) = Symbol::try_new(&b.asset) else {
+                continue;
+            };
+            // Crypto positions are always positive (long); quantity in
+            // smallest unit (satoshis for BTC, etc.).
+            let qty = f64_to_fixed_checked(total, 1e8, "binance balance")?;
+            positions.push(Position {
+                symbol: sym,
+                quantity: qty,
+                avg_cost_cents: 0,     // Binance doesn't track avg cost
+                market_value_cents: 0, // would need live prices
+                unrealized_pnl_cents: 0,
+            });
+        }
 
         Ok(positions)
     }
@@ -108,19 +132,31 @@ impl Broker for BinanceBroker {
         let client = self.require_client()?;
         let info = client.account_info()?;
 
-        // Sum USDT-equivalent balance as a rough equity estimate
+        // Sum USDT-equivalent balance as a rough equity estimate.
         let usdt_balance: f64 = info
             .balances
             .iter()
             .filter(|b| b.asset == self.quote_asset)
             .map(|b| {
-                let free: f64 = b.free.parse().unwrap_or(0.0);
-                let locked: f64 = b.locked.parse().unwrap_or(0.0);
+                let free: f64 = b.free.parse().unwrap_or_else(|_| {
+                    warn!(
+                        "binance balance.free: failed to parse {:?}; using 0",
+                        b.free
+                    );
+                    0.0
+                });
+                let locked: f64 = b.locked.parse().unwrap_or_else(|_| {
+                    warn!(
+                        "binance balance.locked: failed to parse {:?}; using 0",
+                        b.locked
+                    );
+                    0.0
+                });
                 free + locked
             })
             .sum();
 
-        let equity_cents = (usdt_balance * 100.0) as i64;
+        let equity_cents = f64_cents_checked(usdt_balance, "binance equity")?;
 
         Ok(Account {
             equity_cents,
@@ -189,8 +225,8 @@ impl Broker for BinanceBroker {
         let binance_sym = self.to_binance_symbol(symbol);
         let ticker = client.book_ticker(&binance_sym)?;
 
-        let bid = Self::parse_price_cents(&ticker.bid_price);
-        let ask = Self::parse_price_cents(&ticker.ask_price);
+        let bid = Self::parse_price_cents(&ticker.bid_price, "binance bid")?;
+        let ask = Self::parse_price_cents(&ticker.ask_price, "binance ask")?;
         let last = (bid + ask) / 2; // Binance bookTicker doesn't have last; use mid
 
         Ok(Quote {
