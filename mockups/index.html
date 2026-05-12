@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nanobook release reports &mdash; visual mockups</title>
+  <style>
+    :root {
+      --bid: #2a7f5f;
+      --ask: #b03a3a;
+      --accent: #4a6fa5;
+      --bg: #f8f8f6;
+      --text: #1a1a1a;
+      --muted: #666;
+      --line: #ddd;
+      --panel: #fff;
+      --badge-bg: #f5e9b0;
+      --badge-text: #7a6200;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    main {
+      width: min(1100px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 34px 0 56px;
+    }
+
+    .eyebrow {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      font-size: clamp(30px, 4vw, 44px);
+      font-weight: 650;
+      letter-spacing: 0;
+      line-height: 1.1;
+      margin: 0 0 14px;
+      text-wrap: balance;
+    }
+
+    .intro {
+      max-width: 760px;
+      color: #444;
+      font-size: 16px;
+      margin: 0 0 34px;
+      text-wrap: pretty;
+    }
+
+    .note {
+      background: #fff;
+      border: 1px solid var(--line);
+      color: #333;
+      font-size: 15px;
+      margin: 0 0 26px;
+      padding: 14px 16px;
+    }
+
+    .cards {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+      display: flex;
+      flex-direction: column;
+      min-height: 190px;
+      padding: 20px;
+      text-decoration: none;
+      transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+    }
+
+    .card:hover,
+    .card:focus-visible {
+      border-color: var(--accent);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.05);
+      transform: translateY(-1px);
+    }
+
+    .card:active {
+      transform: translateY(0) scale(0.96);
+    }
+
+    .card:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+
+    .tag {
+      color: var(--accent);
+      font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, monospace;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+    }
+
+    .card h2 {
+      color: var(--text);
+      font-size: 21px;
+      font-weight: 650;
+      letter-spacing: 0;
+      margin: 0 0 12px;
+    }
+
+    .card p {
+      color: #444;
+      font-size: 15px;
+      margin: 0;
+      text-wrap: pretty;
+    }
+
+    .card .open {
+      color: var(--accent);
+      font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, monospace;
+      font-size: 13px;
+      font-weight: 700;
+      margin-top: auto;
+      padding-top: 24px;
+    }
+
+    footer {
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 34px;
+      padding-top: 18px;
+    }
+
+    @media (max-width: 800px) {
+      main {
+        width: min(100% - 28px, 1100px);
+        padding-top: 24px;
+      }
+
+      .cards {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">visual specifications</div>
+    <h1>nanobook release reports &mdash; visual mockups</h1>
+    <p class="intro">Rust execution kernel for Python trading strategies. These files define the visual shape of future release report artifacts, using synthetic data and static HTML.</p>
+    <p class="note">These are visual mockups / design specs for nanobook release reports. All data is synthetic.</p>
+
+    <section class="cards" aria-label="Report mockups">
+      <a class="card" href="v0.11-itch-replay.html">
+        <div class="tag">v0.11</div>
+        <h2>ITCH Replay</h2>
+        <p>Did nanobook reconstruct a real exchange day correctly and quickly? Latency + LOB self-consistency.</p>
+        <span class="open">Open v0.11 report</span>
+      </a>
+
+      <a class="card" href="v0.12-momentum-backtest.html">
+        <div class="tag">v0.12</div>
+        <h2>Momentum Backtest</h2>
+        <p>Does nanobook's portfolio simulator agree with vectorbt at zero cost? Equity-curve parity check.</p>
+        <span class="open">Open v0.12 report</span>
+      </a>
+
+      <a class="card" href="v0.14-paper-soak.html">
+        <div class="tag">v0.14</div>
+        <h2>Paper-Live Soak</h2>
+        <p>Did the runner survive two weeks on IBKR paper without manual intervention? Daily equity + incident log.</p>
+        <span class="open">Open v0.14 report</span>
+      </a>
+    </section>
+
+    <footer>
+      Static mockups only. Charts load uPlot from CDN; no local dependencies or data fetches are used.
+    </footer>
+  </main>
+</body>
+</html>
