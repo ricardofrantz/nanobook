@@ -18,7 +18,7 @@ name = "nanobook_rebalancer"
 path = "src/lib.rs"
 
 [dependencies]
-nanobook = { version = "0.11.0", path = "..", features = ["portfolio", "serde"] }
+nanobook = { version = "0.12.0", path = "..", features = ["portfolio", "serde"] }
 nanobook-broker = { version = "0.5.0", path = "../broker", features = ["ibkr"] }
 nanobook-risk = { version = "0.5.0", path = "../risk" }
 thiserror = "2.0"
