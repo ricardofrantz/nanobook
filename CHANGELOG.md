@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-05-12 - Replay
+
+This release introduces a reproducible ITCH replay harness for measuring end-to-end parsing and order-book update performance on real NASDAQ TotalView-ITCH data. The focus is on honest performance measurement with proper warmup exclusion and full reproducibility documentation.
+
+### Added
+
+- **`examples/itch-replay/` replay harness**: End-to-end ITCH replay example that downloads NASDAQ TotalView-ITCH data, slices to a 1-minute window, runs deterministic replay, and generates performance reports
+- **`examples/itch-replay/report.py`**: HTML report generator with latency histograms, message-rate timeline, spread distribution, and book reconstruction snapshots
+- **`REPRODUCIBILITY.md`**: Comprehensive reproducibility guide with exact data sources, command sequences, reference environment specifications, measured performance numbers, and verification methodology
+- **`docs/solutions/itch-replay-learnings.md`**: First entry in docs/solutions/ capturing learnings from ITCH replay implementation (warmup methodology, JSON corruption handling, performance characteristics)
+- **`--warmup N` flag**: Exclude first N events from latency measurements (default N=1000) to avoid warmup inflation in performance numbers
+- **`--snapshot-every N` flag**: Gate book snapshot generation to every Nth event (default N=1000) to reduce JSONL output size
+- **CI smoke job**: GitHub Actions `examples-smoke` job that downloads ITCH data, runs replay, generates report, and validates output on every push
+
+### Changed
+
+- **README performance section**: Updated with measured end-to-end ITCH replay performance (p50=83ns/p95=125ns/p99=250ns parse, p50=208ns/p95=833ns/p99=3,000ns book-update on Apple M1 Pro, 16GB RAM, N=974,288 events, warmup excluded)
+- **README methodology footnotes**: Added footnote ¹ for end-to-end ITCH replay (measured on real data) and footnote ² for kernel microbenchmarks (synthetic) to clearly distinguish measurement methodologies
+- **README report path**: Updated from `replay-smoke` to `replay-v2` to reflect the new warmup-aware measurement methodology
+
+### Fixed
+
+- **Null-safety filters in report.py**: Added `isinstance(value, int) and not isinstance(value, bool)` checks to exclude boolean values from latency calculations (Python's `isinstance(True, int)` returns `True`)
+- **JSON file corruption**: Documented incomplete JSON line issue on replay interrupt and added atomic file writes as candidate future work
+
 ## [0.10.0] - 2026-04-22 - Hardening Release
 
 This release focuses on security hardening, supply-chain
