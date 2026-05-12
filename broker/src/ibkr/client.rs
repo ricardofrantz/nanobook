@@ -1,4 +1,22 @@
 //! IBKR connection, position fetching, market data, and account summary.
+//!
+//! # Disconnect and Reconnect Handling (F3 Failure Mode)
+//!
+//! This module implements reconnect logic for handling connection losses during order execution.
+//!
+//! When a disconnect occurs:
+//! 1. The `IbkrClient::reconnect` method re-establishes the connection to TWS/Gateway
+//! 2. On reconnect, the callback deduplication cache is cleared to avoid stale entries
+//! 3. Current positions are queried via `positions()` API to get ground truth
+//! 4. The positions are returned to the caller for reconciliation
+//!
+//! The reconnect process ensures that:
+//! - Any partial fills that occurred during disconnect are detected via position comparison
+//! - The callback cache is cleared to prevent false duplicate detection after reconnect
+//! - Ground truth from positions API is used for reconciliation (not local state)
+//!
+//! See `orders::reconcile_partial_fill` for the reconciliation logic that uses the positions
+//! returned by `reconnect`.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -65,6 +83,55 @@ impl IbkrClient {
             best_quotes: Mutex::new(HashMap::new()),
             callback_cache: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Reconnect to IB Gateway/TWS after a disconnect.
+    ///
+    /// This method re-establishes the connection and queries current positions
+    /// to detect any partial fills that may have occurred during the disconnect.
+    ///
+    /// The reconnection process:
+    /// 1. Establishes a new connection to TWS/Gateway
+    /// 2. Queries current positions via positions() API
+    /// 3. Returns the current positions for reconciliation
+    ///
+    /// # Arguments
+    /// * `host` - TWS/Gateway host address
+    /// * `port` - TWS/Gateway port
+    /// * `client_id` - Client ID for the new connection
+    ///
+    /// # Returns
+    /// * `Ok(Vec<Position>)` - Current positions after reconnect (for reconciliation)
+    /// * `Err(BrokerError)` - If reconnection or position query fails
+    pub fn reconnect(&mut self, host: &str, port: u16, client_id: i32) -> Result<Vec<Position>, BrokerError> {
+        let address = format!("{host}:{port}");
+        info!("Reconnecting to IB Gateway at {address}...");
+
+        // Establish new connection
+        let client = Client::connect(&address, client_id)
+            .map_err(|e| BrokerError::Connection(format!("failed to reconnect to {address}: {e}")))?;
+
+        info!("Reconnected (client_id={client_id})");
+        self.client = client;
+
+        // Clear callback cache on reconnect to avoid stale entries
+        {
+            let mut cache = self.callback_cache
+                .lock()
+                .map_err(|_| BrokerError::Other("callback cache poisoned".into()))?;
+            cache.clear();
+        }
+
+        // Query current positions to detect partial fills during disconnect
+        info!("Querying positions after reconnect for reconciliation...");
+        let positions = self.positions()?;
+
+        info!(
+            "Reconnect complete: {} positions fetched for reconciliation",
+            positions.len()
+        );
+
+        Ok(positions)
     }
 
     /// Get the underlying ibapi client (for order submission).

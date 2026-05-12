@@ -39,6 +39,21 @@ impl IbkrBroker {
     fn require_client(&self) -> Result<&IbkrClient, BrokerError> {
         self.client.as_ref().ok_or(BrokerError::NotConnected)
     }
+
+    /// Reconnect to IB Gateway/TWS after a disconnect.
+    ///
+    /// This method re-establishes the connection and queries current positions
+    /// to detect any partial fills that may have occurred during the disconnect.
+    ///
+    /// # Returns
+    /// * `Ok(Vec<Position>)` - Current positions after reconnect (for reconciliation)
+    /// * `Err(BrokerError)` - If reconnection or position query fails
+    pub fn reconnect(&mut self) -> Result<Vec<Position>, BrokerError> {
+        let client = self.client
+            .as_mut()
+            .ok_or(BrokerError::NotConnected)?;
+        client.reconnect(&self.host, self.port, self.client_id)
+    }
 }
 
 impl Broker for IbkrBroker {
