@@ -223,10 +223,8 @@ pub fn execute_limit_order(
                 commission = comm.commission;
                 debug!("Commission: ${:.4}", commission);
             }
-            PlaceOrder::Message(notice) => {
-                if notice.code < 0 || notice.code >= 2000 {
-                    warn!("Order {order_id} error {}: {}", notice.code, notice.message);
-                }
+            PlaceOrder::Message(notice) if notice.code < 0 || notice.code >= 2000 => {
+                warn!("Order {order_id} error {}: {}", notice.code, notice.message);
             }
             _ => {}
         }
