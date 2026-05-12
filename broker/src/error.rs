@@ -47,6 +47,15 @@ pub enum BrokerError {
     #[error("cancel rejected for order {order_id}: {reason}")]
     CancelReject { order_id: i32, reason: String },
 
+    /// Connection lost during order execution with partial fill state.
+    ///
+    /// This error is raised when the TWS/Gateway connection is lost during
+    /// order execution, potentially after a partial fill has occurred.
+    /// The filled_quantity field captures the last known filled quantity
+    /// before the disconnect, enabling reconciliation on reconnect.
+    #[error("connection lost during order execution (order_id={order_id}, filled_quantity={filled_quantity})")]
+    ConnectionLost { order_id: i32, filled_quantity: i64 },
+
     #[error("{0}")]
     Other(String),
 }

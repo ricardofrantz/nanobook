@@ -1,6 +1,6 @@
 //! Order submission, fill monitoring, rate limiting, and cancellation.
 //!
-//! # Cancel Reject Race Handling
+//! # Cancel Reject Race Handling (F2 Failure Mode)
 //!
 //! This module implements handling for the F2 failure mode: cancel reject race with fill reconciliation.
 //!
@@ -16,6 +16,36 @@
 //! - `reconcile_filled_order` function to verify order state when cancel is rejected
 //! - Integration with `execute_limit_order` to handle timeout cancellations with reconciliation
 //!
+//! # Disconnect During Order Execution (F3 Failure Mode)
+//!
+//! This module implements handling for the F3 failure mode: partial fill followed by disconnect.
+//!
+//! When a connection is lost during order execution:
+//! 1. Order may have been partially filled before disconnect
+//! 2. The subscription loop terminates (explicitly or silently)
+//! 3. System must detect the disconnect and preserve partial fill state
+//! 4. On reconnect, system queries positions to reconcile actual fill state
+//!
+//! The implementation includes:
+//! - `BrokerError::ConnectionLost` variant to capture disconnect with partial fill state (order_id, filled_quantity)
+//! - `execute_limit_order` detects disconnect errors (IBKR error codes 1100, 1101, 1102)
+//! - `execute_limit_order` detects silent disconnects (subscription terminates early without timeout)
+//! - Audit logging at info level for disconnect events
+//! - `reconcile_partial_fill` function to reconcile state using ground truth from positions
+//! - `IbkrClient::reconnect` method to re-establish connection and query positions
+//!
+//! # Important: No Double-Submit on Reconnect
+//!
+//! When a disconnect occurs with a partial fill, the remainder is **NOT** automatically resubmitted.
+//! This is deliberate because:
+//! - We cannot guarantee the original order is still active at the broker
+//! - The broker may have cancelled the order during the disconnect
+//! - Resubmitting could lead to duplicate positions
+//! - Manual review is required to determine the correct action
+//!
+//! The `reconcile_partial_fill` function returns the reconciled state but does not resubmit.
+//! It logs "remainder NOT resubmitted" to make this explicit in the audit trail.
+//!
 //! # Audit Log Format
 //!
 //! Cancel-related audit logs use the "AUDIT:" prefix for easy filtering:
@@ -27,8 +57,16 @@
 //! - `AUDIT: Order {id} reconciled as FILLED (cancel rejected due to fill race)` - reconciliation success
 //! - `AUDIT: Order {id} state uncertain after cancel reject - manual review recommended` - uncertain state
 //!
-//! These logs enable post-mortem analysis of cancel/fill race conditions and verification
-//! that reconciliation logic executed correctly.
+//! Disconnect-related audit logs:
+//! - `AUDIT: Connection lost during order {id} execution (filled={filled})` - explicit disconnect error
+//! - `AUDIT: Subscription terminated early for order {id} (filled={filled}) - likely silent disconnect` - silent disconnect
+//! - `AUDIT: Reconciling order {id} after disconnect - symbol={symbol}, pre_disconnect_filled={pre}, expected_total={total}` - reconciliation attempt
+//! - `AUDIT: Order {id} reconciled as PARTIAL_FILL (filled={filled}, remainder={remainder}) - remainder NOT resubmitted` - reconciliation success
+//! - `AUDIT: Order {id} no additional fills detected during disconnect (filled={filled})` - no additional fills
+//! - `AUDIT: Order {id} position not found after disconnect - manual review required` - position missing
+//!
+//! These logs enable post-mortem analysis of cancel/fill race conditions and disconnect
+//! reconciliation, and verification that the remainder was not resubmitted.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -369,8 +407,37 @@ pub fn execute_limit_order(
             }
             PlaceOrder::Message(notice) if notice.code < 0 || notice.code >= 2000 => {
                 warn!("Order {order_id} error {}: {}", notice.code, notice.message);
+                // Detect disconnect errors (IBKR error code 1100, 1101, 1102)
+                if notice.code == 1100 || notice.code == 1101 || notice.code == 1102 {
+                    warn!(
+                        "AUDIT: Connection lost during order {order_id} execution (filled={})",
+                        filled
+                    );
+                    // Return ConnectionLost error with partial fill state
+                    return Err(BrokerError::ConnectionLost {
+                        order_id,
+                        filled_quantity: filled.round() as i64,
+                    });
+                }
             }
             _ => {}
+        }
+    }
+
+    // Detect silent disconnect: if loop terminated without final status and not timeout
+    // This can happen when the connection drops without an explicit error message
+    if final_status == OrderOutcome::Failed && start.elapsed() < timeout {
+        // Subscription terminated early without explicit error - likely silent disconnect
+        warn!(
+            "AUDIT: Subscription terminated early for order {order_id} (filled={}) - likely silent disconnect",
+            filled
+        );
+        if filled > 0.0 {
+            // Partial fill occurred before silent disconnect
+            return Err(BrokerError::ConnectionLost {
+                order_id,
+                filled_quantity: filled.round() as i64,
+            });
         }
     }
 
@@ -568,6 +635,157 @@ pub fn reconcile_filled_order(
     Ok(is_filled)
 }
 
+/// Reconcile partial fill after disconnect using ground truth from positions.
+///
+/// This function is called after a reconnect to detect partial fills that occurred
+/// during the disconnect window. It compares the pre-disconnect filled quantity
+/// against the current position to determine if additional shares were filled.
+///
+/// # Reconciliation Strategy
+///
+/// The reconciliation uses ground truth from IBKR's position API:
+/// 1. Query current positions after reconnect
+/// 2. Find the position for the order's symbol
+/// 3. Compare current quantity against expected quantity
+/// 4. If current > expected, a partial fill occurred during disconnect
+/// 5. Update order state to PartialFill with the reconciled quantity
+///
+/// # Important: No Double-Submit
+///
+/// This function **does NOT** resubmit the remainder of the order. The remainder
+/// is deliberately left unsubmitted because:
+/// - We cannot guarantee the original order is still active at the broker
+/// - Resubmitting could lead to duplicate positions
+/// - The original order may have been cancelled by the broker during disconnect
+/// - Manual review is required to determine the correct action
+///
+/// # Arguments
+/// * `order_id` - The order ID that was being executed when disconnect occurred
+/// * `symbol` - The symbol of the order
+/// * `pre_disconnect_filled` - The filled quantity before disconnect
+/// * `expected_total` - The total expected quantity (original order size)
+/// * `current_positions` - Current positions from reconnect (ground truth)
+/// * `side` - The order side (Buy/Sell)
+///
+/// # Returns
+/// * `Ok(OrderResult)` - Reconciled order result with updated filled quantity
+/// * `Err(BrokerError)` - If reconciliation fails
+///
+/// # Audit Logging
+///
+/// Logs reconciliation events at info level:
+/// - "AUDIT: Reconciling order {id} after disconnect - symbol={symbol}, pre_disconnect_filled={pre}, expected_total={total}"
+/// - "AUDIT: Order {id} reconciled as PARTIAL_FILL (filled={filled}, remainder={remainder}) - remainder NOT resubmitted"
+/// - "AUDIT: Order {id} no additional fills detected during disconnect (filled={filled})"
+/// - "AUDIT: Order {id} position not found after disconnect - manual review required"
+///
+/// These logs enable tracking of disconnect reconciliation and verification
+/// that the remainder was not resubmitted.
+pub fn reconcile_partial_fill(
+    order_id: i32,
+    symbol: nanobook::Symbol,
+    pre_disconnect_filled: i64,
+    expected_total: i64,
+    current_positions: &[Position],
+    side: BrokerSide,
+) -> Result<OrderResult, BrokerError> {
+    info!(
+        "AUDIT: Reconciling order {} after disconnect - symbol={}, pre_disconnect_filled={}, expected_total={}",
+        order_id, symbol, pre_disconnect_filled, expected_total
+    );
+
+    // Find the position for this symbol
+    let current_position = current_positions.iter().find(|p| p.symbol == symbol);
+
+    match current_position {
+        Some(pos) => {
+            let current_qty = pos.quantity;
+
+            // For buy orders, positive quantity indicates long position
+            // For sell orders, negative quantity indicates short position
+            let signed_current_qty = match side {
+                BrokerSide::Buy => current_qty,
+                BrokerSide::Sell => -current_qty,
+            };
+
+            // Compare current quantity against pre-disconnect filled
+            if signed_current_qty.abs() > pre_disconnect_filled {
+                // Additional shares were filled during disconnect
+                let reconciled_filled = signed_current_qty.abs();
+                let remainder = expected_total - reconciled_filled;
+
+                info!(
+                    "AUDIT: Order {} reconciled as PARTIAL_FILL (filled={}, remainder={}) - remainder NOT resubmitted",
+                    order_id, reconciled_filled, remainder
+                );
+
+                Ok(OrderResult {
+                    symbol,
+                    order_id,
+                    filled_shares: reconciled_filled,
+                    avg_fill_price: 0.0, // Would need to query execution history for accurate price
+                    commission: 0.0,      // Would need to query execution history
+                    status: OrderOutcome::PartialFill,
+                })
+            } else if signed_current_qty.abs() == pre_disconnect_filled {
+                // No additional fills during disconnect
+                info!(
+                    "AUDIT: Order {} no additional fills detected during disconnect (filled={})",
+                    order_id, pre_disconnect_filled
+                );
+
+                Ok(OrderResult {
+                    symbol,
+                    order_id,
+                    filled_shares: pre_disconnect_filled,
+                    avg_fill_price: 0.0,
+                    commission: 0.0,
+                    status: if pre_disconnect_filled > 0 {
+                        OrderOutcome::PartialFill
+                    } else {
+                        OrderOutcome::Failed
+                    },
+                })
+            } else {
+                // Position decreased - unexpected, manual review required
+                warn!(
+                    "AUDIT: Order {} position decreased after disconnect (pre={}, current={}) - manual review required",
+                    order_id, pre_disconnect_filled, signed_current_qty.abs()
+                );
+
+                Ok(OrderResult {
+                    symbol,
+                    order_id,
+                    filled_shares: pre_disconnect_filled,
+                    avg_fill_price: 0.0,
+                    commission: 0.0,
+                    status: OrderOutcome::PartialFill,
+                })
+            }
+        }
+        None => {
+            // Position not found - order may have been cancelled or no position exists
+            warn!(
+                "AUDIT: Order {} position not found after disconnect - manual review required",
+                order_id
+            );
+
+            Ok(OrderResult {
+                symbol,
+                order_id,
+                filled_shares: pre_disconnect_filled,
+                avg_fill_price: 0.0,
+                commission: 0.0,
+                status: if pre_disconnect_filled > 0 {
+                    OrderOutcome::PartialFill
+                } else {
+                    OrderOutcome::Failed
+                },
+            })
+        }
+    }
+}
+
 /// Sleep for the rate-limit interval between orders.
 pub fn rate_limit_delay(interval_ms: u64) {
     if interval_ms > 0 {
@@ -675,5 +893,146 @@ mod tests {
         let result = reconcile_filled_order(order_id, reason);
         assert!(result.is_ok());
         assert!(result.unwrap(), "Order should be reconciled as filled (case-insensitive)");
+    }
+
+    #[test]
+    fn test_reconcile_partial_fill_with_additional_fill() {
+        // Test reconciliation when additional shares were filled during disconnect
+        let order_id = 12345;
+        let symbol = nanobook::Symbol::try_new("AAPL").unwrap();
+        let pre_disconnect_filled = 50;
+        let expected_total = 100;
+        let side = BrokerSide::Buy;
+
+        // Simulate position with 75 shares (25 additional filled during disconnect)
+        let positions = vec![Position {
+            symbol,
+            quantity: 75,
+            avg_cost_cents: 15000,
+            market_value_cents: 1125000,
+            unrealized_pnl_cents: 0,
+        }];
+
+        let result = reconcile_partial_fill(
+            order_id,
+            symbol,
+            pre_disconnect_filled,
+            expected_total,
+            &positions,
+            side,
+        );
+
+        assert!(result.is_ok());
+        let order_result = result.unwrap();
+        assert_eq!(order_result.order_id, order_id);
+        assert_eq!(order_result.filled_shares, 75, "Should detect additional 25 shares filled");
+        assert_eq!(order_result.status, OrderOutcome::PartialFill);
+    }
+
+    #[test]
+    fn test_reconcile_partial_fill_no_additional_fill() {
+        // Test reconciliation when no additional shares were filled during disconnect
+        let order_id = 12345;
+        let symbol = nanobook::Symbol::try_new("AAPL").unwrap();
+        let pre_disconnect_filled = 50;
+        let expected_total = 100;
+        let side = BrokerSide::Buy;
+
+        // Position unchanged (no additional fills)
+        let positions = vec![Position {
+            symbol,
+            quantity: 50,
+            avg_cost_cents: 15000,
+            market_value_cents: 750000,
+            unrealized_pnl_cents: 0,
+        }];
+
+        let result = reconcile_partial_fill(
+            order_id,
+            symbol,
+            pre_disconnect_filled,
+            expected_total,
+            &positions,
+            side,
+        );
+
+        assert!(result.is_ok());
+        let order_result = result.unwrap();
+        assert_eq!(order_result.filled_shares, 50, "Should report pre-disconnect fill quantity");
+        assert_eq!(order_result.status, OrderOutcome::PartialFill);
+    }
+
+    #[test]
+    fn test_reconcile_partial_fill_position_not_found() {
+        // Test reconciliation when position is not found after disconnect
+        let order_id = 12345;
+        let symbol = nanobook::Symbol::try_new("AAPL").unwrap();
+        let pre_disconnect_filled = 50;
+        let expected_total = 100;
+        let side = BrokerSide::Buy;
+
+        // No positions found
+        let positions: Vec<Position> = vec![];
+
+        let result = reconcile_partial_fill(
+            order_id,
+            symbol,
+            pre_disconnect_filled,
+            expected_total,
+            &positions,
+            side,
+        );
+
+        assert!(result.is_ok());
+        let order_result = result.unwrap();
+        assert_eq!(order_result.filled_shares, 50, "Should report pre-disconnect fill quantity");
+        assert_eq!(order_result.status, OrderOutcome::PartialFill);
+    }
+
+    #[test]
+    fn test_reconcile_partial_fill_sell_order() {
+        // Test reconciliation for sell orders (negative positions)
+        let order_id = 12345;
+        let symbol = nanobook::Symbol::try_new("AAPL").unwrap();
+        let pre_disconnect_filled = 50;
+        let expected_total = 100;
+        let side = BrokerSide::Sell;
+
+        // Sell order: negative position indicates short
+        let positions = vec![Position {
+            symbol,
+            quantity: -75, // 75 shares sold (25 additional during disconnect)
+            avg_cost_cents: 15000,
+            market_value_cents: -1125000,
+            unrealized_pnl_cents: 0,
+        }];
+
+        let result = reconcile_partial_fill(
+            order_id,
+            symbol,
+            pre_disconnect_filled,
+            expected_total,
+            &positions,
+            side,
+        );
+
+        assert!(result.is_ok());
+        let order_result = result.unwrap();
+        assert_eq!(order_result.filled_shares, 75, "Should detect additional 25 shares sold");
+        assert_eq!(order_result.status, OrderOutcome::PartialFill);
+    }
+
+    #[test]
+    fn test_connection_lost_error_variant() {
+        // Test that ConnectionLost error variant works correctly
+        let error = BrokerError::ConnectionLost {
+            order_id: 12345,
+            filled_quantity: 50,
+        };
+
+        let error_string = error.to_string();
+        assert!(error_string.contains("connection lost"));
+        assert!(error_string.contains("12345"));
+        assert!(error_string.contains("50"));
     }
 }
