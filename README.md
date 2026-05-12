@@ -245,21 +245,21 @@ rebalancer reconcile target.json
 
 ## Performance
 
-**End-to-end ITCH replay performance** (measured on NASDAQ TotalView-ITCH 2019-07-30, Apple M1 Pro, 16 GB RAM, N=974,288 events, warmup excluded):
+**End-to-end ITCH replay performance** (measured on NASDAQ TotalView-ITCH 2019-07-30, Apple M1 Pro, 16 GB RAM, N=974,288 events, warmup excluded)¹:
 
 | Stage | p50 latency | p95 latency | p99 latency |
 |-------|-------------|-------------|-------------|
 | ITCH parse | 83 ns | 125 ns | 250 ns |
 | LOB book-update | 208 ns | 833 ns | 3,000 ns |
 
-Reproducible by following `examples/itch-replay/README.md` and `REPRODUCIBILITY.md`.
+¹ Reproducible by following `examples/itch-replay/README.md` and `REPRODUCIBILITY.md`.
 Numbers exclude warmup events and reflect single-threaded replay of a 1-minute
 NASDAQ trading window (09:30-09:31 ET). See `examples/itch-replay/data/report-v2/report.html`
 for full latency distribution histograms.
 
 ### Kernel microbenchmarks
 
-Single-threaded synthetic microbenchmarks (macOS arm64, v0.10.0, stock clocks):
+Single-threaded synthetic microbenchmarks (macOS arm64, v0.10.0, stock clocks)²:
 
 | Operation | Latency | Throughput |
 |-----------|---------|------------|
@@ -269,7 +269,7 @@ Single-threaded synthetic microbenchmarks (macOS arm64, v0.10.0, stock clocks):
 | Cancel (tombstone, deep queue) | ~385 ns | ~2.6M ops/sec |
 | L2 snapshot (10 levels) | ~255 ns | ~4M ops/sec |
 
-Numbers are criterion medians measured with `cargo bench --bench throughput`.
+² Numbers are criterion medians measured with `cargo bench --bench throughput`.
 Hardware, build flags, and background load all move these ±10-20 %. See
 `benches/README.md` for the methodology and `benches/v0.10-comparison.md`
 for the v0.9.3 → v0.10.0 delta (the v0.10.0 submit path pays a ~20 ns cost
