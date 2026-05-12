@@ -54,7 +54,9 @@ def run_vbt_backtest(data_file: Path, start_date: str, end_date: str, initial_ca
         close=close_prices,
         size=target_weights,
         size_type='targetpercent',
-        group_by=True, # Group by date (aggregate all tickers into one portfolio)
+        # group_by applies to *columns* (assets). Here we intentionally group all
+        # tickers into a single portfolio for comparison against nanobook.
+        group_by=True,
         cash_sharing=True,
         init_cash=initial_cash,
         fees=0.0,
@@ -101,6 +103,13 @@ def main():
     nb_dates = [s["date"] for s in nb_results["snapshots"]]
 
     vbt_equity_series = vbt_portfolio.value()
+    if isinstance(vbt_equity_series, pd.DataFrame):
+        # Defensive: some vectorbt configurations may return a 2D value series.
+        # Prefer a single column if present.
+        if vbt_equity_series.shape[1] == 1:
+            vbt_equity_series = vbt_equity_series.iloc[:, 0]
+        else:
+            vbt_equity_series = vbt_equity_series.sum(axis=1)
 
     print("\n" + "="*70)
     print("PARITY CHECK RESULTS (Zero Cost)")

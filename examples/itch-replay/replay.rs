@@ -60,7 +60,11 @@ fn main() -> io::Result<()> {
 
     let input = File::open(&config.input)?;
     let mut parser = ItchParser::new(BufReader::new(input));
-    let mut replay = Replay::new(&config.output_dir, config.warmup_events, config.snapshot_every)?;
+    let mut replay = Replay::new(
+        &config.output_dir,
+        config.warmup_events,
+        config.snapshot_every,
+    )?;
 
     loop {
         let parse_started = Instant::now();
