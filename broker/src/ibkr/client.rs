@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use ibapi::accounts::types::AccountGroup;
 use ibapi::accounts::{AccountSummaryResult, PositionUpdate};
@@ -18,6 +19,18 @@ use crate::types::{Account, BestQuote, BrokerOrder, OrderId, Position, Quote, f6
 use super::market_data::best_quote_from_quote;
 use super::orders;
 
+/// Deduplication key for order-status callbacks.
+///
+/// TWS may send duplicate OrderStatus callbacks for the same fill event.
+/// We deduplicate based on the combination of order ID, status string,
+/// and filled quantity to ensure position changes only once per unique fill.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct OrderCallbackKey {
+    pub order_id: i32,
+    pub status: String,
+    pub filled_quantity: i64, // Converted from f64 for hashing
+}
+
 /// Wraps the ibapi blocking client with convenience methods.
 ///
 /// Unlike `BinanceBroker`, `IbkrClient` holds no credentials —
@@ -31,6 +44,10 @@ use super::orders;
 pub struct IbkrClient {
     client: Client,
     best_quotes: Mutex<HashMap<Symbol, BestQuote>>,
+    /// Deduplication cache for order-status callbacks to handle TWS duplicates.
+    /// Key: (order_id, status, filled_quantity), Value: timestamp when first seen.
+    /// TTL: 5 minutes to prevent unbounded growth.
+    callback_cache: Mutex<HashMap<OrderCallbackKey, Instant>>,
 }
 
 impl IbkrClient {
@@ -46,6 +63,7 @@ impl IbkrClient {
         Ok(Self {
             client,
             best_quotes: Mutex::new(HashMap::new()),
+            callback_cache: Mutex::new(HashMap::new()),
         })
     }
 
@@ -75,6 +93,75 @@ impl IbkrClient {
             .map_err(|_| BrokerError::Other("best quote cache poisoned".into()))?;
         quotes.insert(symbol, quote);
         Ok(())
+    }
+
+    /// Check if an order-status callback is a duplicate.
+    ///
+    /// Returns true if this exact (order_id, status, filled_quantity) combination
+    /// has been seen within the TTL window (5 minutes).
+    pub fn is_duplicate_callback(
+        &self,
+        order_id: i32,
+        status: &str,
+        filled_quantity: f64,
+    ) -> bool {
+        let key = OrderCallbackKey {
+            order_id,
+            status: status.to_string(),
+            filled_quantity: filled_quantity.round() as i64,
+        };
+
+        let mut cache = self
+            .callback_cache
+            .lock()
+            .map_err(|_| BrokerError::Other("callback cache poisoned".into()));
+
+        if let Ok(ref mut cache) = cache {
+            // Clean up expired entries (TTL: 5 minutes)
+            let ttl = Duration::from_secs(300);
+            cache.retain(|_, timestamp| timestamp.elapsed() < ttl);
+
+            // Check if this is a duplicate
+            if cache.contains_key(&key) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Record that an order-status callback has been processed.
+    pub fn record_processed_callback(
+        &self,
+        order_id: i32,
+        status: &str,
+        filled_quantity: f64,
+    ) -> Result<(), BrokerError> {
+        let key = OrderCallbackKey {
+            order_id,
+            status: status.to_string(),
+            filled_quantity: filled_quantity.round() as i64,
+        };
+
+        let mut cache = self
+            .callback_cache
+            .lock()
+            .map_err(|_| BrokerError::Other("callback cache poisoned".into()))?;
+
+        // Clean up expired entries before inserting (TTL: 5 minutes)
+        let ttl = Duration::from_secs(300);
+        cache.retain(|_, timestamp| timestamp.elapsed() < ttl);
+
+        cache.insert(key, Instant::now());
+        Ok(())
+    }
+
+    /// Get a reference to the deduplication cache for order-status callbacks.
+    ///
+    /// This is used by `execute_limit_order` to detect and skip duplicate
+    /// callbacks from TWS.
+    pub fn dedup_cache(&self) -> &Mutex<HashMap<OrderCallbackKey, Instant>> {
+        &self.callback_cache
     }
 
     /// Fetch current positions from IBKR.

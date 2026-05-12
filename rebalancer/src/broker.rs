@@ -69,6 +69,7 @@ impl BrokerGateway for IbkrClient {
             limit_price_cents,
             client_order_id,
             timeout,
+            None, // TODO: pass dedup cache when available
         )
     }
 }
