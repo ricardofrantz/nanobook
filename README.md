@@ -70,23 +70,29 @@ logs?"
 - cargo-fuzz harnesses for matching and ITCH, plus an 89.76 % mutation-testing
   baseline for the matcher.
 
-## What nanobook is NOT
+## Competitive Positioning
 
-The narrow scope is intentional: nanobook should be easy to audit, embed, and
-replace if your system grows beyond it.
+| Project | Scope | Execution Model | Python API | Rust Core | Auditability | Niche |
+|---------|-------|-----------------|------------|-----------|--------------|-------|
+| **nanobook** | Execution kernel | Deterministic LOB (6M ops/s) | PyO3 native extension | ✓ Full (LOB, portfolio, risk) | High (event sourcing, property tests) | Research → production bridge |
+| vectorbt | Research framework | Vectorized backtesting | ✓ Pure Python | ✗ | Medium (open source) | Factor research, fast backtests |
+| NautilusTrader | Full platform | Event-driven, multi-venue | ✓ Python bindings | ✓ Partial | High (audit trails) | Institutional quant trading |
+| Hummingbot | Bot platform | Market making, arbitrage | ✓ Pure Python | ✗ | Medium (logging) | Crypto market making |
+| Freqtrade | Bot platform | Technical analysis, backtesting | ✓ Pure Python | ✗ | Low | Crypto technical trading |
+| LEAN | Full platform | Event-driven, multi-asset | ✓ (C# core, Python API) | ✗ (C#) | High (institutional) | Multi-asset backtesting & live |
 
-- **Not a full trading platform.** For venue breadth, calendars, and
-  operator UIs, see [NautilusTrader](https://github.com/nautechsystems/nautilus_trader)
-  or [LEAN](https://github.com/QuantConnect/Lean).
-- **Not a connector zoo.** For broad crypto exchange coverage, see
-  [CCXT](https://github.com/ccxt/ccxt) or
-  [Hummingbot](https://github.com/hummingbot/hummingbot).
-- **Not a research framework.** For vectorized backtests and factor
-  research, see [vectorbt](https://github.com/polakowo/vectorbt) or
-  [Riskfolio-Lib](https://github.com/dcajasn/Riskfolio-Lib).
-- **Not FIX.** No FIX 4.4 / 5.0 adapter and none is planned.
-- **Not an OMS (yet).** Event-sourced OMS with deterministic replay is
-  on the v1.0 roadmap.
+**Strengths:**
+- Deterministic execution: same inputs → same outputs (event replay)
+- Performance: LOB matching at 6M ops/sec, outside Python GIL
+- Auditability: event sourcing, property tests, mutation testing
+- Sharp boundary: Python for strategy, Rust for execution
+
+**Weaknesses:**
+- No GUI: CLI-only, no web dashboard
+- Small community: single maintainer, no plugin ecosystem
+- Limited venue coverage: IBKR + Binance only (extensible via broker trait)
+- No FIX protocol: FIX 4.4/5.0 not planned
+- Not an OMS yet: event-sourced OMS on v1.0 roadmap
 
 nanobook is a compact Rust execution kernel for Python strategies:
 limit-order-book matching, portfolio simulation, broker abstraction, pre-trade
