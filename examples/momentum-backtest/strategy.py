@@ -226,20 +226,9 @@ def run_backtest(
         # Rebalance portfolio
         portfolio.rebalance_simple(targets, prices)
 
-        # Record return for the month (use next month's prices with exact date match)
-        if i < len(rebalance_dates) - 1:
-            next_date = rebalance_dates[i + 1]
-            # Use exact date match since we aligned to trading days
-            next_prices_on_date = df[df["Date"] == next_date]
-            if not next_prices_on_date.empty:
-                next_prices_list = [
-                    (row["Ticker"], int(row["Close"] * 100))
-                    for _, row in next_prices_on_date.iterrows()
-                ]
-                portfolio.record_return(next_prices_list)
-
-        # Take snapshot
+        # Take snapshot with current prices
         snapshot = portfolio.snapshot(prices)
+
         snapshots.append(
             {
                 "date": rebalance_date,
