@@ -36,7 +36,7 @@ except ImportError:
 
 def load_data(data_file: Path) -> pd.DataFrame:
     """Load OHLCV data from CSV."""
-    df = pd.read_csv(data_file)
+    df = pd.read_csv(data_file, low_memory=False)
     df["Date"] = pd.to_datetime(df["Date"])
     df = df.sort_values(["Ticker", "Date"])
     return df
@@ -58,13 +58,35 @@ def compute_momentum_signal(
     """
     # Compute monthly returns
     df = df.copy()
-    df.set_index(["Date", "Ticker"], inplace=True)
+    df["Date"] = pd.to_datetime(df["Date"])
+    # Ensure Close is numeric
+    df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
 
-    # Resample to monthly frequency (using last close of month)
-    monthly_close = df["Close"].groupby(["Ticker", pd.Grouper(freq="ME")]).last()
+    # Get list of unique tickers
+    tickers = df["Ticker"].unique()
+
+    # Compute monthly close for each ticker separately
+    # Use last trading day of each month
+    monthly_dfs = []
+    for ticker in tickers:
+        ticker_df = df[df["Ticker"] == ticker].copy()
+        ticker_df = ticker_df.set_index("Date")
+        # Group by year-month and take last trading day
+        ticker_df["YearMonth"] = ticker_df.index.to_period("M")
+        monthly_close = ticker_df.groupby("YearMonth")["Close"].last()
+        monthly_df = pd.DataFrame({
+            "Date": monthly_close.index.to_timestamp(),  # Convert to timestamp (month-end)
+            "Ticker": ticker,
+            "Close": monthly_close.values
+        })
+        monthly_dfs.append(monthly_df)
+
+    # Combine all tickers
+    monthly_df = pd.concat(monthly_dfs, ignore_index=True)
+    monthly_df = monthly_df.set_index(["Date", "Ticker"]).sort_index()
 
     # Compute momentum: (price_t-1 / price_t-lookback-1) - 1
-    momentum = monthly_close.pct_change(lookback_months + skip_months).shift(-skip_months)
+    momentum = monthly_df["Close"].groupby(level="Ticker").pct_change(lookback_months + skip_months, fill_method=None).shift(-skip_months)
 
     # Reset index and rename
     momentum = momentum.reset_index()
@@ -72,6 +94,15 @@ def compute_momentum_signal(
 
     # Drop NaN values (insufficient history)
     momentum = momentum.dropna()
+
+    # Convert month-start dates to actual trading days (first trading day on or after the month-start)
+    # This avoids forward-fill complexity
+    trading_dates = df[["Date"]].drop_duplicates().sort_values("Date")
+    momentum["Date"] = momentum["Date"].apply(
+        lambda d: trading_dates[trading_dates["Date"] >= d].iloc[0]["Date"]
+        if len(trading_dates[trading_dates["Date"] >= d]) > 0
+        else d
+    )
 
     return momentum
 
@@ -181,25 +212,31 @@ def run_backtest(
             print(f"  Warning: No valid targets for {rebalance_date.date()}, skipping")
             continue
 
-        # Get current prices (use close of rebalance date)
-        current_prices = df[df["Date"] == rebalance_date][["Ticker", "Close"]]
+        # Get current prices (exact date match since we aligned to trading days)
+        prices_on_date = df[df["Date"] == rebalance_date]
+        if prices_on_date.empty:
+            print(f"  Warning: No prices for {rebalance_date.date()}, skipping")
+            continue
+
         prices = [
             (row["Ticker"], int(row["Close"] * 100))  # Convert to cents
-            for _, row in current_prices.iterrows()
+            for _, row in prices_on_date.iterrows()
         ]
 
         # Rebalance portfolio
         portfolio.rebalance_simple(targets, prices)
 
-        # Record return for the month (use next month's prices)
+        # Record return for the month (use next month's prices with exact date match)
         if i < len(rebalance_dates) - 1:
             next_date = rebalance_dates[i + 1]
-            next_prices = df[df["Date"] == next_date][["Ticker", "Close"]]
-            next_prices_list = [
-                (row["Ticker"], int(row["Close"] * 100))
-                for _, row in next_prices.iterrows()
-            ]
-            portfolio.record_return(next_prices_list)
+            # Use exact date match since we aligned to trading days
+            next_prices_on_date = df[df["Date"] == next_date]
+            if not next_prices_on_date.empty:
+                next_prices_list = [
+                    (row["Ticker"], int(row["Close"] * 100))
+                    for _, row in next_prices_on_date.iterrows()
+                ]
+                portfolio.record_return(next_prices_list)
 
         # Take snapshot
         snapshot = portfolio.snapshot(prices)

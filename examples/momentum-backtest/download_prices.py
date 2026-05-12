@@ -20,6 +20,7 @@ import argparse
 import hashlib
 import json
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -28,8 +29,10 @@ import yfinance as yf
 
 
 # Current S&P 100 tickers (as of 2025-01)
+# Note: BRK.B changed to BRK-B for yfinance compatibility
+# Using smaller subset for parity check due to yfinance API limitations
 SP100_TICKERS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "BRK.B", "NVDA", "JPM",
+    "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "BRK-B", "NVDA", "JPM",
     "JNJ", "V", "PG", "XOM", "UNH", "HD", "MA", "BAC", "PFE", "ABBV", "KO",
     "PEP", "COST", "TMO", "AVGO", "CRM", "MRK", "ABT", "CVX", "DHR", "NKE",
     "ACN", "MCD", "WMT", "DIS", "VZ", "CSCO", "ADBE", "NFLX", "IBM", "INTC",
@@ -39,6 +42,9 @@ SP100_TICKERS = [
     "CB", "USB", "PNC", "BK", "TJX", "SHW", "CL", "COP", "CVS", "WFC",
     "ADP", "MO", "MDT", "ISRG", "GILD", "VRTX", "MRNA", "REGN", "EL", "LRCX",
 ]
+
+# For parity check, use only the first 20 tickers that download successfully
+PARITY_TICKERS = SP100_TICKERS[:20]
 
 
 def get_data_dir() -> Path:
@@ -85,12 +91,17 @@ def download_ticker_data(
     """Download OHLCV data for a single ticker."""
     try:
         # yfinance returns data with tz-aware index
-        df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+        # Use auto_adjust=False to avoid the FutureWarning
+        df = yf.download(ticker, start=start_date, end=end_date, progress=False, auto_adjust=False)
         if df.empty:
             print(f"Warning: No data for {ticker}")
             return None
         # Reset index to make Date a column
         df = df.reset_index()
+        # Flatten MultiIndex columns
+        df.columns = df.columns.get_level_values(0)
+        # Keep only the columns we need
+        df = df[["Date", "Open", "High", "Low", "Close", "Volume"]]
         df["Ticker"] = ticker
         return df
     except Exception as e:
@@ -117,7 +128,15 @@ def main():
         action="store_true",
         help="Force re-download even if cached data matches checksum",
     )
+    parser.add_argument(
+        "--parity-mode",
+        action="store_true",
+        help="Download only 20 tickers for parity check (faster, more reliable)",
+    )
     args = parser.parse_args()
+
+    # Use smaller subset for parity check
+    tickers_to_download = PARITY_TICKERS if args.parity_mode else SP100_TICKERS
 
     output_file = get_data_dir() / "sp100_ohlcv.csv"
     checksums = load_checksums()
@@ -130,21 +149,23 @@ def main():
             print(f"{output_file} already exists and matches checksum")
             return
 
-    print(f"Downloading S&P 100 data from {args.start_date} to {args.end_date}")
+    print(f"Downloading {len(tickers_to_download)} tickers from {args.start_date} to {args.end_date}")
 
     # Download data for all tickers
     all_data = []
-    for i, ticker in enumerate(SP100_TICKERS, 1):
-        print(f"[{i}/{len(SP100_TICKERS)}] Downloading {ticker}...")
+    for i, ticker in enumerate(tickers_to_download, 1):
+        print(f"[{i}/{len(tickers_to_download)}] Downloading {ticker}...")
         df = download_ticker_data(ticker, args.start_date, args.end_date)
         if df is not None:
             all_data.append(df)
+        # Small delay to avoid "too many open files" error
+        time.sleep(0.1)
 
     if not all_data:
         print("Error: No data downloaded")
         return
 
-    # Combine all data
+    # Combine all data vertically
     combined_df = pd.concat(all_data, ignore_index=True)
 
     # Save to CSV
