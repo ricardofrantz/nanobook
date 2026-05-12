@@ -1,5 +1,7 @@
 //! Order submission, fill monitoring, rate limiting, and cancellation.
 
+use std::collections::HashMap;
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -13,6 +15,40 @@ use log::{debug, info, warn};
 
 use crate::error::BrokerError;
 use crate::types::*;
+
+/// Deduplication key for order-status callbacks.
+///
+/// TWS (Trader Workstation) may send duplicate OrderStatus callbacks for the
+/// same fill event due to network retries, internal TWS state synchronization,
+/// or other implementation details. Without deduplication, these duplicates
+/// would cause position updates to be applied multiple times, leading to
+/// incorrect position tracking.
+///
+/// We deduplicate based on the combination of:
+/// - `order_id`: The broker-assigned order identifier
+/// - `status`: The order status string (e.g., "Filled", "Submitted")
+/// - `filled_quantity`: The quantity filled (rounded to integer for hashing)
+///
+/// This ensures that each unique fill event is processed exactly once,
+/// regardless of how many duplicate callbacks TWS sends.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct OrderCallbackKey {
+    pub order_id: i32,
+    pub status: String,
+    pub filled_quantity: i64, // Converted from f64 for hashing
+}
+
+/// Deduplication cache type for order-status callbacks.
+///
+/// The cache maps each unique callback to the timestamp when it was first
+/// seen. Entries are automatically cleaned up after a TTL (time-to-live) of
+/// 5 minutes to prevent unbounded memory growth.
+///
+/// The TTL of 5 minutes is chosen to be:
+/// - Long enough to cover the typical window for duplicate callbacks
+/// - Short enough to prevent the cache from growing indefinitely
+/// - Sufficient for normal order execution flows (orders typically fill within seconds)
+pub type CallbackDedupCache = Mutex<HashMap<OrderCallbackKey, Instant>>;
 
 /// Result of a single order execution.
 #[derive(Debug, Clone)]
@@ -137,6 +173,30 @@ pub fn submit_order(
 /// Execute a rebalance-style order: submit limit, poll for fill, cancel on timeout.
 ///
 /// This is the higher-level function used by the rebalancer for order-by-order execution.
+///
+/// # Deduplication
+///
+/// The `dedup_cache` parameter enables deduplication of order-status callbacks to
+/// handle TWS duplicate callbacks. When provided, the function will:
+/// - Check each OrderStatus callback against the cache
+/// - Skip processing of duplicate callbacks (logged at debug level)
+/// - Record new callbacks in the cache with a timestamp
+/// - Automatically clean up expired entries (TTL: 5 minutes) on each check
+///
+/// When `None`, no deduplication is performed. This is useful for:
+/// - Testing scenarios where duplicates are not expected
+/// - Environments where TWS behavior is known to be stable
+///
+/// # Why Deduplication is Needed
+///
+/// TWS (Trader Workstation) may send duplicate OrderStatus callbacks for the same
+/// fill event. Without deduplication, these duplicates would cause:
+/// - Position updates to be applied multiple times
+/// - Incorrect position tracking
+/// - Potential double-counting of fills
+///
+/// The deduplication logic ensures that each unique fill event (identified by
+/// order_id + status + filled_quantity) is processed exactly once.
 pub fn execute_limit_order(
     client: &Client,
     symbol: nanobook::Symbol,
@@ -145,6 +205,7 @@ pub fn execute_limit_order(
     limit_price_cents: i64,
     client_order_id: Option<&ClientOrderId>,
     timeout: Duration,
+    dedup_cache: Option<&CallbackDedupCache>,
 ) -> Result<OrderResult, BrokerError> {
     let contract = Contract::stock(symbol.as_str()).build();
 
@@ -194,6 +255,43 @@ pub fn execute_limit_order(
 
         match response {
             PlaceOrder::OrderStatus(status) => {
+                // Check for duplicate callbacks if dedup cache is provided
+                if let Some(cache) = dedup_cache {
+                    let key = OrderCallbackKey {
+                        order_id,
+                        status: status.status.clone(),
+                        filled_quantity: status.filled.round() as i64,
+                    };
+
+                    let is_duplicate = {
+                        let mut cache_guard = cache
+                            .lock()
+                            .map_err(|_| BrokerError::Other("dedup cache poisoned".into()))?;
+
+                        // Clean up expired entries (TTL: 5 minutes)
+                        let ttl = Duration::from_secs(300);
+                        cache_guard.retain(|_, timestamp| timestamp.elapsed() < ttl);
+
+                        // Check if this is a duplicate
+                        let duplicate = cache_guard.contains_key(&key);
+
+                        // Record this callback if not a duplicate
+                        if !duplicate {
+                            cache_guard.insert(key, Instant::now());
+                        }
+
+                        duplicate
+                    };
+
+                    if is_duplicate {
+                        debug!(
+                            "Skipping duplicate OrderStatus for order {}: status={}, filled={}",
+                            order_id, status.status, status.filled
+                        );
+                        continue; // Skip processing this duplicate
+                    }
+                }
+
                 debug!(
                     "Order {order_id} status: {} filled={} remaining={}",
                     status.status, status.filled, status.remaining
@@ -276,5 +374,141 @@ pub fn cancel_order(client: &Client, order_id: i32) {
 pub fn rate_limit_delay(interval_ms: u64) {
     if interval_ms > 0 {
         thread::sleep(Duration::from_millis(interval_ms));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dedup_cache_detects_duplicates() {
+        let cache = CallbackDedupCache::default();
+
+        let order_id = 12345;
+        let status = "Filled";
+        let filled_qty: f64 = 100.0;
+
+        // First callback should not be a duplicate
+        {
+            let key = OrderCallbackKey {
+                order_id,
+                status: status.to_string(),
+                filled_quantity: filled_qty.round() as i64,
+            };
+            let mut cache_guard = cache.lock().unwrap();
+            assert!(!cache_guard.contains_key(&key));
+            cache_guard.insert(key, Instant::now());
+        }
+
+        // Second identical callback should be detected as duplicate
+        {
+            let key = OrderCallbackKey {
+                order_id,
+                status: status.to_string(),
+                filled_quantity: filled_qty.round() as i64,
+            };
+            let cache_guard = cache.lock().unwrap();
+            assert!(cache_guard.contains_key(&key));
+        }
+
+        // Different filled quantity should not be a duplicate
+        {
+            let key = OrderCallbackKey {
+                order_id,
+                status: status.to_string(),
+                filled_quantity: (filled_qty + 50.0).round() as i64,
+            };
+            let cache_guard = cache.lock().unwrap();
+            assert!(!cache_guard.contains_key(&key));
+        }
+
+        // Different status should not be a duplicate
+        {
+            let key = OrderCallbackKey {
+                order_id,
+                status: "Submitted".to_string(),
+                filled_quantity: filled_qty.round() as i64,
+            };
+            let cache_guard = cache.lock().unwrap();
+            assert!(!cache_guard.contains_key(&key));
+        }
+    }
+
+    #[test]
+    fn test_dedup_cache_ttl_cleanup() {
+        let cache = CallbackDedupCache::default();
+
+        let order_id = 12345;
+        let status = "Filled";
+        let filled_qty: f64 = 100.0;
+
+        // Insert an entry
+        {
+            let key = OrderCallbackKey {
+                order_id,
+                status: status.to_string(),
+                filled_quantity: filled_qty.round() as i64,
+            };
+            let mut cache_guard = cache.lock().unwrap();
+            cache_guard.insert(key, Instant::now());
+        }
+
+        // Entry should exist immediately
+        {
+            let key = OrderCallbackKey {
+                order_id,
+                status: status.to_string(),
+                filled_quantity: filled_qty.round() as i64,
+            };
+            let cache_guard = cache.lock().unwrap();
+            assert!(cache_guard.contains_key(&key));
+        }
+
+        // Simulate TTL cleanup (remove entries older than TTL)
+        let ttl = Duration::from_secs(300);
+        {
+            let mut cache_guard = cache.lock().unwrap();
+            cache_guard.retain(|_, timestamp| timestamp.elapsed() < ttl);
+        }
+
+        // Entry should still exist (not expired yet)
+        {
+            let key = OrderCallbackKey {
+                order_id,
+                status: status.to_string(),
+                filled_quantity: filled_qty.round() as i64,
+            };
+            let cache_guard = cache.lock().unwrap();
+            assert!(cache_guard.contains_key(&key));
+        }
+
+        // Manually expire the entry by setting old timestamp
+        {
+            let key = OrderCallbackKey {
+                order_id,
+                status: status.to_string(),
+                filled_quantity: filled_qty.round() as i64,
+            };
+            let mut cache_guard = cache.lock().unwrap();
+            cache_guard.insert(key, Instant::now() - Duration::from_secs(301));
+        }
+
+        // Run TTL cleanup
+        {
+            let mut cache_guard = cache.lock().unwrap();
+            cache_guard.retain(|_, timestamp| timestamp.elapsed() < ttl);
+        }
+
+        // Entry should be removed after TTL
+        {
+            let key = OrderCallbackKey {
+                order_id,
+                status: status.to_string(),
+                filled_quantity: filled_qty.round() as i64,
+            };
+            let cache_guard = cache.lock().unwrap();
+            assert!(!cache_guard.contains_key(&key));
+        }
     }
 }
