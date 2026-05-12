@@ -1,1 +1,9 @@
--e ./python
+# Python version pin for reproducibility
+python==3.14.0
+
+# Build dependencies for local nanobook package
+maturin==1.11.5
+
+# The nanobook package is built locally from ../python
+# No additional runtime dependencies needed for report.py
+# (uses only standard library: json, math, collections, pathlib, argparse, html)
