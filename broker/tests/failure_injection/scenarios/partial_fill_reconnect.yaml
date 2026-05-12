@@ -1,0 +1,27 @@
+name: "Partial fill with reconnect"
+description: "Combines F3 (partial fill disconnect) with F6 (reconnect drill)"
+steps:
+  - action: connect
+  - action: submit_order
+    symbol: "AAPL"
+    quantity: 100
+  - action: inject_failure
+    mode: F3PartialFillDisconnect
+    timing: PostFill
+  - action: fill_order
+    order_id: 1
+    quantity: 50
+  - action: assert
+    condition: disconnected
+  - action: clear_failure
+  - action: connect
+  - action: assert
+    condition: connected
+  - action: submit_order
+    symbol: "MSFT"
+    quantity: 50
+  - action: fill_order
+    order_id: 2
+    quantity: 50
+  - action: assert
+    condition: connected

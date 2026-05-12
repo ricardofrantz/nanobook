@@ -1,0 +1,26 @@
+name: "Stale data and clock skew sequence"
+description: "Tests handling of stale market data (F4) followed by clock skew (F5)"
+steps:
+  - action: connect
+  - action: inject_failure
+    mode: F4StaleMarketData
+    timing: PreSubmit
+  - action: submit_order
+    symbol: "AAPL"
+    quantity: 100
+  - action: clear_failure
+  - action: inject_failure
+    mode: F5ClockSkew
+    timing: PreSubmit
+  - action: submit_order
+    symbol: "AAPL"
+    quantity: 100
+  - action: clear_failure
+  - action: submit_order
+    symbol: "AAPL"
+    quantity: 100
+  - action: fill_order
+    order_id: 3
+    quantity: 100
+  - action: assert
+    condition: connected
