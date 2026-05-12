@@ -60,7 +60,9 @@
 
 ## v0.12 Status
 
-- [ ] Strategy implementation in `strategy.py`
-- [ ] Backtest data pipeline
-- [ ] vectorbt comparison baseline
-- [ ] Report generation (per mockup spec)
+- [x] Strategy implementation in `strategy.py`
+- [x] Backtest data pipeline
+- [x] vectorbt comparison baseline
+- [x] Report generation (equity curve, drawdown, metrics)
+- [x] Parity documentation (COMPARISON.md)
+- [x] Learnings documentation (portfolio-sim-parity-learnings.md)

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-05-12 - Backtest + Positioning
+
+This release adds a momentum backtest case study demonstrating nanobook's portfolio simulator with parity validation against vectorbt, and completes the competitive positioning in the README.
+
+### Added
+
+- **`examples/momentum-backtest/report.py`**: HTML report generator with equity curve, drawdown plots, and performance metrics (Sharpe, Sortino, max drawdown)
+- **`examples/momentum-backtest/COMPARISON.md`**: Line-by-line comparison of nanobook vs vectorbt covering signal generation, execution models, valuation approaches, and cost modeling
+- **`docs/solutions/portfolio-sim-parity-learnings.md`**: Learnings from parity check including snapshot timing, API usage, unit conversion, and architectural differences
+- **`examples/momentum-backtest/strategy.py --output`**: JSON export flag for report generation integration
+- **CI momentum-backtest-smoke job**: GitHub Actions job that runs backtest on cached price data with zero costs for validation
+
+### Changed
+
+- **README competitive positioning**: Competitive table already present and meets v0.12 requirements (honest positioning with strengths/weaknesses)
+- **examples/momentum-backtest/requirements.txt**: Added matplotlib>=3.7.0 for report plotting
+
+### Performance
+
+- **Parity validation**: 0.0818% max difference vs vectorbt for 2020-2022-11 (zero cost)
+- **Known limitation**: 0.4-2.0% differences for 2022-12+ due to architectural differences (snapshot-based vs continuous valuation)
+- **Strategy**: Cross-sectional momentum on S&P 100 (12-month lookback, top/bottom decile, equal-weight, monthly rebalance)
+
 ## [0.11.0] - 2026-05-12 - Replay
 
 This release introduces a reproducible ITCH replay harness for measuring end-to-end parsing and order-book update performance on real NASDAQ TotalView-ITCH data. The focus is on honest performance measurement with proper warmup exclusion and full reproducibility documentation.
