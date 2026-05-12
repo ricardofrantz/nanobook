@@ -82,8 +82,7 @@ impl Broker for IbkrBroker {
 
     fn cancel_order(&self, id: OrderId) -> Result<(), BrokerError> {
         let client = self.require_client()?;
-        orders::cancel_order(client.inner(), id.0 as i32);
-        Ok(())
+        orders::cancel_order(client.inner(), id.0 as i32)
     }
 
     fn quote(&self, symbol: &Symbol) -> Result<Quote, BrokerError> {

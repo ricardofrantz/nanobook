@@ -39,6 +39,14 @@ pub enum BrokerError {
     #[error("{field} out of i64 range after scaling: {value}")]
     ValueOutOfRange { field: &'static str, value: f64 },
 
+    /// Cancel request was rejected by the broker.
+    ///
+    /// This can occur when a cancel races against an in-flight fill:
+    /// the order fills before the cancel request reaches the broker,
+    /// causing the broker to reject the cancel as the order is already complete.
+    #[error("cancel rejected for order {order_id}: {reason}")]
+    CancelReject { order_id: i32, reason: String },
+
     #[error("{0}")]
     Other(String),
 }
