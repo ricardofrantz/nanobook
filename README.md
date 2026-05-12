@@ -245,7 +245,21 @@ rebalancer reconcile target.json
 
 ## Performance
 
-Single-threaded benchmarks (macOS arm64, v0.10.0, stock clocks):
+**End-to-end ITCH replay performance** (measured on NASDAQ TotalView-ITCH 2019-07-30, Apple M1 Pro, 16 GB RAM, N=47,739 events):
+
+| Stage | p50 latency | p95 latency | p99 latency |
+|-------|-------------|-------------|-------------|
+| ITCH parse | 875 ns | 1,000 ns | 3,000 ns |
+| LOB book-update | 1,208 ns | 3,667 ns | 6,792 ns |
+
+Reproducible by following `examples/itch-replay/README.md` and `REPRODUCIBILITY.md`.
+Numbers exclude warmup events and reflect single-threaded replay of a 1-minute
+NASDAQ trading window (09:30-09:31 ET). See `examples/itch-replay/data/replay-smoke/report.html`
+for full latency distribution histograms.
+
+### Kernel microbenchmarks
+
+Single-threaded synthetic microbenchmarks (macOS arm64, v0.10.0, stock clocks):
 
 | Operation | Latency | Throughput |
 |-----------|---------|------------|
@@ -261,6 +275,9 @@ Hardware, build flags, and background load all move these ±10-20 %. See
 for the v0.9.3 → v0.10.0 delta (the v0.10.0 submit path pays a ~20 ns cost
 for the new self-trade-prevention field even with STP off — a future
 revision will lift the off-path check out of the matching loop).
+
+Note: End-to-end ITCH replay numbers above reflect real-world parsing and book-update
+performance on market data, while kernel microbenchmarks measure isolated operations on synthetic inputs.
 
 Single-threaded throughput is roughly equivalent to Numba (both compile to
 LLVM IR). Where Rust wins: zero cold-start, true parallelism via Rayon with
