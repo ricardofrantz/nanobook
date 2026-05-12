@@ -226,9 +226,8 @@ def run_backtest(
         # Rebalance portfolio
         portfolio.rebalance_simple(targets, prices)
 
-        # Take snapshot with current prices
+        # Take snapshot AFTER rebalancing to match vectorbt timing
         snapshot = portfolio.snapshot(prices)
-
         snapshots.append(
             {
                 "date": rebalance_date,
@@ -237,7 +236,6 @@ def run_backtest(
                 "num_positions": snapshot["num_positions"],
             }
         )
-
         equity_curve.append(snapshot["equity"])
 
     # Compute metrics

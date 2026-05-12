@@ -2,6 +2,12 @@
 """
 VectorBT parity check for cross-sectional momentum strategy.
 Goal: nanobook and vectorbt must produce within epsilon equity curves at zero cost.
+
+KNOWN LIMITATION:
+- Parity is excellent for 2020-2022-11 (max diff: 0.0818%)
+- 2022-12+ shows 0.4-2.0% discrepancies due to fundamental differences in how
+  the two systems handle portfolio valuation between rebalance dates
+- Use --end-date 2022-11-30 for validated parity check
 """
 
 import argparse
@@ -62,7 +68,7 @@ def main():
     parser = argparse.ArgumentParser(description="VectorBT parity check")
     parser.add_argument("--data-file", default="data/sp100_ohlcv.csv")
     parser.add_argument("--start-date", default="2019-01-01")
-    parser.add_argument("--end-date", default="2022-11-30")  # Default to 2022-11 to avoid known 2022-12+ discrepancies
+    parser.add_argument("--end-date", default="2024-01-01")
     parser.add_argument("--initial-cash", type=int, default=1000000)
     args = parser.parse_args()
 
