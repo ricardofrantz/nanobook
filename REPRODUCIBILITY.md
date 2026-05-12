@@ -78,14 +78,14 @@ uv run report.py --input data/replay-v2/event-log.jsonl --output data/replay-v2/
 
 ## v0.11 measured performance
 
-Measured from the reference environment run (N=974,288 events, warmup excluded):
+Measured from the reference environment run (N=973,285 measured events, 1,000 warmup events excluded):
 
 | Stage | p50 latency | p95 latency | p99 latency |
 |-------|-------------|-------------|-------------|
-| ITCH parse | 83 ns | 125 ns | 250 ns |
-| LOB book-update | 208 ns | 833 ns | 3,000 ns |
+| ITCH parse | 83 ns | 166 ns | 417 ns |
+| LOB book-update | 250 ns | 1,042 ns | 3,541 ns |
 
-These numbers are published in the README Performance section and reflect steady-state operation after excluding the first 1,000 warmup events.
+These numbers are published in the README Performance section and reflect steady-state operation after excluding the first 1,000 warmup events from the 974,288 total events processed.
 
 ## v0.11 verification
 

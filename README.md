@@ -245,12 +245,12 @@ rebalancer reconcile target.json
 
 ## Performance
 
-**End-to-end ITCH replay performance** (measured on NASDAQ TotalView-ITCH 2019-07-30, Apple M1 Pro, 16 GB RAM, N=974,288 events, warmup excluded)¹:
+**End-to-end ITCH replay performance** (measured on NASDAQ TotalView-ITCH 2019-07-30, Apple M1 Pro, 16 GB RAM, N=973,285 measured events, warmup excluded)¹:
 
 | Stage | p50 latency | p95 latency | p99 latency |
 |-------|-------------|-------------|-------------|
-| ITCH parse | 83 ns | 125 ns | 250 ns |
-| LOB book-update | 208 ns | 833 ns | 3,000 ns |
+| ITCH parse | 83 ns | 166 ns | 417 ns |
+| LOB book-update | 250 ns | 1,042 ns | 3,541 ns |
 
 ¹ Reproducible by following `examples/itch-replay/README.md` and `REPRODUCIBILITY.md`.
 Numbers exclude warmup events and reflect single-threaded replay of a 1-minute
