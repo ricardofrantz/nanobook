@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nanobook v0.14 — Paper-Live Soak</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css">
+  <style>
+    :root {
+      --bid: #2a7f5f;
+      --ask: #b03a3a;
+      --accent: #4a6fa5;
+      --bg: #f8f8f6;
+      --text: #1a1a1a;
+      --muted: #666;
+      --line: #ddd;
+      --panel: #fff;
+      --zebra: #fafafa;
+      --badge-bg: #f5e9b0;
+      --badge-text: #7a6200;
+      --mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-variant-numeric: tabular-nums;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    main {
+      width: min(960px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 36px 0 56px;
+    }
+    .badge {
+      background: var(--badge-bg);
+      color: var(--badge-text);
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      padding: 4px 8px;
+      text-transform: uppercase;
+    }
+    h1 {
+      font-size: clamp(28px, 4vw, 38px);
+      font-weight: 650;
+      letter-spacing: -0.01em;
+      line-height: 1.1;
+      margin: 14px 0 6px;
+      text-wrap: balance;
+    }
+    .subtitle {
+      color: #444;
+      font-size: 17px;
+      margin: 0;
+      text-wrap: pretty;
+    }
+    .tldr {
+      background: #fff;
+      border: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      margin: 28px 0 28px;
+    }
+    .tldr-item {
+      padding: 16px 18px;
+      border-right: 1px solid var(--line);
+    }
+    .tldr-item:last-child { border-right: 0; }
+    .tldr-num {
+      font-family: var(--mono);
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .tldr-label {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-top: 5px;
+    }
+    .lede {
+      font-size: 16px;
+      color: #333;
+      max-width: 720px;
+      margin: 0 0 36px;
+      text-wrap: pretty;
+    }
+    .section { margin-top: 40px; }
+    .section h2 {
+      font-size: 18px;
+      font-weight: 650;
+      margin: 0 0 4px;
+      letter-spacing: -0.005em;
+    }
+    .section-caption {
+      color: #555;
+      font-size: 14px;
+      margin: 0 0 14px;
+      max-width: 720px;
+      text-wrap: pretty;
+    }
+    .chart {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      height: 320px;
+      width: 100%;
+    }
+    table {
+      border-collapse: collapse;
+      font-size: 14px;
+      margin-top: 14px;
+      width: 100%;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f1f1ef;
+      color: #333;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    tbody tr:nth-child(even) { background: var(--zebra); }
+    td.num, .num, .timestamp {
+      font-family: var(--mono);
+      font-variant-numeric: tabular-nums;
+    }
+    .type-tag {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border: 1px solid currentColor;
+    }
+    .type-reconnect { color: #4a6fa5; }
+    .type-cancel    { color: #2a7f5f; }
+    .type-stale     { color: #b03a3a; }
+    .type-partial   { color: #7a5a00; }
+    .type-clock     { color: #666; }
+    .footer {
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 48px;
+      padding-top: 14px;
+    }
+    @media (max-width: 780px) {
+      main { width: min(100% - 28px, 1100px); }
+      .tldr { grid-template-columns: 1fr; }
+      .tldr-item { border-right: 0; border-bottom: 1px solid var(--line); }
+      .tldr-item:last-child { border-bottom: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <span class="badge">MOCKUP — synthetic data</span>
+      <h1>v0.14 · Paper-Live Soak</h1>
+      <p class="subtitle">Did the runner survive two weeks of IBKR paper trading without manual intervention?</p>
+    </header>
+
+    <div class="tldr">
+      <div class="tldr-item">
+        <div class="tldr-num">14 days</div>
+        <div class="tldr-label">continuous paper-account run</div>
+      </div>
+      <div class="tldr-item">
+        <div class="tldr-num">147 / 143</div>
+        <div class="tldr-label">orders sent / fills (4 rejects)</div>
+      </div>
+      <div class="tldr-item">
+        <div class="tldr-num">5 / 5</div>
+        <div class="tldr-label">incidents / auto-recovered</div>
+      </div>
+    </div>
+
+    <p class="lede">v0.13 hardened the broker plumbing against 11 failure modes (reconnect, idempotency, kill switch, cancel races, clock skew, …). v0.14 ran that hardened runner live against IBKR's paper exchange for 14 trading days with <em>no manual intervention</em>. Five operational events occurred. All auto-recovered.</p>
+
+    <section class="section">
+      <h2>Daily equity</h2>
+      <p class="section-caption">Paper account, USD. Period return +3.54%, max drawdown -0.52%. Nothing here is interesting — that's the point.</p>
+      <div id="daily-equity-chart" class="chart"></div>
+    </section>
+
+    <section class="section">
+      <h2>What actually happened — incident log</h2>
+      <p class="section-caption">Every operational event during the soak. The system handled all of them without an operator on duty.</p>
+      <table aria-label="Operational incidents during soak">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>What</th>
+            <th>How it recovered</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="timestamp">Apr&nbsp;08 · 09:31</td>
+            <td><span class="type-tag type-reconnect">reconnect</span> TWS API dropped at market open</td>
+            <td>Auto-reconnect from v0.13 hardening; orders re-queued; 4s delay; no fills lost</td>
+          </tr>
+          <tr>
+            <td class="timestamp">Apr&nbsp;10 · 14:22</td>
+            <td><span class="type-tag type-cancel">cancel race</span> Cancel sent for order already filled</td>
+            <td>Fill reconciler caught it; position correctly reflected; no impact</td>
+          </tr>
+          <tr>
+            <td class="timestamp">Apr&nbsp;14 · 11:05</td>
+            <td><span class="type-tag type-stale">stale quote</span> Bid &gt; ask on XOM for 2 ticks</td>
+            <td>Quote validator flagged; orders held 2 ticks; 1 delayed order</td>
+          </tr>
+          <tr>
+            <td class="timestamp">Apr&nbsp;17 · 09:30</td>
+            <td><span class="type-tag type-partial">partial+drop</span> 22/38 shares filled then TWS dropped</td>
+            <td>Reconnect; remaining 16 shares re-sent as new order; correct final state</td>
+          </tr>
+          <tr>
+            <td class="timestamp">Apr&nbsp;22 · 13:41</td>
+            <td><span class="type-tag type-clock">clock skew</span> System clock drifted 1.8s vs TWS</td>
+            <td>NTP resync auto-triggered; audit-log note inserted; no order impact</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <div class="footer">Synthetic data, visual spec only. IBKR paper account · 2026-04-07 to 2026-04-25 · S&amp;P 100 momentum · examples/paper-live-ibkr/</div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const chartWidth = (el) => Math.max(320, el.clientWidth || 920);
+      const days = Array.from({ length: 14 }, (_, i) => i);
+      const dayLabels = (u, ticks) => ticks.map((t) => "d" + (Math.round(t) + 1));
+      const dailyEquity = [100000, 100840, 101220, 100690, 101450, 102100, 101780, 102450, 102190, 101930, 102680, 103210, 102870, 103540];
+      new uPlot({
+        width: chartWidth(document.getElementById("daily-equity-chart")),
+        height: 320,
+        scales: { x: { time: false } },
+        axes: [
+          { label: "day", values: dayLabels },
+          { label: "USD" }
+        ],
+        series: [
+          {},
+          { label: "Equity", stroke: "#4a6fa5", width: 2 }
+        ]
+      }, [days, dailyEquity], document.getElementById("daily-equity-chart"));
+    });
+  </script>
+</body>
+</html>
