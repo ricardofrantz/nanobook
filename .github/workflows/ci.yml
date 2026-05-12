@@ -166,3 +166,72 @@ jobs:
 
       - name: Run benchmarks
         run: cargo bench --all-features
+
+  itch-replay-smoke:
+    name: ITCH Replay Smoke (1-min slice)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: itch-replay-smoke
+
+      - name: Cache ITCH data
+        uses: actions/cache@v4
+        with:
+          path: examples/itch-replay/data
+          key: itch-data-${{ hashFiles('examples/itch-replay/expected/sample.md5') }}
+
+      - name: Download full ITCH file
+        working-directory: examples/itch-replay
+        run: ./download.sh
+
+      - name: Slice to 1-minute window
+        working-directory: examples/itch-replay
+        run: |
+          SLICE_FILE=data/07302019-0930-0931.itch
+          if [ ! -f "$SLICE_FILE" ]; then
+            cargo run --bin itch-slice -- \
+              --input data/07302019.NASDAQ_ITCH50.gz \
+              --output "$SLICE_FILE" \
+              --start-ns 34200000000000 \
+              --duration-ns 60000000000
+          fi
+
+      - name: Run replay on slice
+        working-directory: examples/itch-replay
+        run: |
+          cargo run --example itch-replay -- \
+            --input data/07302019-0930-0931.itch \
+            --output-dir data/replay-smoke
+
+      - name: Install Python dependencies
+        working-directory: examples/itch-replay
+        run: uv pip install -r requirements.txt
+
+      - name: Generate report
+        working-directory: examples/itch-replay
+        run: uv run report.py --input data/replay-smoke/event-log.jsonl --output data/replay-smoke/report.html
+
+      - name: Verify summary matches expected
+        working-directory: examples/itch-replay
+        run: diff -u expected/summary.txt data/replay-smoke/summary.txt
+
+      - name: Verify invariants log is empty
+        working-directory: examples/itch-replay
+        run: |
+          if [ -s data/replay-smoke/invariants.log ]; then
+            echo "invariants.log should be empty but contains:"
+            cat data/replay-smoke/invariants.log
+            exit 1
+          fi
