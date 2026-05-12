@@ -235,3 +235,60 @@ jobs:
             cat data/replay-smoke/invariants.log
             exit 1
           fi
+
+  momentum-backtest-smoke:
+    name: Momentum Backtest Smoke (cached prices)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: momentum-backtest-smoke
+
+      - name: Cache price data
+        uses: actions/cache@v4
+        with:
+          path: examples/momentum-backtest/data
+          key: price-data-${{ hashFiles('examples/momentum-backtest/data/prices.md5') }}
+
+      - name: Install Python dependencies
+        working-directory: examples/momentum-backtest
+        run: uv pip install -r requirements.txt
+
+      - name: Run backtest with cached data (zero cost)
+        working-directory: examples/momentum-backtest
+        run: |
+          uv run python strategy.py \
+            --data-file data/sp100_ohlcv.csv \
+            --start-date 2020-01-01 \
+            --end-date 2020-12-31 \
+            --initial-cash 1000000 \
+            --commission-bps 0 \
+            --slippage-bps 0 \
+            --output results.json
+
+      - name: Generate report
+        working-directory: examples/momentum-backtest
+        run: uv run python report.py --results results.json --output report.html
+
+      - name: Verify results exist
+        working-directory: examples/momentum-backtest
+        run: |
+          if [ ! -f results.json ]; then
+            echo "results.json not found"
+            exit 1
+          fi
+          if [ ! -f report.html ]; then
+            echo "report.html not found"
+            exit 1
+          fi

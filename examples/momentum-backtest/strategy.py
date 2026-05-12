@@ -18,6 +18,7 @@ Output:
 """
 
 import argparse
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -85,8 +86,14 @@ def compute_momentum_signal(
     monthly_df = pd.concat(monthly_dfs, ignore_index=True)
     monthly_df = monthly_df.set_index(["Date", "Ticker"]).sort_index()
 
-    # Compute momentum: (price_t-1 / price_t-lookback-1) - 1
-    momentum = monthly_df["Close"].groupby(level="Ticker").pct_change(lookback_months + skip_months, fill_method=None).shift(-skip_months)
+    # Compute momentum: (price_t-skip / price_t-lookback-skip) - 1
+    # NOTE: the `shift(-skip_months)` must be applied per ticker; otherwise it will
+    # leak across tickers due to the MultiIndex ordering (Date, then Ticker).
+    pct = monthly_df["Close"].groupby(level="Ticker").pct_change(
+        lookback_months + skip_months,
+        fill_method=None,
+    )
+    momentum = pct.groupby(level="Ticker").shift(-skip_months)
 
     # Reset index and rename
     momentum = momentum.reset_index()
@@ -315,6 +322,11 @@ def main():
         default=5,
         help="Slippage in basis points (default: 5)",
     )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Save results to JSON file (e.g., results.json)",
+    )
     args = parser.parse_args()
 
     data_file = Path(args.data_file)
@@ -335,6 +347,24 @@ def main():
 
     # Print results
     print_results(results)
+
+    # Save results to JSON if requested
+    if args.output:
+        output_path = Path(args.output)
+        # Convert datetime objects to strings for JSON serialization
+        json_results = results.copy()
+        if 'snapshots' in json_results:
+            json_results['snapshots'] = [
+                {**s, 'date': s['date'].isoformat() if hasattr(s['date'], 'isoformat') else str(s['date'])}
+                for s in json_results['snapshots']
+            ]
+        # Convert metrics to dict if it's an object
+        if 'metrics' in json_results and hasattr(json_results['metrics'], '__dict__'):
+            json_results['metrics'] = json_results['metrics'].__dict__
+        
+        with open(output_path, 'w') as f:
+            json.dump(json_results, f, indent=2)
+        print(f"Results saved to {output_path}")
 
 
 if __name__ == "__main__":
