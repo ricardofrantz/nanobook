@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nanobook v0.12 — Momentum Backtest</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css">
+  <style>
+    :root {
+      --bid: #2a7f5f;
+      --ask: #b03a3a;
+      --accent: #4a6fa5;
+      --bg: #f8f8f6;
+      --text: #1a1a1a;
+      --muted: #666;
+      --line: #ddd;
+      --panel: #fff;
+      --zebra: #fafafa;
+      --badge-bg: #f5e9b0;
+      --badge-text: #7a6200;
+      --mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-variant-numeric: tabular-nums;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    main {
+      width: min(960px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 36px 0 56px;
+    }
+    .badge {
+      background: var(--badge-bg);
+      color: var(--badge-text);
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      padding: 4px 8px;
+      text-transform: uppercase;
+    }
+    h1 {
+      font-size: clamp(28px, 4vw, 38px);
+      font-weight: 650;
+      letter-spacing: -0.01em;
+      line-height: 1.1;
+      margin: 14px 0 6px;
+      text-wrap: balance;
+    }
+    .subtitle {
+      color: #444;
+      font-size: 17px;
+      margin: 0;
+      text-wrap: pretty;
+    }
+    .tldr {
+      background: #fff;
+      border: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      margin: 28px 0 28px;
+    }
+    .tldr-item {
+      padding: 16px 18px;
+      border-right: 1px solid var(--line);
+    }
+    .tldr-item:last-child { border-right: 0; }
+    .tldr-num {
+      font-family: var(--mono);
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .tldr-label {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-top: 5px;
+    }
+    .lede {
+      font-size: 16px;
+      color: #333;
+      max-width: 720px;
+      margin: 0 0 36px;
+      text-wrap: pretty;
+    }
+    .section { margin-top: 40px; }
+    .section h2 {
+      font-size: 18px;
+      font-weight: 650;
+      margin: 0 0 4px;
+      letter-spacing: -0.005em;
+    }
+    .section-caption {
+      color: #555;
+      font-size: 14px;
+      margin: 0 0 14px;
+      max-width: 720px;
+      text-wrap: pretty;
+    }
+    .chart {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      height: 320px;
+      width: 100%;
+    }
+    table {
+      border-collapse: collapse;
+      font-size: 14px;
+      margin-top: 14px;
+      width: 100%;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f1f1ef;
+      color: #333;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    tbody tr:nth-child(even) { background: var(--zebra); }
+    td.num, .num {
+      font-family: var(--mono);
+      font-variant-numeric: tabular-nums;
+    }
+    .parity-box {
+      background: #fff;
+      border: 1px solid var(--line);
+      color: #333;
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 700;
+      padding: 14px 16px;
+      text-align: center;
+      margin-top: 14px;
+    }
+    .parity-pass { color: var(--bid); }
+    .parity-fail { color: var(--ask); }
+    .footer {
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 48px;
+      padding-top: 14px;
+    }
+    @media (max-width: 780px) {
+      main { width: min(100% - 28px, 1100px); }
+      .tldr { grid-template-columns: 1fr; }
+      .tldr-item { border-right: 0; border-bottom: 1px solid var(--line); }
+      .tldr-item:last-child { border-bottom: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <span class="badge">MOCKUP — synthetic data</span>
+      <h1>v0.12 · Momentum Backtest</h1>
+      <p class="subtitle">Cross-sectional momentum on S&P 100: does nanobook match vectorbt?</p>
+    </header>
+
+    <div class="tldr">
+      <div class="tldr-item">
+        <div class="tldr-num">12.4%</div>
+        <div class="tldr-label">Annualized return</div>
+      </div>
+      <div class="tldr-item">
+        <div class="tldr-num">1.42</div>
+        <div class="tldr-label">Sharpe ratio</div>
+      </div>
+      <div class="tldr-item">
+        <div class="tldr-num">-14.2%</div>
+        <div class="tldr-label">Max drawdown</div>
+      </div>
+      <div class="tldr-item">
+        <div class="tldr-num">87%</div>
+        <div class="tldr-label">Monthly turnover</div>
+      </div>
+    </div>
+
+    <p class="lede">Cross-sectional momentum strategy (12-month lookback, top/bottom decile, equal-weight, monthly rebal) on S&P 100 constituents. This mockup validates nanobook's backtest engine against vectorbt as a reference implementation.</p>
+
+    <section class="section">
+      <h2>Equity curve (parity check)</h2>
+      <p class="section-caption">nanobook vs vectorbt equity curves over 5-year backtest. The two implementations should track closely — divergence indicates cost modeling or execution timing differences.</p>
+      <div id="equity-chart" class="chart"></div>
+      <div class="parity-box">
+        <span class="parity-pass">✓ PARITY PASS</span> — Final equity difference: 0.23% ($2,300 on $1M)
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Drawdown</h2>
+      <p class="section-caption">Peak-to-trough drawdown over the backtest period. Momentum strategies typically experience drawdowns during regime changes.</p>
+      <div id="drawdown-chart" class="chart"></div>
+    </section>
+
+    <section class="section">
+      <h2>Turnover by month</h2>
+      <p class="section-caption">Monthly portfolio turnover (percentage of portfolio value traded). Momentum requires high turnover — expect 80-100% monthly as positions fully rotate each rebalance.</p>
+      <div id="turnover-chart" class="chart"></div>
+    </section>
+
+    <section class="section">
+      <h2>Cost decomposition</h2>
+      <p class="section-caption">Stacked bar chart of transaction costs by category: commission, slippage, and borrow costs. Commission dominates at $0.005/share; slippage modeled at 5 bps per leg.</p>
+      <div id="cost-chart" class="chart"></div>
+      <table aria-label="Cost summary">
+        <thead>
+          <tr>
+            <th>Cost category</th>
+            <th>Annual cost</th>
+            <th>% of portfolio</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Commission</td><td class="num">$4,200</td><td class="num">0.42%</td></tr>
+          <tr><td>Slippage</td><td class="num">$3,100</td><td class="num">0.31%</td></tr>
+          <tr><td>Borrow costs</td><td class="num">$1,800</td><td class="num">0.18%</td></tr>
+          <tr><td><strong>Total</strong></td><td class="num"><strong>$9,100</strong></td><td class="num"><strong>0.91%</strong></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <div class="footer">Synthetic data, visual spec only. S&P 100 · 2019-2024 · 12-month momentum · examples/momentum-backtest/</div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const chartWidth = (el) => Math.max(320, el.clientWidth || 920);
+
+      // Equity curve
+      const equityEl = document.getElementById("equity-chart");
+      const months = Array.from({ length: 60 }, (_, i) => i);
+      const baseEquity = months.map((m) => 1000000 * Math.pow(1.0097, m) * (1 - 0.002 * Math.sin(m / 4)));
+      const vectorbtEquity = baseEquity.map((v, i) => v * (1 + 0.0005 * Math.sin(i / 6) + (Math.random() - 0.5) * 0.001));
+      const nanobookEquity = baseEquity.map((v, i) => v * (1 + 0.0005 * Math.sin(i / 6) + (Math.random() - 0.5) * 0.001));
+      new uPlot({
+        width: chartWidth(equityEl),
+        height: 320,
+        scales: { x: { time: false }, y: { range: (min, max) => [min * 0.95, max * 1.02] } },
+        axes: [
+          { label: "months" },
+          { label: "equity ($)" }
+        ],
+        series: [
+          {},
+          { label: "nanobook", stroke: "#4a6fa5", width: 2 },
+          { label: "vectorbt", stroke: "#2a7f5f", width: 2, dash: [4, 4] }
+        ]
+      }, [months, nanobookEquity, vectorbtEquity], equityEl);
+
+      // Drawdown
+      const ddEl = document.getElementById("drawdown-chart");
+      const drawdown = months.map((m) => -Math.max(0, 0.15 * Math.exp(-Math.pow((m - 24) / 12, 2)) + 0.03 * Math.sin(m / 3)));
+      new uPlot({
+        width: chartWidth(ddEl),
+        height: 320,
+        scales: { x: { time: false }, y: { range: (min, max) => [Math.min(-0.01, min * 1.1), 0] } },
+        axes: [
+          { label: "months" },
+          { label: "drawdown (%)" }
+        ],
+        series: [
+          {},
+          { label: "Drawdown", stroke: "#b03a3a", fill: "rgba(176,58,58,0.2)", width: 2 }
+        ]
+      }, [months, drawdown], ddEl);
+
+      // Turnover
+      const turnoverEl = document.getElementById("turnover-chart");
+      const turnover = months.map((m) => 85 + 10 * Math.sin(m / 4) + (Math.random() - 0.5) * 5);
+      new uPlot({
+        width: chartWidth(turnoverEl),
+        height: 320,
+        scales: { x: { time: false }, y: { range: (min, max) => [Math.max(0, min * 0.95), max * 1.05] } },
+        axes: [
+          { label: "months" },
+          { label: "turnover (%)" }
+        ],
+        series: [
+          {},
+          { label: "Turnover", stroke: "#4a6fa5", fill: "rgba(74,111,165,0.15)", width: 2, paths: uPlot.paths.bars({ size: [0.72, 100] }) }
+        ]
+      }, [months, turnover], turnoverEl);
+
+      // Cost decomposition (stacked bars)
+      const costEl = document.getElementById("cost-chart");
+      const costMonths = Array.from({ length: 12 }, (_, i) => i);
+      const commission = costMonths.map(() => 350 + Math.random() * 50);
+      const slippage = costMonths.map(() => 250 + Math.random() * 40);
+      const borrow = costMonths.map(() => 150 + Math.random() * 20);
+      new uPlot({
+        width: chartWidth(costEl),
+        height: 320,
+        scales: { x: { time: false }, y: { range: (min, max) => [0, max * 1.1] } },
+        axes: [
+          { label: "month" },
+          { label: "cost ($)" }
+        ],
+        series: [
+          {},
+          { label: "Commission", stroke: "#4a6fa5", fill: "rgba(74,111,165,0.7)", width: 1, paths: uPlot.paths.bars({ size: [0.72, 100] }) },
+          { label: "Slippage", stroke: "#2a7f5f", fill: "rgba(42,127,95,0.7)", width: 1, paths: uPlot.paths.bars({ size: [0.72, 100] }) },
+          { label: "Borrow", stroke: "#b03a3a", fill: "rgba(176,58,58,0.7)", width: 1, paths: uPlot.paths.bars({ size: [0.72, 100] }) }
+        ],
+        plugins: [
+          {
+            hooks: {
+              drawSeries: (u, sidx, i0, i1) => {
+                if (sidx > 0) {
+                  const s = u.series[sidx];
+                  const x0 = u.valToPos(u.data[0][i0], 'x', true);
+                  const y0 = u.valToPos(0, 'y', true);
+                  const x1 = u.valToPos(u.data[0][i1], 'x', true);
+                  const y1 = u.valToPos(0, 'y', true);
+                  u.ctx.fillStyle = s.fill;
+                  u.ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+                }
+              }
+            }
+          }
+        ]
+      }, [costMonths, commission, slippage, borrow], costEl);
+    });
+  </script>
+</body>
+</html>
