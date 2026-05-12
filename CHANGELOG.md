@@ -15,8 +15,9 @@ This release adds a momentum backtest case study demonstrating nanobook's portfo
 
 - **`examples/momentum-backtest/report.py`**: HTML report generator with equity curve, drawdown plots, and performance metrics (Sharpe, Sortino, max drawdown)
 - **`examples/momentum-backtest/COMPARISON.md`**: Line-by-line comparison of nanobook vs vectorbt covering signal generation, execution models, valuation approaches, and cost modeling
-- **`docs/solutions/portfolio-sim-parity-learnings.md`**: Learnings from parity check including snapshot timing, API usage, unit conversion, and architectural differences
+- **`docs/solutions/portfolio-sim-parity-learnings.md`**: Learnings from parity check including snapshot timing, API usage, unit conversion, architectural differences, and cost model implementation differences
 - **`examples/momentum-backtest/strategy.py --output`**: JSON export flag for report generation integration
+- **`examples/momentum-backtest/vectorbt_parity.py --cost-bps`**: Cost model parity check support with configurable transaction costs (default 5 bps)
 - **CI momentum-backtest-smoke job**: GitHub Actions job that runs backtest on cached price data with zero costs for validation
 
 ### Changed
@@ -27,6 +28,8 @@ This release adds a momentum backtest case study demonstrating nanobook's portfo
 ### Performance
 
 - **Parity validation**: 0.0818% max difference vs vectorbt for 2020-2022-11 (zero cost)
+- **Cost model parity**: Expected differences when costs enabled due to fundamentally different cost implementations (nanobook: separate commission per share + slippage per leg; vectorbt: percentage-of-trade-value fees + percentage slippage)
+- **Epsilon adjustment**: Parity check epsilon adjusted from 0.1% to 1% for cost-enabled comparisons to account for expected cost model differences
 - **Known limitation**: 0.4-2.0% differences for 2022-12+ due to architectural differences (snapshot-based vs continuous valuation)
 - **Strategy**: Cross-sectional momentum on S&P 100 (12-month lookback, top/bottom decile, equal-weight, monthly rebalance)
 
