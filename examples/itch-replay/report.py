@@ -65,25 +65,34 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def latency_data_for_histogram(events: list[dict[str, Any]]) -> dict[str, list[int]]:
-    parse_latencies = []
-    book_latencies = []
+def latency_data_for_histogram(events: list[dict[str, Any]]) -> dict[str, Any]:
+    # `isinstance(value, int)` skips JSON nulls written by the replay harness
+    # for warmup events (`--warmup N`) and for non-cross-trade rows that
+    # carry no book update. Bools count as int in Python but the harness
+    # never emits true/false here.
+    parse_latencies: list[int] = []
+    book_latencies: list[int] = []
     for event in events:
-        if isinstance(event.get("parse_latency_ns"), int):
-            parse_latencies.append(event["parse_latency_ns"])
-        if isinstance(event.get("book_update_latency_ns"), int):
-            book_latencies.append(event["book_update_latency_ns"])
-    
+        parse_value = event.get("parse_latency_ns")
+        if isinstance(parse_value, int) and not isinstance(parse_value, bool):
+            parse_latencies.append(parse_value)
+        book_value = event.get("book_update_latency_ns")
+        if isinstance(book_value, int) and not isinstance(book_value, bool):
+            book_latencies.append(book_value)
+
     def percentile(values: list[int], p: float) -> int:
         if not values:
             return 0
         sorted_values = sorted(values)
         idx = int(len(sorted_values) * p / 100)
         return sorted_values[min(idx, len(sorted_values) - 1)]
-    
+
     return {
         "parse": sorted(parse_latencies),
         "book": sorted(book_latencies),
+        "parse_count": len(parse_latencies),
+        "book_count": len(book_latencies),
+        "total_events": len(events),
         "parse_p50": percentile(parse_latencies, 50),
         "parse_p95": percentile(parse_latencies, 95),
         "parse_p99": percentile(parse_latencies, 99),
@@ -93,11 +102,11 @@ def latency_data_for_histogram(events: list[dict[str, Any]]) -> dict[str, list[i
     }
 
 
-def svg_latency_histogram(latency_data: dict[str, list[int]], title: str) -> str:
+def svg_latency_histogram(latency_data: dict[str, Any], title: str) -> str:
     safe_title = html.escape(title)
     parse_latencies = latency_data["parse"]
     book_latencies = latency_data["book"]
-    
+
     if not parse_latencies and not book_latencies:
         return placeholder(title)
     
@@ -172,12 +181,20 @@ def svg_latency_histogram(latency_data: dict[str, list[int]], title: str) -> str
         else:
             return f"{ns}ns"
     
+    parse_count = latency_data.get("parse_count", len(parse_latencies))
+    book_count = latency_data.get("book_count", len(book_latencies))
+    total_events = latency_data.get("total_events", 0)
+    excluded_note = ""
+    if total_events and parse_count < total_events:
+        excluded = total_events - parse_count
+        excluded_note = f" — {excluded} event(s) excluded from pool (warmup or no-op)"
+
     return f"""
       <section>
         <h2>{safe_title}</h2>
         <p class="caption">
-          Parse (blue): p50={format_ns(latency_data["parse_p50"])}, p95={format_ns(latency_data["parse_p95"])}, p99={format_ns(latency_data["parse_p99"])} | 
-          Book update (green): p50={format_ns(latency_data["book_p50"])}, p95={format_ns(latency_data["book_p95"])}, p99={format_ns(latency_data["book_p99"])}
+          Parse (blue): p50={format_ns(latency_data["parse_p50"])}, p95={format_ns(latency_data["parse_p95"])}, p99={format_ns(latency_data["parse_p99"])} (N={parse_count})<br>
+          Book update (green): p50={format_ns(latency_data["book_p50"])}, p95={format_ns(latency_data["book_p95"])}, p99={format_ns(latency_data["book_p99"])} (N={book_count}){excluded_note}
         </p>
         <svg class="plot-svg" viewBox="0 0 {width} {height}" role="img" aria-label="{safe_title}">
           <rect x="0" y="0" width="{width}" height="{height}" fill="#fff" stroke="#ddd"/>
@@ -212,7 +229,13 @@ def spread_distribution(events: list[dict[str, Any]]) -> list[tuple[int, int]]:
 
 
 def latency_values(events: list[dict[str, Any]], field: str) -> list[int]:
-    return [value for event in events if isinstance((value := event.get(field)), int)]
+    # Skip JSON nulls (warmup or non-applicable rows) AND `bool` values,
+    # since `isinstance(True, int)` would otherwise treat them as ints.
+    return [
+        value
+        for event in events
+        if isinstance((value := event.get(field)), int) and not isinstance(value, bool)
+    ]
 
 
 def percentile(values: list[int], pct: float) -> int:
