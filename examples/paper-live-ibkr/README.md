@@ -22,6 +22,17 @@ This is a 1-week IBKR paper trading dry-run to validate v0.13's hardened plumbin
 - **Rebalancer:** v0.13 with hardened plumbing
 - **Execution:** `--cron-mode` for idempotent cron-friendly execution
 - **Risk Config:** `risk-config.toml` (see file for details)
+- **Target Portfolio:** `target.json` (copy from `target.json.example` and customize)
+
+## Setup
+
+1. Configure `risk-config.toml` with your IBKR paper account settings
+2. Set up appropriate risk limits for your paper account
+3. Create a `target.json` file with your target portfolio weights:
+   ```bash
+   cp target.json.example target.json
+   # Edit target.json with your desired symbols and weights
+   ```
 
 ## Audit Logs
 
@@ -38,10 +49,10 @@ Audit logs are stored in `audit/` directory. These logs contain:
 The `runner.sh` script is designed for cron execution:
 ```bash
 # Manual execution
-./runner.sh risk-config.toml
+./runner.sh risk-config.toml target.json
 
 # Cron entry example (run every 30 minutes during market hours)
-*/30 09:30-16:00 * * 1-5 /path/to/examples/paper-live-ibkr/runner.sh /path/to/examples/paper-live-ibkr/risk-config.toml
+*/30 09:30-16:00 * * 1-5 /path/to/examples/paper-live-ibkr/runner.sh /path/to/examples/paper-live-ibkr/risk-config.toml /path/to/examples/paper-live-ibkr/target.json
 ```
 
 ## Post-Run Analysis
