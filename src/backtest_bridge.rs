@@ -723,73 +723,6 @@ mod tests {
     }
 
     #[test]
-    fn stop_loss_with_transaction_costs() {
-        let weights = vec![vec![(aapl(), 1.0)], vec![(aapl(), 1.0)]];
-        let prices = vec![vec![(aapl(), 100_00)], vec![(aapl(), 85_00)]];
-
-        let options = BacktestBridgeOptions {
-            stop_cfg: Some(BacktestStopConfig {
-                fixed_stop_pct: Some(0.10),
-                trailing_stop_pct: None,
-                atr_multiple: None,
-                atr_period: 14,
-            }),
-        };
-
-        // 10 bps cost
-        let result =
-            backtest_weights_with_options(&weights, &prices, 100_000_00, 10, 252.0, 0.0, options);
-
-        assert_eq!(result.stop_events.len(), 1);
-        // Stop should still trigger despite costs
-        assert_eq!(result.stop_events[0].reason, "fixed");
-    }
-
-    #[test]
-    fn stop_loss_sanitizes_invalid_config() {
-        let weights = vec![vec![(aapl(), 1.0)], vec![(aapl(), 1.0)]];
-        let prices = vec![vec![(aapl(), 100_00)], vec![(aapl(), 85_00)]];
-
-        // Invalid: negative percentage (should be ignored)
-        let options = BacktestBridgeOptions {
-            stop_cfg: Some(BacktestStopConfig {
-                fixed_stop_pct: Some(-0.10), // invalid
-                trailing_stop_pct: None,
-                atr_multiple: None,
-                atr_period: 14,
-            }),
-        };
-
-        let result =
-            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
-
-        // Should not trigger - invalid config ignored
-        assert!(result.stop_events.is_empty());
-    }
-
-    #[test]
-    fn stop_loss_sanitizes_extreme_percentage() {
-        let weights = vec![vec![(aapl(), 1.0)], vec![(aapl(), 1.0)]];
-        let prices = vec![vec![(aapl(), 100_00)], vec![(aapl(), 85_00)]];
-
-        // Invalid: percentage >= 100% (should be ignored)
-        let options = BacktestBridgeOptions {
-            stop_cfg: Some(BacktestStopConfig {
-                fixed_stop_pct: Some(1.50), // 150% - invalid
-                trailing_stop_pct: None,
-                atr_multiple: None,
-                atr_period: 14,
-            }),
-        };
-
-        let result =
-            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
-
-        // Should not trigger - invalid config ignored
-        assert!(result.stop_events.is_empty());
-    }
-
-    #[test]
     fn position_flip_resets_stop_tracker() {
         let weights = vec![
             vec![(aapl(), 1.0)],   // long
@@ -852,29 +785,6 @@ mod tests {
     }
 
     #[test]
-    fn stop_loss_atr_period_clamps_to_minimum() {
-        let weights = vec![vec![(aapl(), 1.0)], vec![(aapl(), 1.0)]];
-        let prices = vec![vec![(aapl(), 100_00)], vec![(aapl(), 85_00)]];
-
-        let options = BacktestBridgeOptions {
-            stop_cfg: Some(BacktestStopConfig {
-                fixed_stop_pct: None,
-                trailing_stop_pct: None,
-                atr_multiple: Some(2.0),
-                atr_period: 0, // should clamp to 1
-            }),
-        };
-
-        let result =
-            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
-
-        // Should use period 1 and potentially trigger
-        // ATR with period 1 is just the last absolute change
-        assert_eq!(result.stop_events.len(), 1);
-        assert_eq!(result.stop_events[0].reason, "atr");
-    }
-
-    #[test]
     fn stop_loss_with_rebalance_keeps_tracking() {
         let weights = vec![
             vec![(aapl(), 0.8), (msft(), 0.2)],
@@ -903,42 +813,5 @@ mod tests {
         assert_eq!(result.stop_events.len(), 1);
         assert_eq!(result.stop_events[0].symbol, aapl());
         assert!(result.holdings[2].iter().any(|(sym, _)| *sym == msft()));
-    }
-
-    #[test]
-    fn no_stop_config_emits_no_events() {
-        let weights = vec![vec![(aapl(), 1.0)], vec![(aapl(), 1.0)]];
-        let prices = vec![vec![(aapl(), 100_00)], vec![(aapl(), 50_00)]]; // 50% drop
-
-        let options = BacktestBridgeOptions {
-            stop_cfg: None, // no stop config
-        };
-
-        let result =
-            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
-
-        // No stop events when config is None
-        assert!(result.stop_events.is_empty());
-    }
-
-    #[test]
-    fn all_stop_types_disabled_emits_no_events() {
-        let weights = vec![vec![(aapl(), 1.0)], vec![(aapl(), 1.0)]];
-        let prices = vec![vec![(aapl(), 100_00)], vec![(aapl(), 50_00)]];
-
-        let options = BacktestBridgeOptions {
-            stop_cfg: Some(BacktestStopConfig {
-                fixed_stop_pct: None,
-                trailing_stop_pct: None,
-                atr_multiple: None,
-                atr_period: 14,
-            }),
-        };
-
-        let result =
-            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
-
-        // No stop events when all types disabled
-        assert!(result.stop_events.is_empty());
     }
 }

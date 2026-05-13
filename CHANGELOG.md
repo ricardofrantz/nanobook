@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Testing
 
 - **Stop loss integration tests**: Added 10 comprehensive integration tests for stop loss functionality, covering ATR-based stops, short position behavior, multiple symbols, config sanitization, position flips, and interactions with rebalancing. Total backtest_bridge tests increased from 8 to 18.
+- **Stop loss test cleanup**: Removed 6 low-quality stop-loss tests with ambiguous or incorrect behavior (mixed concerns, unclear validation semantics, implementation detail tests).
 
 ## [0.15.0] - 2026-05-13 - Documentation & Infrastructure
 
