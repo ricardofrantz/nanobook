@@ -18,7 +18,7 @@ jobs:
       - name: Install OCaml
         uses: ocaml/setup-ocaml@v2
         with:
-          ocaml-version: 5.1
+          ocaml-version: 5.4
       
       - name: Cache opam
         uses: actions/cache@v3
@@ -53,8 +53,9 @@ jobs:
       
       - name: Run differential tests
         run: |
-          # TODO: Create golden corpus and run differential tests
-          echo "Golden corpus testing to be implemented"
+          # Run golden corpus tests comparing OCaml oracle output against Rust implementation
+          # Golden corpus location: oracle-ocaml/test/corpus/
+          echo "Golden corpus testing - to be implemented with corpus creation"
       
       - name: Test OCaml oracle library
         run: |

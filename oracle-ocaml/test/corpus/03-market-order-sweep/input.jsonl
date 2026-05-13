@@ -1,0 +1,4 @@
+{"type":"SubmitLimit","side":"SELL","price":10100,"quantity":50,"time_in_force":"GTC"}
+{"type":"SubmitLimit","side":"SELL","price":10200,"quantity":30,"time_in_force":"GTC"}
+{"type":"SubmitLimit","side":"SELL","price":10300,"quantity":20,"time_in_force":"GTC"}
+{"type":"SubmitMarket","side":"BUY","quantity":100}
