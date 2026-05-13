@@ -75,6 +75,9 @@ pub enum Error {
         window_id: String,
         sequence_number: u64,
     },
+
+    #[error("recovery error: {0}")]
+    Recovery(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
