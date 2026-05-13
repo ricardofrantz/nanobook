@@ -41,6 +41,26 @@ jobs:
       - name: Run tests (no default features)
         run: cargo test --no-default-features
 
+  failure-injection:
+    name: Failure Injection Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run IBKR F6 reconnect drill test
+        run: cargo test -p nanobook-broker --test ibkr_f6_reconnect_drill
+
+      - name: Run Binance F1 idempotency test
+        run: cargo test -p nanobook-broker --test binance_f_bin1_idempotency --features binance
+
+      - name: Run Binance F2 reconnect drill test
+        run: cargo test -p nanobook-broker --test binance_f_bin2_reconnect_drill --features binance
+
   python-test:
     name: Python (${{ matrix.os }}, ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
