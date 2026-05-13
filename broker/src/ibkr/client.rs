@@ -27,15 +27,32 @@ use ibapi::accounts::{AccountSummaryResult, PositionUpdate};
 use ibapi::client::blocking::Client;
 use ibapi::contracts::Contract;
 use ibapi::market_data::realtime::{TickType, TickTypes};
+use ibapi::orders::Orders;
 use log::{debug, info, warn};
 use nanobook::Symbol;
 
 use crate::error::BrokerError;
 use crate::parse::parse_f64_or_warn;
-use crate::types::{Account, BestQuote, BrokerOrder, OrderId, Position, Quote, f64_cents_checked};
+use crate::types::{
+    Account, BestQuote, BrokerOrder, BrokerOrderStatus, BrokerSide, OrderId, Position, Quote,
+    f64_cents_checked,
+};
 
 use super::market_data::best_quote_from_quote;
-use super::orders;
+use super::orders::{
+    self, broker_order_status_from_ibkr_parts, broker_order_status_from_order_data,
+};
+
+/// Locally tracked order submitted by this IBKR client instance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachedOrder {
+    pub order_id: i32,
+    pub symbol: Symbol,
+    pub quantity: i64,
+    pub side: String,
+    pub status: String,
+    pub submitted_at: Instant,
+}
 
 /// Deduplication key for order-status callbacks.
 ///
@@ -62,6 +79,7 @@ pub struct OrderCallbackKey {
 pub struct IbkrClient {
     client: Client,
     best_quotes: Mutex<HashMap<Symbol, BestQuote>>,
+    order_cache: Mutex<HashMap<i32, CachedOrder>>,
     /// Deduplication cache for order-status callbacks to handle TWS duplicates.
     /// Key: (order_id, status, filled_quantity), Value: timestamp when first seen.
     /// TTL: 5 minutes to prevent unbounded growth.
@@ -81,6 +99,7 @@ impl IbkrClient {
         Ok(Self {
             client,
             best_quotes: Mutex::new(HashMap::new()),
+            order_cache: Mutex::new(HashMap::new()),
             callback_cache: Mutex::new(HashMap::new()),
         })
     }
@@ -103,24 +122,32 @@ impl IbkrClient {
     /// # Returns
     /// * `Ok(Vec<Position>)` - Current positions after reconnect (for reconciliation)
     /// * `Err(BrokerError)` - If reconnection or position query fails
-    pub fn reconnect(&mut self, host: &str, port: u16, client_id: i32) -> Result<Vec<Position>, BrokerError> {
+    pub fn reconnect(
+        &mut self,
+        host: &str,
+        port: u16,
+        client_id: i32,
+    ) -> Result<Vec<Position>, BrokerError> {
         let address = format!("{host}:{port}");
         info!("Reconnecting to IB Gateway at {address}...");
 
         // Establish new connection
-        let client = Client::connect(&address, client_id)
-            .map_err(|e| BrokerError::Connection(format!("failed to reconnect to {address}: {e}")))?;
+        let client = Client::connect(&address, client_id).map_err(|e| {
+            BrokerError::Connection(format!("failed to reconnect to {address}: {e}"))
+        })?;
 
         info!("Reconnected (client_id={client_id})");
         self.client = client;
 
-        // Clear callback cache on reconnect to avoid stale entries
+        // Clear local caches on reconnect to avoid stale callback/order state.
         {
-            let mut cache = self.callback_cache
+            let mut cache = self
+                .callback_cache
                 .lock()
                 .map_err(|_| BrokerError::Other("callback cache poisoned".into()))?;
             cache.clear();
         }
+        self.clear_order_cache()?;
 
         // Query current positions to detect partial fills during disconnect
         info!("Querying positions after reconnect for reconciliation...");
@@ -142,7 +169,83 @@ impl IbkrClient {
     /// Submit an order using the current best-quote cache when available.
     pub fn submit_order(&self, order: &BrokerOrder) -> Result<OrderId, BrokerError> {
         let best_quote = self.cached_best_quote(&order.symbol)?;
-        orders::submit_order(&self.client, order, best_quote.as_ref())
+        let order_id = orders::submit_order(&self.client, order, best_quote.as_ref())?;
+        let side = match order.side {
+            BrokerSide::Buy => "Buy",
+            BrokerSide::Sell => "Sell",
+        };
+        self.cache_order(
+            order_id.0 as i32,
+            order.symbol,
+            order.quantity as i64,
+            side.to_string(),
+        )?;
+        Ok(order_id)
+    }
+
+    pub fn cache_order(
+        &self,
+        order_id: i32,
+        symbol: Symbol,
+        quantity: i64,
+        side: String,
+    ) -> Result<(), BrokerError> {
+        let mut cache = self
+            .order_cache
+            .lock()
+            .map_err(|_| BrokerError::Other("order cache poisoned".into()))?;
+        cache.insert(
+            order_id,
+            CachedOrder {
+                order_id,
+                symbol,
+                quantity,
+                side,
+                status: "Submitted".to_string(),
+                submitted_at: Instant::now(),
+            },
+        );
+        Ok(())
+    }
+
+    pub fn update_cached_order_status(
+        &self,
+        order_id: i32,
+        status: String,
+    ) -> Result<(), BrokerError> {
+        let mut cache = self
+            .order_cache
+            .lock()
+            .map_err(|_| BrokerError::Other("order cache poisoned".into()))?;
+        if let Some(order) = cache.get_mut(&order_id) {
+            order.status = status;
+        }
+        Ok(())
+    }
+
+    pub fn get_cached_order(&self, order_id: i32) -> Result<Option<CachedOrder>, BrokerError> {
+        let cache = self
+            .order_cache
+            .lock()
+            .map_err(|_| BrokerError::Other("order cache poisoned".into()))?;
+        Ok(cache.get(&order_id).cloned())
+    }
+
+    pub fn cached_orders(&self) -> Result<Vec<CachedOrder>, BrokerError> {
+        let cache = self
+            .order_cache
+            .lock()
+            .map_err(|_| BrokerError::Other("order cache poisoned".into()))?;
+        Ok(cache.values().cloned().collect())
+    }
+
+    pub fn clear_order_cache(&self) -> Result<(), BrokerError> {
+        let mut cache = self
+            .order_cache
+            .lock()
+            .map_err(|_| BrokerError::Other("order cache poisoned".into()))?;
+        cache.clear();
+        Ok(())
     }
 
     fn cached_best_quote(&self, symbol: &Symbol) -> Result<Option<BestQuote>, BrokerError> {
@@ -166,12 +269,7 @@ impl IbkrClient {
     ///
     /// Returns true if this exact (order_id, status, filled_quantity) combination
     /// has been seen within the TTL window (5 minutes).
-    pub fn is_duplicate_callback(
-        &self,
-        order_id: i32,
-        status: &str,
-        filled_quantity: f64,
-    ) -> bool {
+    pub fn is_duplicate_callback(&self, order_id: i32, status: &str, filled_quantity: f64) -> bool {
         let key = OrderCallbackKey {
             order_id,
             status: status.to_string(),
@@ -271,6 +369,43 @@ impl IbkrClient {
         // aggregated info-level logs.
         debug!("Fetched {} positions", positions.len());
         Ok(positions)
+    }
+
+    /// Fetch all open orders known to TWS/Gateway.
+    pub fn open_orders(&self) -> Result<Vec<BrokerOrderStatus>, BrokerError> {
+        let subscription = self
+            .client
+            .all_open_orders()
+            .map_err(|e| BrokerError::Connection(format!("failed to request open orders: {e}")))?;
+
+        let mut statuses = HashMap::new();
+        for update in subscription {
+            match update {
+                Orders::OrderData(order_data) => {
+                    let status = broker_order_status_from_order_data(&order_data)?;
+                    statuses.insert(status.id.0, status);
+                }
+                Orders::OrderStatus(order_status) => {
+                    let status = broker_order_status_from_ibkr_parts(
+                        order_status.order_id,
+                        &order_status.status,
+                        order_status.filled,
+                        order_status.remaining,
+                        order_status.average_fill_price,
+                    )?;
+                    self.update_cached_order_status(
+                        order_status.order_id,
+                        order_status.status.clone(),
+                    )?;
+                    statuses.insert(status.id.0, status);
+                }
+                Orders::Notice(notice) => {
+                    debug!("IBKR open-orders notice: {notice:?}");
+                }
+            }
+        }
+
+        Ok(statuses.into_values().collect())
     }
 
     /// Fetch account summary (equity, cash, buying power).

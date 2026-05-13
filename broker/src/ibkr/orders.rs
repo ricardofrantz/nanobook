@@ -78,11 +78,70 @@ use ibapi::contracts::Contract;
 use ibapi::orders::order_builder::limit_order;
 #[cfg(not(feature = "strict-market-reject"))]
 use ibapi::orders::order_builder::market_order;
-use ibapi::orders::{Action as IbAction, CancelOrder, PlaceOrder};
+use ibapi::orders::{Action as IbAction, CancelOrder, OrderData, PlaceOrder};
 use log::{debug, info, warn};
 
 use crate::error::BrokerError;
 use crate::types::*;
+
+pub fn map_ibkr_order_status(status: &str) -> OrderState {
+    match status {
+        "Submitted" | "PreSubmitted" | "PendingSubmit" | "ApiPending" => OrderState::Submitted,
+        "PartiallyFilled" => OrderState::PartiallyFilled,
+        "Filled" => OrderState::Filled,
+        "Cancelled" | "ApiCancelled" | "PendingCancel" => OrderState::Cancelled,
+        "Inactive" => OrderState::Rejected,
+        _ => OrderState::Submitted,
+    }
+}
+
+fn rounded_non_negative_u64(value: f64, field: &'static str) -> Result<u64, BrokerError> {
+    if !value.is_finite() {
+        return Err(BrokerError::Order(format!(
+            "{field} is not finite: {value}"
+        )));
+    }
+    Ok(value.max(0.0).round() as u64)
+}
+
+pub fn broker_order_status_from_ibkr_parts(
+    order_id: i32,
+    status: &str,
+    filled: f64,
+    remaining: f64,
+    average_fill_price: f64,
+) -> Result<BrokerOrderStatus, BrokerError> {
+    let filled_quantity = rounded_non_negative_u64(filled, "ibkr order.filled")?;
+    let remaining_quantity = rounded_non_negative_u64(remaining, "ibkr order.remaining")?;
+    let mapped = if filled_quantity > 0 && remaining_quantity > 0 {
+        OrderState::PartiallyFilled
+    } else {
+        map_ibkr_order_status(status)
+    };
+
+    Ok(BrokerOrderStatus {
+        id: OrderId(order_id as u64),
+        status: mapped,
+        filled_quantity,
+        remaining_quantity,
+        avg_fill_price_cents: f64_cents_checked(
+            average_fill_price,
+            "ibkr order.average_fill_price",
+        )?,
+    })
+}
+
+pub fn broker_order_status_from_order_data(
+    order_data: &OrderData,
+) -> Result<BrokerOrderStatus, BrokerError> {
+    broker_order_status_from_ibkr_parts(
+        order_data.order_id,
+        &order_data.order_state.status,
+        0.0,
+        order_data.order.total_quantity,
+        0.0,
+    )
+}
 
 /// Deduplication key for order-status callbacks.
 ///
@@ -314,7 +373,10 @@ pub fn execute_limit_order(
             warn!("Order {order_id} timed out after {}s", timeout.as_secs());
             match cancel_order(client, order_id) {
                 Ok(()) => {}
-                Err(BrokerError::CancelReject { order_id: oid, reason }) => {
+                Err(BrokerError::CancelReject {
+                    order_id: oid,
+                    reason,
+                }) => {
                     debug!("Cancel rejected (order may have filled): {reason}");
                     // Reconcile order state to handle fill/cancel race condition
                     if let Ok(is_filled) = reconcile_filled_order(oid, &reason) {
@@ -554,7 +616,9 @@ pub fn cancel_order(client: &Client, order_id: i32) -> Result<(), BrokerError> {
                 );
                 return Ok(());
             }
-            Err(BrokerError::Order(format!("failed to cancel order {order_id}: {e}")))
+            Err(BrokerError::Order(format!(
+                "failed to cancel order {order_id}: {e}"
+            )))
         }
     }
 }
@@ -597,10 +661,7 @@ pub fn cancel_order(client: &Client, order_id: i32) -> Result<(), BrokerError> {
 ///
 /// These logs enable tracking of race condition resolution and identifying
 /// orders that may need manual review.
-pub fn reconcile_filled_order(
-    order_id: i32,
-    rejection_reason: &str,
-) -> Result<bool, BrokerError> {
+pub fn reconcile_filled_order(order_id: i32, rejection_reason: &str) -> Result<bool, BrokerError> {
     info!(
         "AUDIT: Reconciling order {} after cancel reject - reason: {}",
         order_id, rejection_reason
@@ -724,7 +785,7 @@ pub fn reconcile_partial_fill(
                     order_id,
                     filled_shares: reconciled_filled,
                     avg_fill_price: 0.0, // Would need to query execution history for accurate price
-                    commission: 0.0,      // Would need to query execution history
+                    commission: 0.0,     // Would need to query execution history
                     status: OrderOutcome::PartialFill,
                 })
             } else if signed_current_qty.abs() == pre_disconnect_filled {
@@ -750,7 +811,9 @@ pub fn reconcile_partial_fill(
                 // Position decreased - unexpected, manual review required
                 warn!(
                     "AUDIT: Order {} position decreased after disconnect (pre={}, current={}) - manual review required",
-                    order_id, pre_disconnect_filled, signed_current_qty.abs()
+                    order_id,
+                    pre_disconnect_filled,
+                    signed_current_qty.abs()
                 );
 
                 Ok(OrderResult {
@@ -892,7 +955,10 @@ mod tests {
 
         let result = reconcile_filled_order(order_id, reason);
         assert!(result.is_ok());
-        assert!(result.unwrap(), "Order should be reconciled as filled (case-insensitive)");
+        assert!(
+            result.unwrap(),
+            "Order should be reconciled as filled (case-insensitive)"
+        );
     }
 
     #[test]
@@ -925,7 +991,10 @@ mod tests {
         assert!(result.is_ok());
         let order_result = result.unwrap();
         assert_eq!(order_result.order_id, order_id);
-        assert_eq!(order_result.filled_shares, 75, "Should detect additional 25 shares filled");
+        assert_eq!(
+            order_result.filled_shares, 75,
+            "Should detect additional 25 shares filled"
+        );
         assert_eq!(order_result.status, OrderOutcome::PartialFill);
     }
 
@@ -958,7 +1027,10 @@ mod tests {
 
         assert!(result.is_ok());
         let order_result = result.unwrap();
-        assert_eq!(order_result.filled_shares, 50, "Should report pre-disconnect fill quantity");
+        assert_eq!(
+            order_result.filled_shares, 50,
+            "Should report pre-disconnect fill quantity"
+        );
         assert_eq!(order_result.status, OrderOutcome::PartialFill);
     }
 
@@ -985,7 +1057,10 @@ mod tests {
 
         assert!(result.is_ok());
         let order_result = result.unwrap();
-        assert_eq!(order_result.filled_shares, 50, "Should report pre-disconnect fill quantity");
+        assert_eq!(
+            order_result.filled_shares, 50,
+            "Should report pre-disconnect fill quantity"
+        );
         assert_eq!(order_result.status, OrderOutcome::PartialFill);
     }
 
@@ -1018,7 +1093,10 @@ mod tests {
 
         assert!(result.is_ok());
         let order_result = result.unwrap();
-        assert_eq!(order_result.filled_shares, 75, "Should detect additional 25 shares sold");
+        assert_eq!(
+            order_result.filled_shares, 75,
+            "Should detect additional 25 shares sold"
+        );
         assert_eq!(order_result.status, OrderOutcome::PartialFill);
     }
 
