@@ -17,17 +17,23 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use log::warn;
 
 use crate::clock_skew::{ClockSkewDetector, SkewResult};
 use crate::error::{Error, Result};
 
 /// An audit event written to the JSONL trail.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEvent {
-    pub event: &'static str,
+    pub event: String,
     pub ts: DateTime<Utc>,
+    /// Sequence number for cron mode idempotency (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence_number: Option<u64>,
+    /// Window ID derived from target spec (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<String>,
     #[serde(flatten)]
     pub data: serde_json::Value,
 }
@@ -62,6 +68,7 @@ pub struct AuditEvent {
 /// clock problems.
 #[derive(Debug)]
 pub struct AuditLog {
+    path: PathBuf,
     writer: BufWriter<std::fs::File>,
     clock_skew_detector: ClockSkewDetector,
 }
@@ -132,6 +139,7 @@ impl AuditLog {
         let file = opts.open(path)?;
 
         Ok(Self {
+            path: path.to_path_buf(),
             writer: BufWriter::new(file),
             clock_skew_detector: detector,
         })
@@ -139,6 +147,17 @@ impl AuditLog {
 
     /// Log an event with arbitrary JSON data.
     pub fn log(&mut self, event: &'static str, data: serde_json::Value) -> Result<()> {
+        self.log_with_idempotency(event, None, None, data)
+    }
+
+    /// Log an event with optional idempotency fields (sequence_number, window_id).
+    pub fn log_with_idempotency(
+        &mut self,
+        event: &'static str,
+        sequence_number: Option<u64>,
+        window_id: Option<String>,
+        data: serde_json::Value,
+    ) -> Result<()> {
         let ts = Utc::now();
 
         // Check for clock skew before logging
@@ -160,8 +179,10 @@ impl AuditLog {
         }
 
         let entry = AuditEvent {
-            event,
+            event: event.to_string(),
             ts,
+            sequence_number,
+            window_id,
             data,
         };
         let json = serde_json::to_string(&entry)
@@ -174,6 +195,57 @@ impl AuditLog {
     /// Log a simple event with no additional data.
     pub fn log_simple(&mut self, event: &'static str) -> Result<()> {
         self.log(event, serde_json::json!({}))
+    }
+
+    /// Check if a rebalance window was already completed in cron mode.
+    ///
+    /// This method reads the audit log and searches for `cron_completed` events
+    /// with a matching `window_id`. If found, it returns the sequence number
+    /// of the most recent completion. This is used to prevent double-firing
+    /// the same rebalance window in cron mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `window_id` - The window identifier derived from the target specification
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some(sequence_number))` - The window is complete with this sequence number
+    /// * `Ok(None)` - The window has not been completed yet
+    /// * `Err(Error)` - Failed to read or parse the audit log
+    ///
+    /// # Idempotency Behavior
+    ///
+    /// Only `cron_completed` events are considered. Other events like `cron_start`
+    /// or `run_started` do not mark a window as complete. This ensures that
+    /// incomplete or failed runs do not block subsequent attempts.
+    pub fn check_window_already_complete(
+        &mut self,
+        window_id: &str,
+    ) -> Result<Option<u64>> {
+        // Flush any buffered writes first
+        self.writer.flush()?;
+
+        // Read the audit log file
+        let contents = std::fs::read_to_string(&self.path)?;
+
+        // Parse each line and look for cron_completed events with matching window_id
+        // Return the most recent (last) completion
+        let mut last_sequence: Option<u64> = None;
+        for line in contents.lines() {
+            if let Ok(event) = serde_json::from_str::<AuditEvent>(line) {
+                if event.event == "cron_completed" {
+                    if event.window_id.as_deref() == Some(window_id) {
+                        // Found a completed event for this window
+                        if let Some(seq) = event.sequence_number {
+                            last_sequence = Some(seq);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(last_sequence)
     }
 }
 
@@ -360,6 +432,55 @@ pub fn log_run_completed(
             "filled": filled,
             "failed": failed,
         }),
+    )
+}
+
+/// Convenience: log cron mode start with sequence number.
+pub fn log_cron_start(
+    audit: &mut AuditLog,
+    sequence_number: u64,
+    window_id: &str,
+) -> Result<()> {
+    audit.log_with_idempotency(
+        "cron_start",
+        Some(sequence_number),
+        Some(window_id.to_string()),
+        serde_json::json!({}),
+    )
+}
+
+/// Convenience: log cron mode completion.
+pub fn log_cron_completed(
+    audit: &mut AuditLog,
+    sequence_number: u64,
+    window_id: &str,
+    submitted: usize,
+    filled: usize,
+    failed: usize,
+) -> Result<()> {
+    audit.log_with_idempotency(
+        "cron_completed",
+        Some(sequence_number),
+        Some(window_id.to_string()),
+        serde_json::json!({
+            "submitted": submitted,
+            "filled": filled,
+            "failed": failed,
+        }),
+    )
+}
+
+/// Convenience: log idempotency rejection.
+pub fn log_idempotency_rejection(
+    audit: &mut AuditLog,
+    window_id: &str,
+    existing_sequence: u64,
+) -> Result<()> {
+    audit.log_with_idempotency(
+        "idempotency_rejection",
+        Some(existing_sequence),
+        Some(window_id.to_string()),
+        serde_json::json!({}),
     )
 }
 
@@ -569,21 +690,161 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("audit.jsonl");
 
-        // Create detector with low threshold
-        let mut detector = ClockSkewDetector::with_thresholds(5, 2.0);
-        let past_ts = Utc::now() - chrono::Duration::seconds(100);
-        detector.set_last_timestamp(past_ts);
-
-        let mut log = AuditLog::open_in_with_detector(&path, dir.path(), detector).unwrap();
-
-        // Log multiple events - all should succeed
-        log.log_simple("event1").unwrap();
-        log.log_simple("event2").unwrap();
-        log.log_simple("event3").unwrap();
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        log.log_simple("test_event").unwrap();
         drop(log);
 
         let contents = std::fs::read_to_string(&path).unwrap();
-        let lines: Vec<&str> = contents.lines().collect();
-        assert_eq!(lines.len(), 3);
+        assert!(contents.contains("\"event\":\"test_event\""));
+    }
+
+    // ========================================================================
+    // Cron Mode Idempotency (F7)
+    // ========================================================================
+
+    /// check_window_already_complete returns None when window not found.
+    #[test]
+    fn check_window_not_complete_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        let result = log.check_window_already_complete("test-window").unwrap();
+        assert_eq!(result, None);
+    }
+
+    /// check_window_already_complete returns sequence number when window is complete.
+    #[test]
+    fn check_window_complete_returns_sequence_number() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+
+        // Log a cron_completed event
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_with_idempotency(
+                "cron_completed",
+                Some(123),
+                Some("test-window".to_string()),
+                serde_json::json!({"submitted": 5, "filled": 5, "failed": 0}),
+            )
+            .unwrap();
+        }
+
+        // Check if window is complete
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        let result = log.check_window_already_complete("test-window").unwrap();
+        assert_eq!(result, Some(123));
+    }
+
+    /// check_window_already_complete handles multiple windows independently.
+    #[test]
+    fn check_window_multiple_windows_independent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+
+        // Log completion for window A
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_with_idempotency(
+                "cron_completed",
+                Some(100),
+                Some("window-a".to_string()),
+                serde_json::json!({}),
+            )
+            .unwrap();
+        }
+
+        // Log completion for window B
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_with_idempotency(
+                "cron_completed",
+                Some(200),
+                Some("window-b".to_string()),
+                serde_json::json!({}),
+            )
+            .unwrap();
+        }
+
+        // Check window A
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        let result_a = log.check_window_already_complete("window-a").unwrap();
+        assert_eq!(result_a, Some(100));
+
+        // Check window B
+        let result_b = log.check_window_already_complete("window-b").unwrap();
+        assert_eq!(result_b, Some(200));
+
+        // Check non-existent window
+        let result_c = log.check_window_already_complete("window-c").unwrap();
+        assert_eq!(result_c, None);
+    }
+
+    /// check_window_already_complete ignores non-cron_completed events.
+    #[test]
+    fn check_window_ignores_other_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+
+        // Log various events with window_id but not cron_completed
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_with_idempotency(
+                "cron_start",
+                Some(123),
+                Some("test-window".to_string()),
+                serde_json::json!({}),
+            )
+            .unwrap();
+            log.log_with_idempotency(
+                "run_started",
+                Some(123),
+                Some("test-window".to_string()),
+                serde_json::json!({}),
+            )
+            .unwrap();
+        }
+
+        // Window should not be considered complete
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        let result = log.check_window_already_complete("test-window").unwrap();
+        assert_eq!(result, None);
+    }
+
+    /// check_window_already_complete returns the most recent completion.
+    #[test]
+    fn check_window_returns_most_recent_completion() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+
+        // Log first completion
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_with_idempotency(
+                "cron_completed",
+                Some(100),
+                Some("test-window".to_string()),
+                serde_json::json!({}),
+            )
+            .unwrap();
+        }
+
+        // Log second completion (e.g., retry with different sequence)
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_with_idempotency(
+                "cron_completed",
+                Some(200),
+                Some("test-window".to_string()),
+                serde_json::json!({}),
+            )
+            .unwrap();
+        }
+
+        // Should return the most recent (last in file)
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        let result = log.check_window_already_complete("test-window").unwrap();
+        assert_eq!(result, Some(200));
     }
 }

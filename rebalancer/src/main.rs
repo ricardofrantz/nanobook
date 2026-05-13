@@ -37,6 +37,15 @@ enum Command {
         /// Skip confirmation prompt (for automation/cron)
         #[arg(long)]
         force: bool,
+
+        /// Enable cron mode with idempotency checks (for automation)
+        ///
+        /// In cron mode, the rebalancer writes a sequence number to the audit log
+        /// for each rebalance window. If the same window is already complete,
+        /// subsequent runs are rejected to prevent double-firing. This is designed
+        /// for automated cron jobs that may run multiple times for the same target.
+        #[arg(long)]
+        cron_mode: bool,
     },
 
     /// Show current IBKR positions
@@ -72,6 +81,7 @@ fn main() {
             target,
             dry_run,
             force,
+            cron_mode,
         } => {
             let spec = match TargetSpec::load(&target) {
                 Ok(s) => s,
@@ -84,6 +94,7 @@ fn main() {
                 dry_run,
                 force,
                 target_file: target.display().to_string(),
+                cron_mode,
             };
             execution::run(&config, &spec, &opts)
         }

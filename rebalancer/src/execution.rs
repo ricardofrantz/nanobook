@@ -25,6 +25,36 @@ pub struct RunOptions {
     pub dry_run: bool,
     pub force: bool,
     pub target_file: String,
+    pub cron_mode: bool,
+}
+
+/// Cron mode state for idempotency tracking.
+///
+/// When cron mode is enabled, each rebalance run is assigned a sequence number
+/// (Unix timestamp in seconds) that is written to the audit log. The audit log
+/// is checked before execution to prevent double-firing the same rebalance window.
+#[derive(Debug, Clone)]
+pub struct CronMode {
+    /// Sequence number for this rebalance run (Unix timestamp in seconds).
+    pub sequence_number: u64,
+}
+
+impl CronMode {
+    /// Create a new CronMode instance with a sequence number.
+    ///
+    /// The sequence number is typically a Unix timestamp in seconds, ensuring
+    /// monotonic increasing values across runs.
+    pub fn new(sequence_number: u64) -> Self {
+        Self { sequence_number }
+    }
+
+    /// Check if cron mode is enabled.
+    ///
+    /// This method always returns true when CronMode is present, as the presence
+    /// of this struct indicates cron mode is active.
+    pub fn is_enabled(&self) -> bool {
+        true
+    }
 }
 
 /// Convert broker positions to rebalancer CurrentPosition type.
@@ -80,12 +110,46 @@ pub fn derive_client_order_id(
 
 /// Execute a full rebalance run.
 pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()> {
+    // In cron mode, check idempotency before connecting
+    if opts.cron_mode {
+        let window_id = target.window_id();
+        // Open audit log to check for previous completion
+        let mut audit_check = AuditLog::open(&config.audit_path())?;
+        if let Some(existing_seq) = audit_check.check_window_already_complete(&window_id)? {
+            warn!(
+                "Rebalance window {} already completed with sequence number {} — refusing to run",
+                window_id, existing_seq
+            );
+            // Log the rejection
+            let mut audit = AuditLog::open(&config.audit_path())?;
+            audit::log_idempotency_rejection(&mut audit, &window_id, existing_seq)?;
+            return Err(Error::IdempotencyRejection {
+                window_id,
+                sequence_number: existing_seq,
+            });
+        }
+    }
+
     // 1. Connect to IBKR
     let client = connect_ibkr(config)?;
 
     // 2. Open audit log
     let mut audit = AuditLog::open(&config.audit_path())?;
     audit::log_run_started(&mut audit, &opts.target_file, &config.account.id)?;
+
+    // In cron mode, log the start with sequence number
+    let cron_mode = if opts.cron_mode {
+        let window_id = target.window_id();
+        // Use a simple sequence number based on timestamp (in production, this could be from a config)
+        let sequence_number = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| Error::Config(format!("clock error: {e}")))?
+            .as_secs();
+        audit::log_cron_start(&mut audit, sequence_number, &window_id)?;
+        Some(CronMode::new(sequence_number))
+    } else {
+        None
+    };
 
     // 3. Fetch account summary
     let summary = as_connection_error(client.account_summary())?;
@@ -292,7 +356,12 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     }
 
     // 12. Log completion
-    audit::log_run_completed(&mut audit, submitted, filled, failed)?;
+    if let Some(cron) = cron_mode {
+        let window_id = target.window_id();
+        audit::log_cron_completed(&mut audit, cron.sequence_number, &window_id, submitted, filled, failed)?;
+    } else {
+        audit::log_run_completed(&mut audit, submitted, filled, failed)?;
+    }
     println!(
         "\n{submitted} submitted, {filled} filled, {failed} failed. Audit logged to {}",
         config.audit_path().display()

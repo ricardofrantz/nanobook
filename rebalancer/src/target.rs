@@ -146,6 +146,41 @@ impl TargetSpec {
             self.metadata.id.clone()
         }
     }
+
+    /// Derive window_id from target spec for cron mode idempotency.
+    ///
+    /// The window_id is a stable hash derived from the target specification,
+    /// used to identify unique rebalance windows in the audit log. Two targets
+    /// with the same idempotency scope and target positions will produce the
+    /// same window_id, while different targets will produce different window_ids.
+    ///
+    /// # Format
+    ///
+    /// The window_id is a 16-character hexadecimal string representing the
+    /// hash of the target specification.
+    ///
+    /// # Derivation
+    ///
+    /// The hash includes:
+    /// - The idempotency scope (metadata.id or timestamp)
+    /// - All target symbols and their weights
+    ///
+    /// This ensures that changes to the target portfolio result in a new
+    /// window_id, allowing independent execution of different rebalance windows.
+    pub fn window_id(&self) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        // Hash the idempotency scope (metadata.id or timestamp)
+        self.idempotency_scope().hash(&mut hasher);
+        // Hash the targets
+        for target in &self.targets {
+            target.symbol.hash(&mut hasher);
+            (target.weight.to_bits()).hash(&mut hasher);
+        }
+        format!("{:x}", hasher.finish())
+    }
 }
 
 #[cfg(test)]
@@ -296,5 +331,43 @@ mod tests {
         }"#;
         let spec = TargetSpec::from_json(json).unwrap();
         assert_eq!(spec.idempotency_scope(), "2026-01-01T00:00:00+00:00");
+    }
+
+    #[test]
+    fn window_id_is_stable_for_same_target() {
+        let json = r#"{
+            "timestamp": "2026-01-01T00:00:00Z",
+            "metadata": { "id": "test-123" },
+            "targets": [
+                { "symbol": "AAPL", "weight": 0.50 },
+                { "symbol": "MSFT", "weight": 0.50 }
+            ]
+        }"#;
+        let spec = TargetSpec::from_json(json).unwrap();
+        let window_id1 = spec.window_id();
+        let window_id2 = spec.window_id();
+        assert_eq!(window_id1, window_id2);
+        assert_eq!(window_id1.len(), 16); // hex hash
+    }
+
+    #[test]
+    fn window_id_differs_for_different_targets() {
+        let json1 = r#"{
+            "timestamp": "2026-01-01T00:00:00Z",
+            "metadata": { "id": "test-123" },
+            "targets": [
+                { "symbol": "AAPL", "weight": 0.50 }
+            ]
+        }"#;
+        let json2 = r#"{
+            "timestamp": "2026-01-01T00:00:00Z",
+            "metadata": { "id": "test-456" },
+            "targets": [
+                { "symbol": "AAPL", "weight": 0.50 }
+            ]
+        }"#;
+        let spec1 = TargetSpec::from_json(json1).unwrap();
+        let spec2 = TargetSpec::from_json(json2).unwrap();
+        assert_ne!(spec1.window_id(), spec2.window_id());
     }
 }
