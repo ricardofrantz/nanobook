@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-05-13 - Ops Hardening
+
+This release completes the v0.13 ops-hardening program with failure-injection testing for 9 failure modes (F1-F9) covering IBKR and Binance broker adapters, warm-restart recovery, cron idempotency, and kill-switch safety. All failure modes are now validated with end-to-end integration tests and documented operational procedures.
+
+### Added
+
+**Failure Mode Testing (F-series):**
+- **F6 (IBKR TWS restart drill)**: Connection state tracking, heartbeat mechanism, exponential backoff reconnect (1s, 2s, 4s, 8s, 16s max, 5 attempts), open orders query via `all_open_orders()`, local order cache, state reconciliation with discrepancy detection (orphan orders, missing orders, status mismatches, position mismatches), reconciliation safety checks blocking submission when discrepancies detected, 30s target for full reconnect+reconcile cycle, 23 integration tests in `broker/tests/ibkr_*.rs`
+- **F-bin1 (Binance idempotency proof)**: Order cache with JSON persistence, UUID-based client order ID generation (`nanobook-{16-char-uuid}-{sequence_number}`), duplicate detection based on client_order_id, audit log integration in JSONL format, sequence-based double-fire detection, 37 integration tests in `broker/tests/binance_*.rs`
+- **F-bin2 (Binance reconnect drill)**: WebSocket implementation with connection state tracking, heartbeat mechanism (10s default), exponential backoff reconnect, account info query with position/order comparison, REST API fallback with 5s polling interval, connection mode enum (WebSocket, Rest, Auto), 24 integration tests in `broker/tests/binance_*.rs`
+- **F9 (process crash mid-rebalance + warm restart)**: Audit-log → state reconstruction protocol in `rebalancer/src/recovery.rs`, `run_recover()` subcommand with reconstructed state output, broker state comparison for discrepancy detection, 5 integration tests in `rebalancer/tests/recovery.rs`
+- **F8 (kill switch)**: `--kill` subcommand that cancels all open orders via broker, safety checks (confirmation prompt, dry-run mode), 4 integration tests in `rebalancer/tests/kill.rs`
+- **F7 (cron double-fire)**: `--cron-mode` flag with idempotency checks, sequence-based audit log collision detection, 3 integration tests in `rebalancer/tests/cron.rs`
+- **F5 (clock skew)**: Clock skew detection between strategy host and exchange via `clock_skew_ms()` in broker adapters, 2 integration tests
+- **F4 (stale market data)**: Stale market data detection via timestamp comparison, 2 integration tests
+- **F3 (partial fill + disconnect)**: Partial fill handling followed by disconnect simulation, state reconciliation verification, 2 integration tests
+- **F2 (cancel reject race)**: Cancel reject handling with fill race detection, 2 integration tests
+- **F1 (duplicate order-status callbacks)**: Duplicate callback deduplication, 2 integration tests
+
+**Operational Documentation:**
+- **`docs/solutions/ops-hardening-learnings.md`**: Consolidated learnings from all 9 failure modes, categorizing which were already handled by v0.10 hardening vs. new bugs surfaced, what changed, and operational takeaways
+- **`docs/ops/warm-restart.md`**: Audit-log → state reconstruction protocol with worked examples for operators, documenting what to do after a crash (how to read audit log, confirm position state matches broker view, when to manually intervene)
+
+**CI:**
+- **`failure-injection` job**: GitHub Actions job running all failure-injection tests (IBKR F6, Binance F-bin1, Binance F-bin2) on every PR
+
+### Changed
+
+**Breaking (nanobook-rebalancer 0.6.0 → 0.7.0):**
+- **`--cron-mode` flag**: New flag for cron-scheduled idempotent execution, adds sequence-based collision detection to prevent double-fire
+- **`--kill` subcommand**: New subcommand that cancels all open orders via broker with safety checks (confirmation prompt, dry-run mode)
+
+**Breaking (nanobook-broker 0.5.0 → 0.6.0):**
+- **Binance WebSocket**: Added WebSocket connection mode with automatic fallback to REST polling
+- **Connection mode enum**: New `ConnectionMode` (WebSocket, Rest, Auto) with `connection_mode` field on `BinanceBroker`
+- **REST polling**: Added `poll_account_info()` and `poll_open_orders()` methods with 5s interval enforcement
+
+### Fixed
+
+- **IBKR reconnect logic**: Fixed connection state tracking to properly detect disconnects and trigger reconnect with backoff
+- **Binance idempotency**: Fixed duplicate order detection via client_order_id cache and audit log sequence checks
+- **State reconciliation**: Fixed discrepancy detection to properly identify orphan orders, missing orders, status mismatches, and position mismatches
+- **Clock skew detection**: Fixed timestamp comparison logic to detect skew between strategy host and exchange
+- **Stale data detection**: Fixed market data staleness checks with configurable thresholds
+
+### Performance
+
+- **Reconnect target**: IBKR and Binance reconnect drills target 30s for full reconnect+reconcile cycle (measured via integration tests)
+- **WebSocket vs REST**: WebSocket mode provides real-time updates; REST fallback ensures reliability when WebSocket unavailable; Auto mode selects best of both
+- **Audit log performance**: JSONL audit log with sequence-based collision detection adds minimal overhead to order submission
+
 ## [0.12.0] - 2026-05-12 - Backtest + Positioning
 
 This release adds a momentum backtest case study demonstrating nanobook's portfolio simulator with parity validation against vectorbt, and completes the competitive positioning in the README.
