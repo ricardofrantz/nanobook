@@ -3,10 +3,13 @@
 use std::error::Error;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::net::TcpStream;
+use tokio::time::{sleep, Instant};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
@@ -53,6 +56,12 @@ pub struct BinanceWebSocket {
     state: ConnectionState,
     client: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     events: Vec<BinanceWebSocketEvent>,
+    // Heartbeat mechanism
+    last_heartbeat: Arc<Mutex<Option<Instant>>>,
+    heartbeat_interval: Duration,
+    // Auto-reconnect mechanism
+    max_reconnect_attempts: u32,
+    reconnect_attempts: u32,
 }
 
 impl BinanceWebSocket {
@@ -66,6 +75,10 @@ impl BinanceWebSocket {
             state: ConnectionState::Disconnected,
             client: None,
             events: Vec::new(),
+            last_heartbeat: Arc::new(Mutex::new(None)),
+            heartbeat_interval: Duration::from_secs(10),
+            max_reconnect_attempts: 5,
+            reconnect_attempts: 0,
         }
     }
 
@@ -87,6 +100,7 @@ impl BinanceWebSocket {
     /// Connect to the Binance WebSocket endpoint.
     pub async fn connect(&mut self) -> Result<(), Box<dyn Error>> {
         self.state = ConnectionState::Reconnecting;
+        self.reconnect_attempts = 0;
         let (stream, _) = connect_async(self.endpoint()).await.map_err(|err| {
             self.connected.store(false, Ordering::SeqCst);
             self.state = ConnectionState::Disconnected;
@@ -96,6 +110,7 @@ impl BinanceWebSocket {
         self.client = Some(stream);
         self.connected.store(true, Ordering::SeqCst);
         self.state = ConnectionState::Connected;
+        self.update_heartbeat();
         Ok(())
     }
 
@@ -106,6 +121,12 @@ impl BinanceWebSocket {
     /// minimal and sends a simple subscription frame so tests and future mock
     /// servers can exercise the connection path without live credentials.
     pub async fn subscribe_user_data(&mut self) -> Result<(), Box<dyn Error>> {
+        // Check heartbeat before processing
+        if !self.check_heartbeat() {
+            self.state = ConnectionState::Disconnected;
+            return Err("Heartbeat timeout detected".into());
+        }
+
         let client = self
             .client
             .as_mut()
@@ -121,6 +142,8 @@ impl BinanceWebSocket {
         if let Some(message) = client.next().await {
             if let Some(event) = Self::parse_frame(message?)? {
                 self.events.push(event);
+                // Update heartbeat on successful message processing
+                self.update_heartbeat();
             }
         }
 
@@ -134,6 +157,91 @@ impl BinanceWebSocket {
         }
         self.connected.store(false, Ordering::SeqCst);
         self.state = ConnectionState::Disconnected;
+        *self.last_heartbeat.lock().unwrap() = None;
+        self.reconnect_attempts = 0;
+    }
+
+    /// Send a ping message to the server.
+    pub async fn send_ping(&mut self) -> Result<(), Box<dyn Error>> {
+        let client = self
+            .client
+            .as_mut()
+            .ok_or("Binance WebSocket is not connected")?;
+
+        client.send(Message::Ping(vec![])).await?;
+        self.update_heartbeat();
+        Ok(())
+    }
+
+    /// Attempt to reconnect with exponential backoff.
+    ///
+    /// Uses exponential backoff: 1s, 2s, 4s, 8s, 16s (max).
+    /// Returns error if all attempts fail.
+    pub async fn reconnect_with_backoff(&mut self) -> Result<(), Box<dyn Error>> {
+        self.reconnect_attempts = 0;
+
+        while self.reconnect_attempts < self.max_reconnect_attempts {
+            self.reconnect_attempts += 1;
+            self.state = ConnectionState::Reconnecting;
+
+            // Calculate backoff delay: 2^(attempt-1) seconds, capped at 16s
+            let backoff_secs = 2u64.pow(self.reconnect_attempts.saturating_sub(1)).min(16);
+            let backoff = Duration::from_secs(backoff_secs);
+
+            // Wait for backoff
+            sleep(backoff).await;
+
+            // Attempt to reconnect
+            if let Ok(()) = self.connect().await {
+                return Ok(());
+            }
+        }
+
+        // All attempts failed
+        self.state = ConnectionState::Disconnected;
+        Err(format!(
+            "Failed to reconnect after {} attempts",
+            self.max_reconnect_attempts
+        )
+        .into())
+    }
+
+    /// Check if heartbeat has timed out.
+    ///
+    /// Returns true if the heartbeat is still valid (no timeout),
+    /// false if a timeout has occurred.
+    pub fn check_heartbeat(&self) -> bool {
+        let last_heartbeat = self.last_heartbeat.lock().unwrap();
+        if let Some(last) = *last_heartbeat {
+            last.elapsed() < self.heartbeat_interval
+        } else {
+            false
+        }
+    }
+
+    /// Update the last heartbeat timestamp to now.
+    pub fn update_heartbeat(&self) {
+        *self.last_heartbeat.lock().unwrap() = Some(Instant::now());
+    }
+
+    /// Get the current number of reconnect attempts.
+    pub fn reconnect_attempts(&self) -> u32 {
+        self.reconnect_attempts
+    }
+
+    /// Get the maximum number of reconnect attempts.
+    pub fn max_reconnect_attempts(&self) -> u32 {
+        self.max_reconnect_attempts
+    }
+
+    /// Set the maximum number of reconnect attempts (for testing).
+    pub fn set_max_reconnect_attempts(&mut self, max: u32) {
+        self.max_reconnect_attempts = max;
+    }
+
+    /// Set the heartbeat interval (for testing).
+    pub fn set_heartbeat_interval(&mut self, interval: Duration) {
+        self.heartbeat_interval = interval;
     }
 
     fn endpoint(&self) -> &'static str {
