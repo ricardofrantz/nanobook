@@ -1,8 +1,69 @@
-# F6 Implementation Plan: TWS Restart Drill
+# v0.13 Status
 
-## Status: ✅ COMPLETE (2026-05-13)
+## Quick Wins Completed ✅ (2026-05-13)
 
-All 4 phases implemented and tested. F6 (bd-w7x) is now complete.
+### bd-2tu: F9 follow-up - Wire compare_broker_state() into run_recover
+- Modified run_recover() to accept Option<&dyn Broker> parameter
+- Added broker state comparison logic after reconstructing state
+- Updated Recover subcommand to create and connect broker
+- Added integration test for broker state comparison
+- Enhanced Rollback and ManualReview guidance with discrepancy notes
+- Commit: 964901e
+
+### bd-2pu: Write docs/ops/warm-restart.md
+- Created comprehensive warm restart guide for operators
+- Documented audit-log → state reconstruction protocol
+- Included 3 worked examples with audit log excerpts
+- Added broker state verification guidance
+- Added troubleshooting and best practices sections
+- Updated README.md with reference
+- Commit: 8412071
+
+### bd-2ia: Write docs/solutions/ops-hardening-learnings.md
+- Documented all 9 IBKR failure modes (F1-F9)
+- Created failure mode summary table
+- Detailed analysis per failure mode (v0.10 vs v0.13)
+- Cross-cutting learnings (audit log, reconciliation, graceful degradation)
+- Architectural changes documentation
+- Recommendations for v0.14, operators, and developers
+- Created docs/solutions/README.md as index
+- Commit: 0e41ef9
+
+## Remaining v0.13 Blockers
+
+### bd-2ln: v0.13 F-bin1 - Binance idempotency proof
+- Status: OPEN
+- Effort: 10-13 days
+- Description: Mirror F7 for Binance - sequence-number/audit-log check for double-fire idempotency
+- Dependencies: MockTws harness ✅
+- 5 phases: Binance Order Cache, Client Order IDs, Audit Log Integration, Binance Mock, Integration Test
+
+### bd-1pd: v0.13 F-bin2 - Binance reconnect drill
+- Status: OPEN
+- Effort: 11-15 days
+- Description: Mirror F6 for Binance - WebSocket drop + reconnect, state reconciliation, 30s target
+- Dependencies: MockTws harness ✅, F-bin1 (bd-2ln)
+- 5 phases: Binance WebSocket, Disconnect Detection, Account Info Query, WebSocket + REST Fallback, Integration Test
+
+## Recommendation
+
+The Binance failure modes (F-bin1, F-bin2) are large efforts (21-28 days combined). Consider:
+
+**Option A:** Ship v0.13 without Binance failure modes
+- All 9 IBKR failure modes are complete
+- Documentation is complete
+- Binance modes can be v0.14 or a separate track
+- Unblocks v0.13 release immediately
+
+**Option B:** Complete Binance modes before v0.13 release
+- Ensures parity between IBKR and Binance adapters
+- Requires 21-28 additional days
+- Delays v0.13 release
+
+**Option C:** Split v0.13 into v0.13.0 (IBKR-only) and v0.13.1 (IBKR + Binance)
+- Ships IBKR hardening sooner
+- Binance modes follow in v0.13.1
+- Maintains semantic versioning consistency
 
 ## Overview
 Implement F6 (bd-w7x): TWS restart mid-position (reconnect drill). When TWS restarts while the rebalancer has open positions, the broker adapter must detect disconnect, reconnect, query IBKR state, reconcile against local state, and resume monitoring without double-submitting orders.
