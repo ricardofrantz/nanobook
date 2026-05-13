@@ -142,6 +142,7 @@ fn quote_construction() {
         ask_cents: 421_00,
         last_cents: 420_75,
         volume: 1_000_000,
+        timestamp: std::time::SystemTime::now(),
     };
     assert_eq!(q.bid_cents, 420_50);
     assert!(q.ask_cents > q.bid_cents);

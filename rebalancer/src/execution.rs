@@ -104,9 +104,41 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
 
     display_current_positions(&positions, summary.equity_cents);
 
-    // 5. Fetch live prices for all symbols (current + target)
+    // 5. Fetch live quotes for all symbols (current + target) and check staleness
+    //
+    // Staleness detection is critical for trading safety:
+    // - Market data can become stale due to network issues, exchange outages, or data feed problems
+    // - Trading on stale prices can lead to significant slippage or execution at unfavorable prices
+    // - A 30-second old quote may no longer reflect current market conditions, especially during volatility
+    // - This check prevents the rebalancer from making decisions based on outdated information
     let all_symbols = collect_all_symbols(&positions, target);
-    let prices = as_connection_error(client.prices(&all_symbols))?;
+
+    // Fetch quotes and check staleness
+    let quotes = as_connection_error(client.quotes(&all_symbols))?;
+    for quote in &quotes {
+        if quote.is_stale(config.execution.quote_staleness_threshold_sec) {
+            let age_sec = quote.timestamp.elapsed().unwrap_or_default().as_secs();
+            return Err(Error::StaleQuote {
+                symbol: quote.symbol.as_str().to_string(),
+                age_sec,
+                threshold_sec: config.execution.quote_staleness_threshold_sec,
+            });
+        }
+    }
+
+    // Extract mid prices from quotes for diff computation
+    let prices: Vec<(Symbol, i64)> = quotes
+        .iter()
+        .map(|q| {
+            let mid = match (q.bid_cents, q.ask_cents) {
+                (b, a) if b > 0 && a > 0 => b + (a - b) / 2,
+                (b, _) if b > 0 => b,
+                (_, a) if a > 0 => a,
+                _ => q.last_cents,
+            };
+            (q.symbol, mid)
+        })
+        .collect();
 
     // 6. Compute diff
     let targets = target.as_target_pairs();
@@ -270,7 +302,22 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     info!("Running post-execution reconciliation...");
     let final_broker_positions = as_connection_error(client.positions())?;
     let final_positions = to_current_positions(&final_broker_positions);
-    let final_prices = as_connection_error(client.prices(&all_symbols))?;
+
+    // Fetch final quotes and extract mid prices
+    let final_quotes = as_connection_error(client.quotes(&all_symbols))?;
+    let final_prices: Vec<(Symbol, i64)> = final_quotes
+        .iter()
+        .map(|q| {
+            let mid = match (q.bid_cents, q.ask_cents) {
+                (b, a) if b > 0 && a > 0 => b + (a - b) / 2,
+                (b, _) if b > 0 => b,
+                (_, a) if a > 0 => a,
+                _ => q.last_cents,
+            };
+            (q.symbol, mid)
+        })
+        .collect();
+
     let final_summary = as_connection_error(client.account_summary())?;
 
     let report = reconcile::reconcile(
@@ -331,7 +378,22 @@ pub fn run_reconcile(config: &Config, target: &TargetSpec) -> Result<()> {
     let positions = to_current_positions(&broker_positions);
 
     let all_symbols = collect_all_symbols(&positions, target);
-    let prices = as_connection_error(client.prices(&all_symbols))?;
+
+    // Fetch quotes and extract mid prices
+    let quotes = as_connection_error(client.quotes(&all_symbols))?;
+    let prices: Vec<(Symbol, i64)> = quotes
+        .iter()
+        .map(|q| {
+            let mid = match (q.bid_cents, q.ask_cents) {
+                (b, a) if b > 0 && a > 0 => b + (a - b) / 2,
+                (b, _) if b > 0 => b,
+                (_, a) if a > 0 => a,
+                _ => q.last_cents,
+            };
+            (q.symbol, mid)
+        })
+        .collect();
+
     let targets = target.as_target_pairs();
 
     let report = reconcile::reconcile(&positions, &targets, &prices, summary.equity_cents);

@@ -8,7 +8,7 @@ use nanobook_broker::ibkr::orders;
 use nanobook_broker::{
     BrokerSide, ClientOrderId,
     error::BrokerError,
-    types::{Account, Position},
+    types::{Account, Position, Quote},
 };
 
 use crate::config::Config;
@@ -25,6 +25,7 @@ pub trait BrokerGateway {
     fn account_summary(&self) -> BrokerResult<Account>;
     fn positions(&self) -> BrokerResult<Vec<Position>>;
     fn prices(&self, symbols: &[Symbol]) -> BrokerResult<Vec<(Symbol, i64)>>;
+    fn quotes(&self, symbols: &[Symbol]) -> BrokerResult<Vec<Quote>>;
     fn execute_limit_order(
         &self,
         symbol: Symbol,
@@ -47,6 +48,14 @@ impl BrokerGateway for IbkrClient {
 
     fn prices(&self, symbols: &[Symbol]) -> BrokerResult<Vec<(Symbol, i64)>> {
         self.prices(symbols)
+    }
+
+    fn quotes(&self, symbols: &[Symbol]) -> BrokerResult<Vec<Quote>> {
+        let mut quotes = Vec::with_capacity(symbols.len());
+        for &sym in symbols {
+            quotes.push(self.quote(&sym)?);
+        }
+        Ok(quotes)
     }
 
     fn execute_limit_order(

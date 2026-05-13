@@ -229,6 +229,7 @@ impl Broker for BinanceBroker {
             ask_cents: ask,
             last_cents: last,
             volume: 0,
+            timestamp: std::time::SystemTime::now(),
         })
     }
 }
