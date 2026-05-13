@@ -5,6 +5,7 @@ pub mod auth;
 pub mod cache;
 pub mod client;
 pub mod types;
+pub mod websocket;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
