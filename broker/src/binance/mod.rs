@@ -20,6 +20,7 @@ use crate::parse::parse_f64_or_warn;
 use crate::types::*;
 pub use audit::{check_audit_log_for_sequence, log_idempotency_rejection, log_order_submitted};
 pub use cache::BinanceOrderCache;
+pub use types::{Discrepancy, DiscrepancyReport};
 use client::BinanceClient;
 
 #[derive(Debug, Clone)]
@@ -73,6 +74,9 @@ pub struct BinanceBroker {
     /// Optional sequence number for client order ID generation and audit logging.
     #[zeroize(skip)]
     sequence_number: Option<u64>,
+    /// Flag indicating if reconciliation is blocked due to detected discrepancies.
+    #[zeroize(skip)]
+    reconciliation_blocked: bool,
 }
 
 impl BinanceBroker {
@@ -90,6 +94,7 @@ impl BinanceBroker {
             order_cache: Mutex::new(BinanceOrderCache::new()),
             audit_log_path: None,
             sequence_number: None,
+            reconciliation_blocked: false,
         }
     }
 
@@ -256,6 +261,105 @@ impl BinanceBroker {
             .any(|order| order.client_order_id.as_deref() == Some(client_order_id))
     }
 
+    /// Check if reconciliation is currently blocked.
+    pub fn is_reconciliation_blocked(&self) -> bool {
+        self.reconciliation_blocked
+    }
+
+    /// Block reconciliation (e.g., after detecting critical discrepancies).
+    pub fn block_reconciliation(&mut self) {
+        self.reconciliation_blocked = true;
+    }
+
+    /// Unblock reconciliation (after manual review and resolution).
+    pub fn unblock_reconciliation(&mut self) {
+        self.reconciliation_blocked = false;
+    }
+
+    /// Reconcile local state with Binance account state.
+    ///
+    /// Queries account info from Binance and compares against local order cache
+    /// to detect discrepancies such as orphan orders, missing orders, and position mismatches.
+    ///
+    /// # Returns
+    /// * `Ok(DiscrepancyReport)` - Report of any discrepancies found
+    /// * `Err(BrokerError)` - If query fails or not connected
+    pub fn reconcile_state(&mut self) -> Result<DiscrepancyReport, BrokerError> {
+        let client = self.require_client()?;
+        let info = client.account_info()?;
+
+        let mut discrepancies = Vec::new();
+
+        // Get cached orders as a cloned vector
+        let cached_orders: Vec<(OrderId, CachedOrder)> = {
+            let cache = self
+                .order_cache
+                .lock()
+                .expect("Binance order cache mutex poisoned");
+            cache.orders.iter().map(|(k, v)| (*k, v.clone())).collect()
+        };
+
+        // Check for orphan orders (orders on broker but not in cache)
+        for broker_order in &info.open_orders {
+            let order_id = OrderId(broker_order.order_id);
+            let found = cached_orders
+                .iter()
+                .any(|(id, _)| id.0 == broker_order.order_id);
+            if !found {
+                discrepancies.push(Discrepancy::OrphanOrder { order_id });
+            }
+        }
+
+        // Check for missing orders (orders in cache but not on broker)
+        for (order_id, cached_order) in &cached_orders {
+            let found = info
+                .open_orders
+                .iter()
+                .any(|broker_order| broker_order.order_id == order_id.0);
+            if !found && cached_order.status == OrderState::Submitted {
+                discrepancies.push(Discrepancy::MissingOrder { order_id: *order_id });
+            }
+        }
+
+        // Check for order status mismatches
+        for broker_order in &info.open_orders {
+            let order_id = OrderId(broker_order.order_id);
+            if let Some((_, cached_order)) = cached_orders
+                .iter()
+                .find(|(id, _)| id.0 == broker_order.order_id)
+            {
+                let broker_status = match broker_order.status.as_str() {
+                    "NEW" => OrderState::Submitted,
+                    "PARTIALLY_FILLED" => OrderState::PartiallyFilled,
+                    "FILLED" => OrderState::Filled,
+                    "CANCELED" => OrderState::Cancelled,
+                    "REJECTED" => OrderState::Rejected,
+                    "EXPIRED" => OrderState::Cancelled,
+                    _ => OrderState::Submitted,
+                };
+                if cached_order.status != broker_status {
+                    discrepancies.push(Discrepancy::OrderStatusMismatch {
+                        order_id,
+                        local_status: format!("{:?}", cached_order.status),
+                        broker_status,
+                    });
+                }
+            }
+        }
+
+        let has_critical_issues = !discrepancies.is_empty();
+
+        // Block reconciliation if critical issues found
+        if has_critical_issues {
+            self.reconciliation_blocked = true;
+        }
+
+        Ok(DiscrepancyReport {
+            discrepancies,
+            has_critical_issues,
+        })
+    }
+
     /// Submit an order with optional sequence number for client order ID generation.
     ///
     /// If `sequence_number` is Some, a client order ID will be generated using
@@ -405,6 +509,11 @@ impl Broker for BinanceBroker {
     }
 
     fn submit_order(&self, order: &BrokerOrder) -> Result<OrderId, BrokerError> {
+        if self.reconciliation_blocked {
+            return Err(BrokerError::Order(
+                "Reconciliation blocked - manual review required".to_string(),
+            ));
+        }
         let client = self.require_client()?;
         let binance_sym = self.to_binance_symbol(&order.symbol);
         let side = match order.side {
