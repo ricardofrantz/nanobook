@@ -4,17 +4,16 @@
 
 ## What Was Completed
 
-All infrastructure for the v0.14 pre-soak rehearsal has been set up:
+All infrastructure for the v0.15 paper trading soak has been set up:
 
 1. ✅ Directory structure created (`examples/paper-live-ibkr/`)
 2. ✅ `runner.sh` script for cron-friendly execution
 3. ✅ `risk-config.toml` template with correct rebalancer config structure
-4. ✅ `target.json.example` with sample portfolio
+4. ✅ `target.json.example` with S&P 100 sample portfolio
 5. ✅ Comprehensive 9-step setup guide in README.md
 6. ✅ `audit/` directory for logs
 7. ✅ `scripts/sanitize-audit.py` verified to exist
-8. ✅ nanobook-risk dependencies fixed for v0.13
-9. ✅ rebalancer binary built (`target/release/rebalancer`)
+8. ✅ rebalancer binary built (`target/release/rebalancer`)
 
 ## What To Do When Ready
 
@@ -38,8 +37,8 @@ IBKR Gateway/TWS requires manual download and installation. It's a GUI applicati
 
 - **No API keys needed** - IBKR authenticates via socket connection (host, port, client_id)
 - **Paper trading only** - no real money at risk
-- **Purpose** - validate v0.13's failure-injection hardening in real environment
-- **Duration** - 1-week dry-run rehearsal
+- **Purpose** - validate v0.15's production readiness with S&P 100 monthly strategy
+- **Duration** - 2-4 calendar weeks
 
 ## Next Steps When Returning
 

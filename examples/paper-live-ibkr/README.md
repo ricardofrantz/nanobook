@@ -1,10 +1,10 @@
-# Paper Trading IBKR Dry-Run
+# Paper Trading IBKR Soak
 
-**Purpose:** Pre-soak rehearsal for v0.14 failure-injection hardening validation.
+**Purpose:** v0.15 paper trading soak for S&P 100 monthly strategy.
 
 ## Overview
 
-This is a 1-week IBKR paper trading dry-run to validate v0.13's hardened plumbing with `--cron-mode`. The goal is to test the rebalancer's resilience to failure modes in a controlled paper trading environment before the full soak test.
+This is a 2-4 calendar week IBKR paper trading soak to validate v0.15's production readiness with `--cron-mode`. The goal is to test the rebalancer's resilience in a live paper trading environment using the S&P 100 monthly universe.
 
 ## Step-by-Step Setup
 
@@ -103,14 +103,19 @@ This is a 1-week IBKR paper trading dry-run to validate v0.13's hardened plumbin
    {
      "timestamp": "2026-05-13T15:30:00Z",
      "metadata": {
-       "id": "paper-soak-rehearsal-2026-05-13"
+       "id": "paper-soak-v0.15-2026-05-13"
      },
      "targets": [
-       { "symbol": "AAPL", "weight": 0.20 },
-       { "symbol": "MSFT", "weight": 0.20 },
-       { "symbol": "GOOGL", "weight": 0.20 },
-       { "symbol": "AMZN", "weight": 0.20 },
-       { "symbol": "TSLA", "weight": 0.20 }
+       { "symbol": "AAPL", "weight": 0.10 },
+       { "symbol": "MSFT", "weight": 0.10 },
+       { "symbol": "GOOGL", "weight": 0.10 },
+       { "symbol": "AMZN", "weight": 0.10 },
+       { "symbol": "NVDA", "weight": 0.10 },
+       { "symbol": "META", "weight": 0.10 },
+       { "symbol": "TSLA", "weight": 0.10 },
+       { "symbol": "BRK.B", "weight": 0.10 },
+       { "symbol": "JPM", "weight": 0.10 },
+       { "symbol": "V", "weight": 0.10 }
      ],
      "constraints": {
        "max_position_pct": 0.25,
@@ -119,6 +124,8 @@ This is a 1-week IBKR paper trading dry-run to validate v0.13's hardened plumbin
      }
    }
    ```
+
+   **Note:** The example above uses a representative subset of S&P 100 (top 10 by market cap). The full S&P 100 universe will be generated at runtime from the momentum strategy.
 
    **Important constraints:**
    - Symbol names must be ≤ 8 characters (IBKR limit)
@@ -152,7 +159,7 @@ This is a 1-week IBKR paper trading dry-run to validate v0.13's hardened plumbin
    - If successful: "Connected to IB Gateway at 127.0.0.1:4002 (client_id=100)"
    - If failed: Check that Gateway/TWS is running and API is enabled
 
-### Step 7: Run a Dry-Run Test
+### Step 7: Run a Test Rebalance
 
 1. **Test with --dry-run flag (no orders executed):**
    ```bash
@@ -198,19 +205,19 @@ This is a 1-week IBKR paper trading dry-run to validate v0.13's hardened plumbin
    # Edit crontab
    crontab -e
 
-   # Add entry (run every 30 minutes during market hours)
-   */30 09:30-16:00 * * 1-5 /path/to/nanobook/examples/paper-live-ibkr/runner.sh /path/to/nanobook/examples/paper-live-ibkr/my-config.toml /path/to/nanobook/examples/paper-live-ibkr/my-target.json
+   # Add entry (run monthly on the 1st at 09:30 ET)
+   30 9 1 * * /path/to/nanobook/examples/paper-live-ibkr/runner.sh /path/to/nanobook/examples/paper-live-ibkr/my-config.toml /path/to/nanobook/examples/paper-live-ibkr/my-target.json
    ```
 
 ## Run Details
 
-**Status:** Setup phase (awaiting execution)
+**Status:** Ready for v0.15 soak execution
 
-**Execution Window:** TBD (to be filled during execution)
+**Execution Window:** 2-4 calendar weeks
 
-**Universe:** TBD (to be filled during execution)
+**Universe:** S&P 100 monthly
 
-**Risk Limits:** TBD (to be filled during execution)
+**Risk Limits:** See risk-config.toml (max 25% position, 1.0 leverage, $100-$10,000 trade sizes)
 
 ## Audit Logs
 
@@ -224,12 +231,11 @@ Audit logs are stored in `audit/` directory. These logs contain:
 
 ## Post-Run Analysis
 
-After the dry-run completes:
+After the soak completes:
 1. Review audit logs for anomalies
 2. Verify cron-mode idempotency (no duplicate orders)
-3. Check failure injection handling
-4. Generate HTML report: `python3 report.py audit/audit.jsonl report.html`
-5. Sanitize audit logs before sharing: `python3 scripts/sanitize-audit.py audit/audit.jsonl`
+3. Generate HTML report: `python3 report.py audit/audit.jsonl report.html`
+4. Sanitize audit logs before sharing: `python3 scripts/sanitize-audit.py audit/audit.jsonl`
 
 ## Troubleshooting
 
@@ -254,7 +260,7 @@ After the dry-run completes:
 ## Notes
 
 - This is paper trading only - no real money at risk
-- The dry-run validates plumbing robustness, not strategy performance
+- The soak validates production readiness, not strategy performance
 - All trading is on IBKR's paper trading environment
-- Use conservative risk limits for the rehearsal
+- Use conservative risk limits for the soak
 - Monitor the first few runs closely before automating with cron

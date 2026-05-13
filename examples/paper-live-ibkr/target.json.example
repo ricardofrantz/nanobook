@@ -1,14 +1,19 @@
 {
   "timestamp": "2026-05-13T15:30:00Z",
   "metadata": {
-    "id": "paper-soak-rehearsal-2026-05-13"
+    "id": "paper-soak-v0.15-2026-05-13"
   },
   "targets": [
-    { "symbol": "AAPL", "weight": 0.20 },
-    { "symbol": "MSFT", "weight": 0.20 },
-    { "symbol": "GOOGL", "weight": 0.20 },
-    { "symbol": "AMZN", "weight": 0.20 },
-    { "symbol": "TSLA", "weight": 0.20 }
+    { "symbol": "AAPL", "weight": 0.10 },
+    { "symbol": "MSFT", "weight": 0.10 },
+    { "symbol": "GOOGL", "weight": 0.10 },
+    { "symbol": "AMZN", "weight": 0.10 },
+    { "symbol": "NVDA", "weight": 0.10 },
+    { "symbol": "META", "weight": 0.10 },
+    { "symbol": "TSLA", "weight": 0.10 },
+    { "symbol": "BRK.B", "weight": 0.10 },
+    { "symbol": "JPM", "weight": 0.10 },
+    { "symbol": "V", "weight": 0.10 }
   ],
   "constraints": {
     "max_position_pct": 0.25,

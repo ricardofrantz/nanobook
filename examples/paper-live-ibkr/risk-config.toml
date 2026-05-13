@@ -1,4 +1,4 @@
-# IBKR paper trading configuration for v0.14 pre-soak rehearsal
+# IBKR paper trading configuration for v0.15 paper trading soak
 #
 # This configuration uses IBKR paper trading (no real money).
 # Adjust values based on your paper account size and risk tolerance.
