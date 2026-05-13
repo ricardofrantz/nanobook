@@ -19,3 +19,7 @@ logs/
 target.json
 # But keep the example
 !target.json.example
+
+# User config files (user will customize for their IBKR settings)
+*.toml
+!risk-config.toml

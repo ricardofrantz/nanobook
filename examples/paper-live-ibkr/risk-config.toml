@@ -1,90 +1,46 @@
-# Risk configuration for paper trading IBKR dry-run
+# IBKR paper trading configuration for v0.14 pre-soak rehearsal
 #
-# This is a sample configuration with risk limits suitable for paper trading.
+# This configuration uses IBKR paper trading (no real money).
 # Adjust values based on your paper account size and risk tolerance.
 
-[general]
-# Universe of symbols to trade
-# Example: symbols = ["SPY", "QQQ", "IWM"]
-symbols = []
-
-# Risk limits
-[limits]
-# Maximum position size per symbol (in shares or USD, depending on your strategy)
-# Example: max_position_size = 1000
-max_position_size = 0
-
-# Maximum total portfolio value (USD)
-# Example: max_portfolio_value = 100000
-max_portfolio_value = 0
-
-# Maximum leverage (portfolio value / account equity)
-# Example: max_leverage = 1.0  # No leverage for conservative paper trading
-max_leverage = 1.0
-
-# Maximum number of open positions
-# Example: max_open_positions = 10
-max_open_positions = 0
-
-# Maximum daily loss (USD) - stop trading if exceeded
-# Example: max_daily_loss = 1000
-max_daily_loss = 0
-
-# Maximum order size (shares or USD)
-# Example: max_order_size = 500
-max_order_size = 0
-
-# IBKR-specific settings
-[ibkr]
-# IBKR paper trading account (NOT real money)
-# Set to true to enforce paper trading mode
-paper_trading = true
-
-# IBKR client ID (for API connection)
-# Obtain from IBKR account management
-# client_id = 0
-
-# IBKR connection settings
+[connection]
+# IBKR Gateway connection settings
 host = "127.0.0.1"
-port = 7497  # Paper trading port (7497 for paper, 7496 for production)
+port = 4002              # 4002 = Gateway paper, 7497 = TWS paper, 7496 = TWS live
+client_id = 100         # Unique ID per connection (1-999999)
+timeout_secs = 30       # Connection timeout
 
-# Order settings
-[orders]
-# Order type: "market", "limit", "ioc"
-order_type = "market"
+[account]
+# IBKR account information
+id = "DU123456"         # Paper: DUxxxxxx, Live: Uxxxxxxx (get from IBKR account management)
+type = "margin"          # "cash" or "margin"
 
-# Time-in-force: "DAY", "GTC", "IOC", "FOK"
-time_in_force = "DAY"
+[execution]
+# Order execution settings
+order_interval_ms = 100  # Min delay between orders (rate limiting)
+limit_offset_bps = 5     # Buy at ask+5bps, sell at bid-5bps (slippage buffer)
+order_timeout_secs = 300  # Cancel unfilled orders after 5 min
+max_orders_per_run = 50  # Maximum orders per rebalance run
+quote_staleness_threshold_sec = 30  # Reject quotes older than 30 seconds
 
-# Minimum order size (shares)
-min_order_size = 1
+[risk]
+# Risk limits for paper trading
+max_position_pct = 0.25   # Max 25% in any single name
+max_leverage = 1.0       # Max gross exposure / equity (1.0 = no leverage for paper)
+min_trade_usd = 100.0    # Skip tiny trades below $100
+max_trade_usd = 10000.0  # Block huge trades above $10,000
+allow_short = true       # Allow short positions
+max_short_pct = 0.20     # Max 20% total short exposure
 
-# Audit logging
-[audit]
-# Path to audit log directory
-audit_log_path = "audit"
+[cost]
+# Trading cost model
+commission_per_share = 0.0035  # IBKR Tiered commission
+commission_min = 0.35          # Minimum commission per order
+slippage_bps = 5               # Expected slippage in basis points
 
-# Enable detailed audit logging
-detailed_logging = true
-
-# Include order book snapshots in audit log (can be large)
-include_order_book = false
-
-# Failure injection (for testing hardened plumbing)
-[failure_injection]
-# Enable failure injection for testing
-enabled = false
-
-# Failure injection modes:
-# - "network_latency": Inject random network delays
-# - "order_rejection": Simulate order rejections
-# - "partial_fill": Simulate partial fills
-# - "disconnect": Simulate IBKR connection drops
-mode = "network_latency"
-
-# Failure probability (0.0 to 1.0)
-probability = 0.01
-
-# Failure injection schedule (cron-like syntax)
-# Example: "09:30-16:00" = during market hours
-schedule = "09:30-16:00"
+[logging]
+# Audit logging settings
+dir = "./audit"          # Directory for audit logs
+audit_file = "audit.jsonl"  # Audit log filename
+clock_skew_threshold_sec = 30   # Max backward clock jump before warning
+max_jump_rate_sec_per_sec = 2.0  # Max forward jump rate (2x real time)
