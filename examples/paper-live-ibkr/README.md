@@ -228,7 +228,8 @@ After the dry-run completes:
 1. Review audit logs for anomalies
 2. Verify cron-mode idempotency (no duplicate orders)
 3. Check failure injection handling
-4. Sanitize audit logs before sharing: `python3 scripts/sanitize-audit.py audit/audit.jsonl`
+4. Generate HTML report: `python3 report.py audit/audit.jsonl report.html`
+5. Sanitize audit logs before sharing: `python3 scripts/sanitize-audit.py audit/audit.jsonl`
 
 ## Troubleshooting
 
