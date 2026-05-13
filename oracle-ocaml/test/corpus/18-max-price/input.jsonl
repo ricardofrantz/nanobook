@@ -1,0 +1,2 @@
+{"type":"SubmitLimit","side":"SELL","price":"9223372036854775807","quantity":100,"time_in_force":"GTC","owner":null,"stp_policy":"Off"}
+{"type":"SubmitLimit","side":"BUY","price":"9223372036854775807","quantity":50,"time_in_force":"GTC","owner":null,"stp_policy":"Off"}
