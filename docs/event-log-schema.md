@@ -117,11 +117,63 @@ When replaying events, trades are emitted in JSONL format:
 
 ## Schema Evolution Rules
 
-When the schema changes:
-1. Increment the `schema_version` field
-2. Update both Rust and OCaml implementations simultaneously
-3. Maintain backward compatibility if possible
-4. Document breaking changes in this file
+Schema evolution is intentionally conservative because these logs are shared
+test artifacts for two independent engines. Any change that requires a
+different interpretation of an existing log must be treated as a compatibility
+event, not as a local implementation detail.
+
+Current field stability:
+
+| Surface | Fields | Compatibility status |
+| --- | --- | --- |
+| Event envelope | `type` | Stable |
+| `SubmitLimit` | `side`, `price`, `quantity`, `time_in_force` | Stable |
+| `SubmitMarket` | `side`, `quantity` | Stable |
+| `Cancel` | `order_id` | Stable |
+| Trade output | `id`, `price`, `quantity`, `aggressor_order_id`, `passive_order_id`, `aggressor_side`, `timestamp` | Stable |
+| Schema envelope | `schema_version` | Experimental in v1.0 because it is optional; future schemas may require it |
+| Self-trade prevention | `owner`, `stp_policy` | Experimental until both engines enforce the same validation and golden corpus coverage for all policies |
+
+Rules for schema changes:
+
+1. Incrementing `schema_version` is a **breaking change**. A version bump means
+   fixtures, parsers, validators, golden outputs, and replay behavior may no
+   longer be compatible with older logs unless an explicit migration is provided.
+2. Rust and OCaml implementations must be updated in the same change set. It is
+   not acceptable for one engine to accept, reject, or emit a new schema before
+   the other engine has matching behavior.
+3. Add CI regression coverage for every schema change. At minimum, the change
+   must include golden corpus inputs and expected trade outputs, Rust replay
+   tests, OCaml oracle tests, and a differential test that proves both engines
+   produce byte-identical output for the affected cases.
+4. Stable fields cannot be renamed, removed, have their type changed, or have
+   their semantics changed without a `schema_version` bump and migration plan.
+   New optional fields may be added to an existing version only when old readers
+   can ignore them and both engines are tested to do so.
+5. Experimental fields may change within the current version only if the change
+   is documented here, both engines are updated together, and CI contains
+   regression tests for the old and new edge cases. Promoting an experimental
+   field to stable requires golden corpus coverage and explicit documentation in
+   this table.
+6. Unknown event `type` values, unknown enum values, invalid required fields,
+   and unsupported `schema_version` values must be rejected consistently by both
+   engines.
+
+Migration path for breaking schema changes:
+
+1. Add the new `schema_version` definition to this document, including the exact
+   field-level differences from the previous version.
+2. Add or update a deterministic migration tool or script that converts old
+   JSONL logs to the new schema. If automatic migration is impossible, document
+   the manual rewrite rule and the reason it cannot be automated.
+3. Keep the previous golden corpus fixtures available long enough to test the
+   migration path from the previous schema to the new schema.
+4. Update Rust and OCaml readers, validators, writers, and replay code in the
+   same change set.
+5. Add CI checks that run the old fixtures through the migration path, replay
+   the migrated logs in both engines, and compare byte-identical trade output.
+6. Document the breaking change, migration command, and any removed fields in
+   this file before accepting logs written with the new schema.
 
 ## Validation
 
