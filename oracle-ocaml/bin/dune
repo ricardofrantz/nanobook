@@ -1,7 +1,8 @@
 (executable
- (name replay)
- (libraries oracle))
+ (name replay_bin)
+ (public_name replay)
+ (libraries oracle_lib))
 
 (executable
  (name triage)
- (libraries oracle))
+ (libraries oracle_lib))
