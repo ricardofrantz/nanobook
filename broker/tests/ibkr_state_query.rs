@@ -46,7 +46,7 @@ fn test_ibkr_order_status_partially_filled() {
 
 #[test]
 fn test_reconcile_state_requires_connection() {
-    let broker = IbkrBroker::new("127.0.0.1", 4002, 100);
+    let mut broker = IbkrBroker::new("127.0.0.1", 4002, 100);
 
     let result = broker.reconcile_state();
 
