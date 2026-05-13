@@ -13,6 +13,7 @@ pub mod error;
 pub mod execution;
 pub mod kill;
 pub mod pid_file;
+pub mod recovery;
 pub mod reconcile;
 pub mod risk;
 pub mod target;
