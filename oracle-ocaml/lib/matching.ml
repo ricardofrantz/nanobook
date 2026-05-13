@@ -56,9 +56,10 @@ let stp_conflict incoming_owner resting_owner policy =
 let rec match_order book incoming policy =
   let result = ref { trades = []; remaining_quantity = incoming.Order.remaining_quantity; stp_cancelled = false } in
   let incoming_ref = ref incoming in
+  let continue_matching = ref true in
   
   (* Match until no more crosses or order is filled *)
-  while !incoming_ref.Order.remaining_quantity > 0L do
+  while !incoming_ref.Order.remaining_quantity > 0L && !continue_matching do
     (* Get the best price on the opposite side *)
     let opposite = opposite_side !incoming_ref.Order.side in
     let best_price = 
@@ -68,10 +69,13 @@ let rec match_order book incoming policy =
     in
     
     match best_price with
-    | None -> ()  (* No liquidity - stop matching *)
+    | None -> 
+        (* No liquidity - stop matching *)
+        continue_matching := false
     | Some resting_price ->
         if not (prices_cross !incoming_ref.Order.side !incoming_ref.Order.price resting_price) then
-          ()  (* No match at this price - stop matching *)
+          (* No match at this price - stop matching *)
+          continue_matching := false
         else
           (* Match against orders at this price level *)
           match_at_price book incoming_ref resting_price policy result
