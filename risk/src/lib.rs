@@ -16,6 +16,38 @@ use nanobook::Symbol;
 use nanobook_broker::{Account, BrokerSide};
 
 /// Pre-trade risk engine.
+///
+/// ```
+/// use nanobook::Symbol;
+/// use nanobook_broker::{Account, BrokerSide};
+/// use nanobook_risk::{RiskConfig, RiskEngine};
+///
+/// let engine = RiskEngine::new(RiskConfig {
+///     max_position_pct: 0.25,
+///     max_order_value_cents: 50_000_00,
+///     allow_short: false,
+///     ..RiskConfig::default()
+/// }).unwrap();
+///
+/// let account = Account {
+///     equity_cents: 100_000_00,
+///     buying_power_cents: 100_000_00,
+///     cash_cents: 100_000_00,
+///     gross_position_value_cents: 0,
+/// };
+/// let symbol = Symbol::new("AAPL");
+///
+/// let report = engine.check_order(
+///     &symbol,
+///     BrokerSide::Buy,
+///     100,
+///     150_00,
+///     &account,
+///     &[],
+/// );
+///
+/// assert!(!report.has_failures());
+/// ```
 #[derive(Debug, Clone)]
 pub struct RiskEngine {
     config: RiskConfig,
