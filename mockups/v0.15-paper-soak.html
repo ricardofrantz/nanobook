@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nanobook v0.15 — Paper Trading Soak</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css">
+  <style>
+    :root {
+      --bid: #2a7f5f;
+      --ask: #b03a3a;
+      --accent: #4a6fa5;
+      --bg: #f8f8f6;
+      --text: #1a1a1a;
+      --muted: #666;
+      --line: #ddd;
+      --panel: #fff;
+      --zebra: #fafafa;
+      --badge-bg: #f5e9b0;
+      --badge-text: #7a6200;
+      --mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-variant-numeric: tabular-nums;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    main {
+      width: min(960px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 36px 0 56px;
+    }
+    .badge {
+      background: var(--badge-bg);
+      color: var(--badge-text);
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      padding: 4px 8px;
+      text-transform: uppercase;
+    }
+    h1 {
+      font-size: clamp(28px, 4vw, 38px);
+      font-weight: 650;
+      letter-spacing: -0.01em;
+      line-height: 1.1;
+      margin: 14px 0 6px;
+      text-wrap: balance;
+    }
+    .subtitle {
+      color: #444;
+      font-size: 17px;
+      margin: 0;
+      text-wrap: pretty;
+    }
+    .tldr {
+      background: #fff;
+      border: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      margin: 28px 0 28px;
+    }
+    .tldr-item {
+      padding: 16px 18px;
+      border-right: 1px solid var(--line);
+    }
+    .tldr-item:last-child { border-right: 0; }
+    .tldr-num {
+      font-family: var(--mono);
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .tldr-label {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-top: 5px;
+    }
+    .lede {
+      font-size: 16px;
+      color: #333;
+      max-width: 720px;
+      margin: 0 0 36px;
+      text-wrap: pretty;
+    }
+    .section { margin-top: 40px; }
+    .section h2 {
+      font-size: 18px;
+      font-weight: 650;
+      margin: 0 0 4px;
+      letter-spacing: -0.005em;
+    }
+    .section-caption {
+      color: #555;
+      font-size: 14px;
+      margin: 0 0 14px;
+      max-width: 720px;
+      text-wrap: pretty;
+    }
+    .chart {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      height: 320px;
+      width: 100%;
+    }
+    table {
+      border-collapse: collapse;
+      font-size: 14px;
+      margin-top: 14px;
+      width: 100%;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f1f1ef;
+      color: #333;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    tbody tr:nth-child(even) { background: var(--zebra); }
+    td.num, .num, .timestamp {
+      font-family: var(--mono);
+      font-variant-numeric: tabular-nums;
+    }
+    .severity-tag {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border: 1px solid currentColor;
+    }
+    .severity-warning { color: #7a5a00; }
+    .severity-info { color: #4a6fa5; }
+    .severity-error { color: #b03a3a; }
+    .footer {
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 48px;
+      padding-top: 14px;
+    }
+    @media (max-width: 780px) {
+      main { width: min(100% - 28px, 1100px); }
+      .tldr { grid-template-columns: 1fr; }
+      .tldr-item { border-right: 0; border-bottom: 1px solid var(--line); }
+      .tldr-item:last-child { border-bottom: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <span class="badge">MOCKUP — synthetic data</span>
+      <h1>v0.15 · Paper Trading Soak</h1>
+      <p class="subtitle">2-4 calendar weeks of live IBKR paper trading</p>
+    </header>
+
+    <div class="tldr">
+      <div class="tldr-item">
+        <div class="tldr-num">14 trading days</div>
+        <div class="tldr-label">Calendar duration</div>
+      </div>
+      <div class="tldr-item">
+        <div class="tldr-num">4</div>
+        <div class="tldr-label">Total rebalances</div>
+      </div>
+      <div class="tldr-item">
+        <div class="tldr-num">23</div>
+        <div class="tldr-label">Total orders</div>
+      </div>
+      <div class="tldr-item">
+        <div class="tldr-num">1</div>
+        <div class="tldr-label">Incidents</div>
+      </div>
+    </div>
+
+    <p class="lede">Live IBKR paper trading soak test for v0.15, running a momentum strategy on S&P 100 monthly universe over 2-4 calendar weeks. This mockup defines the visual specification before the actual soak begins, ensuring we capture all required metrics.</p>
+
+    <section class="section">
+      <h2>Daily Equity Curve</h2>
+      <p class="section-caption">Portfolio value over 14 trading days. Actual equity (blue) vs expected equity benchmark (green dashed). The benchmark represents the theoretical portfolio value assuming perfect execution at mid-price.</p>
+      <div id="equity-chart" class="chart"></div>
+    </section>
+
+    <section class="section">
+      <h2>Position Evolution</h2>
+      <p class="section-caption">Position count for top 5 tickers over the soak period. Shows how positions change across rebalances as the momentum strategy rotates into/out of names.</p>
+      <div id="position-chart" class="chart"></div>
+    </section>
+
+    <section class="section">
+      <h2>Realized vs Expected Slippage</h2>
+      <p class="section-caption">Scatter plot of each order's realized slippage vs expected slippage (in basis points). Points in green are within 5 bps tolerance; red points exceed tolerance. Diagonal line indicates parity.</p>
+      <div id="slippage-chart" class="chart"></div>
+    </section>
+
+    <section class="section">
+      <h2>Incidents Log</h2>
+      <p class="section-caption">Operational events during the soak. Severity levels: WARNING (non-critical), ERROR (requires intervention). All incidents should be auto-recovered or resolved.</p>
+      <table aria-label="Incidents during soak">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Severity</th>
+            <th>Type</th>
+            <th>Description</th>
+            <th>Resolved</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="timestamp">2026-05-15 10:32:30</td>
+            <td><span class="severity-tag severity-warning">WARNING</span></td>
+            <td>Reconnect</td>
+            <td>IBKR Gateway disconnect, auto-reconnected in 8s</td>
+            <td class="num">Yes</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Cost Summary</h2>
+      <p class="section-caption">Total transaction costs incurred during the soak. Commission is per-share fee; slippage is the difference between expected and realized execution price.</p>
+      <table aria-label="Cost summary">
+        <thead>
+          <tr>
+            <th>Cost category</th>
+            <th>Total cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Commission</td><td class="num">$23.00</td></tr>
+          <tr><td>Slippage</td><td class="num">$45.50</td></tr>
+          <tr><td><strong>Total</strong></td><td class="num"><strong>$68.50</strong></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <div class="footer">Synthetic data, visual spec only. IBKR paper account · S&P 100 monthly universe · v0.15 paper trading soak</div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const chartWidth = (el) => Math.max(320, el.clientWidth || 920);
+
+      // Daily Equity Curve
+      const equityEl = document.getElementById("equity-chart");
+      const days = Array.from({ length: 14 }, (_, i) => i);
+      const dayLabels = (u, ticks) => ticks.map((t) => "Day " + (Math.round(t) + 1));
+      const actualEquity = [100000, 100840, 101220, 100690, 101450, 102100, 101780, 102450, 102190, 101930, 102680, 103210, 102870, 102520];
+      const expectedEquity = [100000, 100820, 101180, 100720, 101380, 102050, 101820, 102380, 102150, 101980, 102620, 103150, 102910, 102580];
+      new uPlot({
+        width: chartWidth(equityEl),
+        height: 320,
+        scales: { x: { time: false }, y: { range: (min, max) => [min * 0.99, max * 1.01] } },
+        axes: [
+          { label: "Trading day", values: dayLabels },
+          { label: "Portfolio value ($)" }
+        ],
+        series: [
+          {},
+          { label: "Actual equity", stroke: "#4a6fa5", width: 2 },
+          { label: "Expected equity", stroke: "#2a7f5f", width: 2, dash: [4, 4] }
+        ]
+      }, [days, actualEquity, expectedEquity], equityEl);
+
+      // Position Evolution
+      const positionEl = document.getElementById("position-chart");
+      const aapl = [1, 1, 2, 2, 1, 1, 2, 2, 1, 1, 0, 0, 1, 1];
+      const msft = [0, 0, 1, 1, 2, 2, 1, 1, 2, 2, 1, 1, 2, 2];
+      const googl = [2, 2, 0, 0, 0, 0, 1, 1, 0, 0, 2, 2, 0, 0];
+      const amzn = [0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0];
+      const nvda = [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1];
+      new uPlot({
+        width: chartWidth(positionEl),
+        height: 320,
+        scales: { x: { time: false }, y: { range: (min, max) => [Math.max(0, min - 0.5), max + 0.5] } },
+        axes: [
+          { label: "Trading day", values: dayLabels },
+          { label: "Position count (shares)" }
+        ],
+        series: [
+          {},
+          { label: "AAPL", stroke: "#4a6fa5", width: 2 },
+          { label: "MSFT", stroke: "#2a7f5f", width: 2 },
+          { label: "GOOGL", stroke: "#b03a3a", width: 2 },
+          { label: "AMZN", stroke: "#7a5a00", width: 2 },
+          { label: "NVDA", stroke: "#6a4fa5", width: 2 }
+        ]
+      }, [days, aapl, msft, googl, amzn, nvda], positionEl);
+
+      // Realized vs Expected Slippage (scatter)
+      const slippageEl = document.getElementById("slippage-chart");
+      const expectedSlippage = [3.2, 4.1, 2.8, 5.3, 3.9, 4.5, 2.1, 3.7, 4.8, 3.4, 5.1, 2.9, 4.2, 3.6, 4.9, 2.5, 3.8, 5.2, 3.1, 4.4, 2.7, 4.0, 3.3];
+      const realizedSlippage = [3.5, 4.3, 2.6, 5.8, 3.7, 4.2, 2.4, 3.9, 5.2, 3.1, 5.5, 3.2, 4.0, 3.8, 5.1, 2.8, 3.5, 5.6, 3.4, 4.6, 2.9, 4.3, 3.0];
+      const slippageColors = realizedSlippage.map((r, i) => Math.abs(r - expectedSlippage[i]) < 5 ? "#2a7f5f" : "#b03a3a");
+      new uPlot({
+        width: chartWidth(slippageEl),
+        height: 320,
+        scales: { x: { range: (min, max) => [0, max * 1.1] }, y: { range: (min, max) => [0, max * 1.1] } },
+        axes: [
+          { label: "Expected slippage (bps)" },
+          { label: "Realized slippage (bps)" }
+        ],
+        series: [
+          {},
+          { 
+            label: "Orders", 
+            stroke: "#4a6fa5", 
+            width: 0,
+            points: { show: true, size: 6, stroke: slippageColors, fill: slippageColors }
+          }
+        ],
+        plugins: [
+          {
+            hooks: {
+              draw: (u) => {
+                const ctx = u.ctx;
+                const x0 = u.valToPos(0, 'x', true);
+                const y0 = u.valToPos(0, 'y', true);
+                const x1 = u.valToPos(Math.max(...expectedSlippage), 'x', true);
+                const y1 = u.valToPos(Math.max(...realizedSlippage), 'y', true);
+                ctx.beginPath();
+                ctx.strokeStyle = "#ddd";
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+                ctx.moveTo(x0, y0);
+                ctx.lineTo(x1, y1);
+                ctx.stroke();
+                ctx.setLineDash([]);
+              }
+            }
+          }
+        ]
+      }, [expectedSlippage, realizedSlippage], slippageEl);
+    });
+  </script>
+</body>
+</html>
