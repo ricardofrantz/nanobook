@@ -7,7 +7,7 @@
 
 use nanobook::Symbol;
 use rustc_hash::FxHashMap;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// A single rebalance order (computed diff).
 #[derive(Debug, Clone, Serialize)]
@@ -41,7 +41,7 @@ impl std::fmt::Display for Action {
 }
 
 /// Current position snapshot from IBKR (or test data).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CurrentPosition {
     pub symbol: Symbol,
     pub quantity: i64,

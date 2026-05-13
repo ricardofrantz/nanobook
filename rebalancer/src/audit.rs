@@ -17,8 +17,8 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use log::warn;
+use serde::{Deserialize, Serialize};
 
 use crate::clock_skew::{ClockSkewDetector, SkewResult};
 use crate::error::{Error, Result};
@@ -91,6 +91,75 @@ pub struct AuditEvent {
     pub checkpoint: Option<String>,
     #[serde(flatten)]
     pub data: serde_json::Value,
+}
+
+pub(crate) fn parse_audit_events(path: &Path) -> Result<Vec<AuditEvent>> {
+    let contents = std::fs::read_to_string(path)?;
+    let mut events = Vec::new();
+    for (line_num, line) in contents.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<AuditEvent>(line) {
+            Ok(event) => events.push(event),
+            Err(_) => {
+                return Err(Error::AuditValidation(format!(
+                    "Corrupted audit log at line {}: invalid JSON",
+                    line_num + 1
+                )))
+            }
+        }
+    }
+    Ok(events)
+}
+
+pub(crate) fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
+    let mut last_sequence: Option<u64> = None;
+    let expected_checkpoints: Vec<Checkpoint> = vec![
+        Checkpoint::RunStarted,
+        Checkpoint::PositionsFetched,
+        Checkpoint::DiffComputed,
+        Checkpoint::RiskCheckPassed,
+    ];
+    let mut found_checkpoints: Vec<Checkpoint> = Vec::new();
+
+    for (index, event) in events.iter().enumerate() {
+        if let Some(checkpoint) = Checkpoint::from_event_name(&event.event) {
+            let sequence_number = event.sequence_number.ok_or_else(|| {
+                Error::AuditValidation(format!(
+                    "Checkpoint at line {} missing sequence number",
+                    index + 1
+                ))
+            })?;
+
+            if let Some(last_seq) = last_sequence {
+                if sequence_number <= last_seq {
+                    return Err(Error::AuditValidation(format!(
+                        "Checkpoint sequence not monotonic at line {}: got {}, expected > {}",
+                        index + 1,
+                        sequence_number,
+                        last_seq
+                    )));
+                }
+            }
+            last_sequence = Some(sequence_number);
+
+            found_checkpoints.push(checkpoint);
+        }
+    }
+
+    for (i, expected) in expected_checkpoints.iter().enumerate() {
+        if found_checkpoints.get(i) != Some(expected) {
+            return Err(Error::AuditValidation(format!(
+                "Missing checkpoint: expected {:?} at position {}, found {:?}",
+                expected,
+                i,
+                found_checkpoints.get(i)
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 /// Append-only audit logger.
@@ -325,27 +394,15 @@ impl AuditLog {
     /// Only `cron_completed` events are considered. Other events like `cron_start`
     /// or `run_started` do not mark a window as complete. This ensures that
     /// incomplete or failed runs do not block subsequent attempts.
-    pub fn check_window_already_complete(
-        &mut self,
-        window_id: &str,
-    ) -> Result<Option<u64>> {
-        // Flush any buffered writes first
+    pub fn check_window_already_complete(&mut self, window_id: &str) -> Result<Option<u64>> {
         self.writer.flush()?;
 
-        // Read the audit log file
-        let contents = std::fs::read_to_string(&self.path)?;
-
-        // Parse each line and look for cron_completed events with matching window_id
-        // Return the most recent (last) completion
         let mut last_sequence: Option<u64> = None;
-        for line in contents.lines() {
-            if let Ok(event) = serde_json::from_str::<AuditEvent>(line) {
-                if event.event == "cron_completed" {
-                    if event.window_id.as_deref() == Some(window_id) {
-                        // Found a completed event for this window
-                        if let Some(seq) = event.sequence_number {
-                            last_sequence = Some(seq);
-                        }
+        for event in parse_audit_events(&self.path)? {
+            if event.event == "cron_completed" {
+                if event.window_id.as_deref() == Some(window_id) {
+                    if let Some(seq) = event.sequence_number {
+                        last_sequence = Some(seq);
                     }
                 }
             }
@@ -366,76 +423,9 @@ impl AuditLog {
     /// * `Ok(())` - All checkpoints are valid
     /// * `Err(Error)` - Checkpoint validation failed with details
     pub fn validate_checkpoints(&mut self) -> Result<()> {
-        // Flush any buffered writes first
         self.writer.flush()?;
-
-        // Read the audit log file
-        let contents = std::fs::read_to_string(&self.path)?;
-
-        // Parse checkpoint events and validate sequence
-        let mut last_sequence: Option<u64> = None;
-        let expected_checkpoints: Vec<Checkpoint> = vec![
-            Checkpoint::RunStarted,
-            Checkpoint::PositionsFetched,
-            Checkpoint::DiffComputed,
-            Checkpoint::RiskCheckPassed,
-        ];
-        let mut found_checkpoints: Vec<Checkpoint> = Vec::new();
-
-        for (line_num, line) in contents.lines().enumerate() {
-            if let Ok(event) = serde_json::from_str::<AuditEvent>(line) {
-                // Check if this is a checkpoint event
-                if event.checkpoint.is_some() {
-                    if let Some(checkpoint) = Checkpoint::from_event_name(&event.event) {
-                        // Validate sequence number is present
-                        let sequence_number = event.sequence_number.ok_or_else(|| {
-                            Error::AuditValidation(format!(
-                                "Checkpoint at line {} missing sequence number",
-                                line_num + 1
-                            ))
-                        })?;
-
-                        // Validate monotonic sequence numbers
-                        if let Some(last_seq) = last_sequence {
-                            if sequence_number <= last_seq {
-                                return Err(Error::AuditValidation(format!(
-                                    "Checkpoint sequence not monotonic at line {}: got {}, expected > {}",
-                                    line_num + 1, sequence_number, last_seq
-                                )));
-                            }
-                        }
-                        last_sequence = Some(sequence_number);
-
-                        // Track found checkpoints
-                        found_checkpoints.push(checkpoint);
-                    }
-                }
-            } else if line.trim().is_empty() {
-                // Skip empty lines
-                continue;
-            } else {
-                return Err(Error::AuditValidation(format!(
-                    "Corrupted audit log at line {}: invalid JSON",
-                    line_num + 1
-                )));
-            }
-        }
-
-        // Validate that expected checkpoints are present (in order)
-        // Note: OrderSubmitted and OrderFilled can appear multiple times,
-        // so we only validate the core sequence up to RiskCheckPassed
-        for (i, expected) in expected_checkpoints.iter().enumerate() {
-            if found_checkpoints.get(i) != Some(expected) {
-                return Err(Error::AuditValidation(format!(
-                    "Missing checkpoint: expected {:?} at position {}, found {:?}",
-                    expected,
-                    i,
-                    found_checkpoints.get(i)
-                )));
-            }
-        }
-
-        Ok(())
+        let events = parse_audit_events(&self.path)?;
+        validate_checkpoints_from_parsed(&events)
     }
 }
 
@@ -783,11 +773,7 @@ pub fn log_run_completed_checkpoint(
 }
 
 /// Convenience: log cron mode start with sequence number.
-pub fn log_cron_start(
-    audit: &mut AuditLog,
-    sequence_number: u64,
-    window_id: &str,
-) -> Result<()> {
+pub fn log_cron_start(audit: &mut AuditLog, sequence_number: u64, window_id: &str) -> Result<()> {
     audit.log_with_idempotency(
         "cron_start",
         Some(sequence_number),
@@ -882,12 +868,14 @@ mod tests {
                 Checkpoint::RunStarted,
                 1,
                 serde_json::json!({"target": "test"}),
-            ).unwrap();
+            )
+            .unwrap();
             log.log_checkpoint(
                 Checkpoint::PositionsFetched,
                 2,
                 serde_json::json!({"equity": 100000}),
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         let contents = std::fs::read_to_string(&path).unwrap();
@@ -913,10 +901,14 @@ mod tests {
 
         {
             let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
-            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({})).unwrap();
-            log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({})).unwrap();
-            log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({})).unwrap();
-            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({})).unwrap();
+            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+                .unwrap();
         }
 
         let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
@@ -930,8 +922,10 @@ mod tests {
 
         {
             let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
-            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({})).unwrap();
-            log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({})).unwrap();
+            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
+                .unwrap();
             // Write a checkpoint with non-monotonic sequence number
             let event = AuditEvent {
                 event: "diff_computed".to_string(),

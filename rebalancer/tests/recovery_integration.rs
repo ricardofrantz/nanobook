@@ -3,6 +3,39 @@
 use nanobook_rebalancer::audit::AuditLog;
 use nanobook_rebalancer::recovery::{reconstruct_state, RecoveryAction};
 
+#[test]
+fn roundtrip_position_through_audit_log_preserves_avg_cost() {
+    use nanobook::Symbol;
+    use nanobook_rebalancer::audit::{log_positions_checkpoint, AuditLog};
+    use nanobook_rebalancer::diff::CurrentPosition;
+
+    let dir = tempfile::tempdir().unwrap();
+    let audit_path = dir.path().join("roundtrip_audit.jsonl");
+    let workdir = dir.path();
+
+    let positions = vec![CurrentPosition {
+        symbol: Symbol::new("AAPL"),
+        quantity: 100,
+        avg_cost_cents: 15_000,
+    }];
+
+    {
+        let mut log = AuditLog::open_in(&audit_path, workdir).unwrap();
+        log_positions_checkpoint(&mut log, 1, &positions, 1_000_000_00).unwrap();
+    }
+
+    let (state, _action) = nanobook_rebalancer::recovery::reconstruct_state(&audit_path).unwrap();
+    assert_eq!(state.positions.len(), 1);
+    assert_eq!(
+        state.positions[0].avg_cost_cents, 15_000,
+        "avg_cost_cents roundtrip failed"
+    );
+    assert_eq!(
+        state.positions[0].quantity, 100,
+        "quantity roundtrip failed"
+    );
+}
+
 /// Test recovery from crash at each checkpoint.
 #[test]
 fn test_recovery_from_run_started() {
@@ -17,13 +50,17 @@ fn test_recovery_from_run_started() {
             nanobook_rebalancer::audit::Checkpoint::RunStarted,
             1,
             serde_json::json!({"target": "test"}),
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     // Recover state
     let (state, action) = reconstruct_state(&audit_path).unwrap();
 
-    assert_eq!(state.checkpoint, nanobook_rebalancer::audit::Checkpoint::RunStarted);
+    assert_eq!(
+        state.checkpoint,
+        nanobook_rebalancer::audit::Checkpoint::RunStarted
+    );
     assert_eq!(state.sequence_number, 1);
     assert!(!state.run_completed);
     assert_eq!(action, RecoveryAction::Restart);
@@ -42,7 +79,8 @@ fn test_recovery_from_positions_fetched() {
             nanobook_rebalancer::audit::Checkpoint::RunStarted,
             1,
             serde_json::json!({"target": "test"}),
-        ).unwrap();
+        )
+        .unwrap();
         log.log_checkpoint(
             nanobook_rebalancer::audit::Checkpoint::PositionsFetched,
             2,
@@ -53,13 +91,17 @@ fn test_recovery_from_positions_fetched() {
                     "avg_cost": 150.0
                 }]
             }),
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     // Recover state
     let (state, action) = reconstruct_state(&audit_path).unwrap();
 
-    assert_eq!(state.checkpoint, nanobook_rebalancer::audit::Checkpoint::PositionsFetched);
+    assert_eq!(
+        state.checkpoint,
+        nanobook_rebalancer::audit::Checkpoint::PositionsFetched
+    );
     assert_eq!(state.sequence_number, 2);
     assert_eq!(state.positions.len(), 1);
     assert_eq!(state.positions[0].symbol.as_str(), "AAPL");
@@ -81,7 +123,8 @@ fn test_recovery_from_diff_computed() {
             nanobook_rebalancer::audit::Checkpoint::RunStarted,
             1,
             serde_json::json!({"target": "test"}),
-        ).unwrap();
+        )
+        .unwrap();
         log.log_checkpoint(
             nanobook_rebalancer::audit::Checkpoint::PositionsFetched,
             2,
@@ -92,7 +135,8 @@ fn test_recovery_from_diff_computed() {
                     "avg_cost": 150.0
                 }]
             }),
-        ).unwrap();
+        )
+        .unwrap();
         log.log_checkpoint(
             nanobook_rebalancer::audit::Checkpoint::DiffComputed,
             3,
@@ -105,13 +149,17 @@ fn test_recovery_from_diff_computed() {
                     "description": "test"
                 }]
             }),
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     // Recover state
     let (state, action) = reconstruct_state(&audit_path).unwrap();
 
-    assert_eq!(state.checkpoint, nanobook_rebalancer::audit::Checkpoint::DiffComputed);
+    assert_eq!(
+        state.checkpoint,
+        nanobook_rebalancer::audit::Checkpoint::DiffComputed
+    );
     assert_eq!(state.sequence_number, 3);
     assert_eq!(state.orders.len(), 1);
     assert_eq!(state.orders[0].symbol.as_str(), "AAPL");
@@ -134,7 +182,8 @@ fn test_recovery_from_order_submitted() {
             nanobook_rebalancer::audit::Checkpoint::RunStarted,
             1,
             serde_json::json!({"target": "test"}),
-        ).unwrap();
+        )
+        .unwrap();
         log.log_checkpoint(
             nanobook_rebalancer::audit::Checkpoint::PositionsFetched,
             2,
@@ -145,7 +194,8 @@ fn test_recovery_from_order_submitted() {
                     "avg_cost": 150.0
                 }]
             }),
-        ).unwrap();
+        )
+        .unwrap();
         log.log_checkpoint(
             nanobook_rebalancer::audit::Checkpoint::DiffComputed,
             3,
@@ -158,7 +208,8 @@ fn test_recovery_from_order_submitted() {
                     "description": "test"
                 }]
             }),
-        ).unwrap();
+        )
+        .unwrap();
         log.log_checkpoint(
             nanobook_rebalancer::audit::Checkpoint::OrderSubmitted,
             4,
@@ -167,13 +218,17 @@ fn test_recovery_from_order_submitted() {
                 "action": "Buy",
                 "ibkr_id": 12345
             }),
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     // Recover state
     let (state, action) = reconstruct_state(&audit_path).unwrap();
 
-    assert_eq!(state.checkpoint, nanobook_rebalancer::audit::Checkpoint::OrderSubmitted);
+    assert_eq!(
+        state.checkpoint,
+        nanobook_rebalancer::audit::Checkpoint::OrderSubmitted
+    );
     assert_eq!(state.sequence_number, 4);
     assert_eq!(state.orders.len(), 1);
     assert_eq!(state.orders[0].ibkr_id, 12345);
@@ -196,7 +251,8 @@ fn test_recovery_from_order_filled() {
             nanobook_rebalancer::audit::Checkpoint::RunStarted,
             1,
             serde_json::json!({"target": "test"}),
-        ).unwrap();
+        )
+        .unwrap();
         log.log_checkpoint(
             nanobook_rebalancer::audit::Checkpoint::PositionsFetched,
             2,
@@ -207,7 +263,8 @@ fn test_recovery_from_order_filled() {
                     "avg_cost": 150.0
                 }]
             }),
-        ).unwrap();
+        )
+        .unwrap();
         log.log_checkpoint(
             nanobook_rebalancer::audit::Checkpoint::DiffComputed,
             3,
@@ -220,7 +277,8 @@ fn test_recovery_from_order_filled() {
                     "description": "test"
                 }]
             }),
-        ).unwrap();
+        )
+        .unwrap();
         log.log_checkpoint(
             nanobook_rebalancer::audit::Checkpoint::OrderSubmitted,
             4,
@@ -229,7 +287,8 @@ fn test_recovery_from_order_filled() {
                 "action": "Buy",
                 "ibkr_id": 12345
             }),
-        ).unwrap();
+        )
+        .unwrap();
         log.log_checkpoint(
             nanobook_rebalancer::audit::Checkpoint::OrderFilled,
             5,
@@ -241,13 +300,17 @@ fn test_recovery_from_order_filled() {
                 "commission": 1.0,
                 "status": "Filled"
             }),
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     // Recover state
     let (state, action) = reconstruct_state(&audit_path).unwrap();
 
-    assert_eq!(state.checkpoint, nanobook_rebalancer::audit::Checkpoint::OrderFilled);
+    assert_eq!(
+        state.checkpoint,
+        nanobook_rebalancer::audit::Checkpoint::OrderFilled
+    );
     assert_eq!(state.sequence_number, 5);
     assert_eq!(state.orders.len(), 1);
     assert!(state.orders[0].submitted);
@@ -269,7 +332,8 @@ fn test_recovery_from_run_completed() {
             nanobook_rebalancer::audit::Checkpoint::RunStarted,
             1,
             serde_json::json!({"target": "test"}),
-        ).unwrap();
+        )
+        .unwrap();
         log.log_checkpoint(
             nanobook_rebalancer::audit::Checkpoint::RunCompleted,
             2,
@@ -278,13 +342,17 @@ fn test_recovery_from_run_completed() {
                 "filled": 1,
                 "failed": 0
             }),
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     // Recover state
     let (state, action) = reconstruct_state(&audit_path).unwrap();
 
-    assert_eq!(state.checkpoint, nanobook_rebalancer::audit::Checkpoint::RunCompleted);
+    assert_eq!(
+        state.checkpoint,
+        nanobook_rebalancer::audit::Checkpoint::RunCompleted
+    );
     assert_eq!(state.sequence_number, 2);
     assert!(state.run_completed);
     assert_eq!(action, RecoveryAction::Restart);
@@ -314,19 +382,25 @@ fn test_checkpoint_coverage_all_checkpoints() {
                 nanobook_rebalancer::audit::Checkpoint::RunStarted,
                 1,
                 serde_json::json!({"target": "test"}),
-            ).unwrap();
-            
+            )
+            .unwrap();
+
             // Add the specific checkpoint
             log.log_checkpoint(
                 *checkpoint,
                 (i + 2) as u64,
                 serde_json::json!({"test": "data"}),
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         // Verify recovery works
         let (state, _action) = reconstruct_state(&audit_path).unwrap();
-        assert_eq!(state.checkpoint, *checkpoint, "Checkpoint mismatch for {:?}", checkpoint);
+        assert_eq!(
+            state.checkpoint, *checkpoint,
+            "Checkpoint mismatch for {:?}",
+            checkpoint
+        );
         assert_eq!(state.sequence_number, (i + 2) as u64);
     }
 }
