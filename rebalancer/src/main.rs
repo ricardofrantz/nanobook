@@ -5,6 +5,8 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 
+use nanobook_broker::ibkr::IbkrBroker;
+use nanobook_broker::Broker;
 use nanobook_rebalancer::config::Config;
 use nanobook_rebalancer::error::Error;
 use nanobook_rebalancer::execution::{self, RunOptions};
@@ -133,7 +135,26 @@ fn main() {
                     process::exit(1);
                 }
             };
-            recovery::run_recover(&config, &spec, dry_run)
+
+            // Try to connect to broker for state comparison
+            let mut broker = IbkrBroker::new(
+                &config.connection.host,
+                config.connection.port,
+                config.connection.client_id,
+            );
+            let broker_ref = match broker.connect() {
+                Ok(()) => {
+                    println!("Connected to IBKR for broker state comparison.");
+                    Some(&broker as &dyn Broker)
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to connect to IBKR: {e}");
+                    eprintln!("Proceeding with recovery without broker state comparison.");
+                    None
+                }
+            };
+
+            recovery::run_recover(&config, &spec, dry_run, broker_ref)
         }
     };
 

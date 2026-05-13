@@ -357,8 +357,14 @@ pub fn reconstruct_state(
 /// This function:
 /// 1. Reads the audit log to reconstruct state
 /// 2. Determines the appropriate recovery action
-/// 3. Prints a recovery report
-pub fn run_recover(config: &Config, _target_spec: &TargetSpec, dry_run: bool) -> Result<()> {
+/// 3. Compares broker state if broker is provided
+/// 4. Prints a recovery report
+pub fn run_recover(
+    config: &Config,
+    _target_spec: &TargetSpec,
+    dry_run: bool,
+    broker: Option<&dyn Broker>,
+) -> Result<()> {
     let audit_log_path = config.audit_path();
 
     println!(
@@ -399,8 +405,75 @@ pub fn run_recover(config: &Config, _target_spec: &TargetSpec, dry_run: bool) ->
     println!("\n=== Recovery Action ===");
     println!("{:?}", recovery_action);
 
-    println!("\n=== Broker State Verification ===");
-    println!("To verify broker state, manually check IBKR TWS for open orders and positions.");
+    // Compare broker state if broker is available
+    let discrepancy_report = if let Some(broker) = broker {
+        println!("\n=== Broker State Comparison ===");
+        match compare_broker_state(broker, &recovered_state) {
+            Ok(report) => {
+                if report.has_critical_issues {
+                    println!("Discrepancies found between broker and reconstructed state:");
+                    for discrepancy in &report.discrepancies {
+                        match discrepancy {
+                            Discrepancy::OrphanOrder {
+                                broker_order_id,
+                                symbol,
+                                status,
+                            } => {
+                                println!(
+                                    "  - Orphan order: ID {} (symbol: {}, status: {})",
+                                    broker_order_id, symbol, status
+                                );
+                            }
+                            Discrepancy::MissingOrder {
+                                symbol,
+                                expected_status,
+                            } => {
+                                println!(
+                                    "  - Missing order: {} (expected: {})",
+                                    symbol, expected_status
+                                );
+                            }
+                            Discrepancy::OrderStatusMismatch {
+                                symbol,
+                                broker_status,
+                                expected_status,
+                            } => {
+                                println!(
+                                    "  - Order status mismatch for {}: broker={}, expected={}",
+                                    symbol, broker_status, expected_status
+                                );
+                            }
+                            Discrepancy::PositionMismatch {
+                                symbol,
+                                broker_qty,
+                                expected_qty,
+                            } => {
+                                println!(
+                                    "  - Position mismatch for {}: broker={}, expected={}",
+                                    symbol, broker_qty, expected_qty
+                                );
+                            }
+                        }
+                    }
+                    println!("\nWARNING: Broker state does not match reconstructed state.");
+                    Some(report)
+                } else {
+                    println!("Broker state matches reconstructed state.");
+                    None
+                }
+            }
+            Err(e) => {
+                println!("Failed to compare broker state: {}", e);
+                println!("Proceeding with recovery based on audit log only.");
+                None
+            }
+        }
+    } else {
+        println!("\n=== Broker State Verification ===");
+        println!("No broker connection available - skipping state comparison.");
+        println!("To verify broker state, manually check IBKR TWS for open orders and positions.");
+        None
+    };
 
     println!("\n=== Recovery Guidance ===");
     match recovery_action {
@@ -421,6 +494,9 @@ pub fn run_recover(config: &Config, _target_spec: &TargetSpec, dry_run: bool) ->
             println!("The crash occurred at an ambiguous point.");
             println!("Please review broker state and decide on the appropriate action.");
             println!("IMPORTANT: Verify IBKR TWS for open orders and positions before proceeding.");
+            if discrepancy_report.is_some() {
+                println!("\nNOTE: Discrepancies detected between broker and reconstructed state. Review the comparison above carefully.");
+            }
             return Err(Error::Recovery("Manual review required".to_string()));
         }
         RecoveryAction::Rollback => {
@@ -428,6 +504,9 @@ pub fn run_recover(config: &Config, _target_spec: &TargetSpec, dry_run: bool) ->
             println!("Orders were submitted but may be in an unknown state.");
             println!("Please review broker open orders and cancel if necessary.");
             println!("IMPORTANT: Verify IBKR TWS for open orders and positions before proceeding.");
+            if discrepancy_report.is_some() {
+                println!("\nNOTE: Orphan orders detected. These should be manually canceled in IBKR TWS before proceeding.");
+            }
             return Err(Error::Recovery(
                 "Rollback required - manual intervention needed".to_string(),
             ));
