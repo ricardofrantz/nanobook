@@ -46,7 +46,7 @@ When TWS restarts while the rebalancer has open positions, the broker adapter mu
 
 ### Deepened Implementation Plan
 
-#### Phase 1: Disconnect Detection (2-3 days)
+#### Phase 1: Disconnect Detection
 
 **Objective**: Add robust disconnect detection to IBKR broker adapter.
 
@@ -67,11 +67,11 @@ When TWS restarts while the rebalancer has open positions, the broker adapter mu
    - Return error if reconnect fails after max attempts
 
 **Verification**:
-- Integration test: Simulate TWS disconnect, verify detection within 15s
-- Unit test: Heartbeat timeout triggers disconnect state
-- Manual test: Kill TWS process, observe reconnect attempts in logs
+- `cargo test -p nanobook-broker --test ibkr_reconnect` passes
+- Assertion: `IBKRBroker::is_connected()` returns `false` within 15s of `MockTws::simulate_disconnect()` — see `broker/tests/ibkr_reconnect.rs::test_heartbeat_timeout`
+- Assertion: after max reconnect attempts exhausted, `IBKRBroker::connect()` returns `Err(BrokerError::ReconnectFailed)` — see `broker/tests/ibkr_reconnect.rs::test_reconnect_failure`
 
-#### Phase 2: Open Positions Query (2-3 days)
+#### Phase 2: Open Positions Query
 
 **Objective**: Implement IBKR open-positions endpoint query.
 
@@ -93,11 +93,11 @@ When TWS restarts while the rebalancer has open positions, the broker adapter mu
    - Return reconciliation report
 
 **Verification**:
-- Integration test: Submit order, query open orders, verify match
-- Integration test: Open position, query positions, verify match
-- Manual test: Run against paper account, verify reconciliation report
+- `cargo test -p nanobook-broker --test ibkr_state_query` passes
+- Assertion: `IBKRBroker::open_orders()` returns the same set submitted via `MockTws` — see `broker/tests/ibkr_state_query.rs::test_open_orders_roundtrip`
+- Assertion: `IBKRBroker::positions()` reflects the partial fill injected by `MockTws::simulate_partial_fill()` — see `broker/tests/ibkr_state_query.rs::test_positions_after_partial_fill`
 
-#### Phase 3: State Reconciliation (3-4 days)
+#### Phase 3: State Reconciliation
 
 **Objective**: Implement state reconciliation logic to prevent double-submits.
 
@@ -126,11 +126,11 @@ When TWS restarts while the rebalancer has open positions, the broker adapter mu
    - Log all reconciliation discrepancies
 
 **Verification**:
-- Integration test: Simulate orphan order, verify detection
-- Integration test: Simulate partial fill, verify reconciliation
-- Manual test: Kill TWS mid-order, verify safe reconnect
+- `cargo test -p nanobook-broker --test ibkr_reconcile` passes
+- Assertion: orphan order (present in broker, absent in local state) is detected and flagged — see `broker/tests/ibkr_reconcile.rs::test_orphan_order_detection`
+- Assertion: `IBKRBroker::reconcile_state()` returns `ReconcileResult::Blocked` when an orphan order exists, preventing further order submission — see `broker/tests/ibkr_reconcile.rs::test_submission_blocked_on_orphan`
 
-#### Phase 4: Reconnect Drill Test (2 days)
+#### Phase 4: Reconnect Drill Test
 
 **Objective**: End-to-end test of F6 failure mode.
 
@@ -153,9 +153,9 @@ When TWS restarts while the rebalancer has open positions, the broker adapter mu
    - Log reconciliation timing metrics
 
 **Verification**:
-- Integration test passes consistently
-- Manual test against paper account
-- Performance test: Reconciliation completes within 30s target
+- `cargo test -p nanobook-broker --test ibkr_f6_reconnect_drill` passes
+- Assertion: after `MockTws::simulate_disconnect()` + `MockTws::simulate_reconnect()`, no duplicate orders are submitted — `broker/tests/ibkr_f6_reconnect_drill.rs::test_no_double_submit_on_reconnect`
+- Assertion: `reconcile_duration_ms < 30_000` recorded in test output for `broker/tests/ibkr_f6_reconnect_drill.rs::test_reconnect_within_30s`
 
 ### Dependencies
 
@@ -183,188 +183,24 @@ When TWS restarts while the rebalancer has open positions, the broker adapter mu
 
 ### Problem Statement
 
-When the rebalancer process crashes (SIGKILL) mid-rebalance, the restart must:
-1. Read the audit log to determine the exact point of failure
-2. Reconstruct state at failure point
-3. Complete or roll back the rebalance cleanly
-4. Prevent double-submission of orders
+When the rebalancer process crashes (SIGKILL) mid-rebalance, the restart must read the audit log, reconstruct state at the failure point, and complete or roll back the rebalance cleanly — without double-submitting orders.
 
 **Test**: Kill at every audit-log checkpoint, assert correct final state.
 
-### Deepened Implementation Plan
+**Status:** ✅ DONE (commits 36aca43..f0dca02, closed 2026-05-13)
 
-#### Phase 1: Audit Log Checkpoints (2-3 days)
+Implementation delivered across 5 commits:
+- Phase 1 (36aca43): Audit log checkpoints — see `rebalancer/src/audit.rs` `Checkpoint` enum + `log_checkpoint()`
+- Phase 2 (aa30eb8): State reconstruction — see `rebalancer/src/recovery.rs` `reconstruct_state()`
+- Phase 3 (5728882): Broker state query — see `Broker::open_orders()` + `compare_broker_state()`
+- Phase 4 (0b8f17b): `rebalancer recover` subcommand with `--dry-run`
+- Phase 5 (f0dca02): `rebalancer/tests/recovery_integration.rs` — 7 tests, all checkpoints covered
 
-**Objective**: Define and implement audit-log checkpoints for recovery.
+**Known gap (tracked as bd-2tu):** `run_recover()` does not yet invoke `compare_broker_state()`; only prints reconstructed state + guidance.
 
-**Tasks**:
-1. Define checkpoint events
-   - `run_started`: Rebalance run begins
-   - `positions_fetched`: Current positions retrieved
-   - `diff_computed`: Rebalance diff computed
-   - `risk_check_passed`: Risk checks passed
-   - `order_submitted_<symbol>`: Individual order submitted
-   - `order_filled_<symbol>`: Individual order filled
-   - `run_completed`: Rebalance run completes (success or failure)
-
-2. Add checkpoint logging to rebalancer
-   - Log checkpoint events with sequence numbers
-   - Include sufficient state in each checkpoint for recovery
-   - Ensure atomic writes (fsync after each checkpoint)
-
-3. Add checkpoint validation
-   - Verify checkpoint sequence is monotonic
-   - Verify no missing checkpoints between known states
-   - Detect corrupted checkpoint entries
-
-**Verification**:
-- Unit test: Checkpoint sequence validation
-- Integration test: Simulate crash at each checkpoint
-- Manual test: Review audit log after crash
-
-#### Phase 2: State Reconstruction (3-4 days)
-
-**Objective**: Implement audit-log-driven state reconstruction.
-
-**Tasks**:
-1. Define recoverable state structure
-   ```rust
-   struct RecoveredState {
-       checkpoint: Checkpoint,
-       positions: Vec<Position>,
-       orders: Vec<Order>,
-       equity: i64,
-       sequence_number: u64,
-   }
-   ```
-
-2. Implement state reconstruction algorithm
-   ```
-   Read audit log from beginning to end:
-     - Parse each checkpoint event
-     - Update in-memory state
-     - Track last known good checkpoint
-     - Detect incomplete operations (e.g., order submitted but not filled)
-
-   Determine recovery action:
-     - If crash before order submission: safe to restart from beginning
-     - If crash after order submission but before fill: query broker state
-     - If crash after fill: mark order as complete, continue with remaining
-   ```
-
-3. Add recovery action decision logic
-   - `Restart`: Safe to restart entire rebalance
-   - `Resume`: Resume from last checkpoint
-   - `ManualReview`: Requires operator intervention
-   - `Rollback`: Rollback submitted orders (if possible)
-
-**Verification**:
-- Unit test: State reconstruction for each checkpoint
-- Integration test: Simulate crash, verify correct recovery action
-- Manual test: Crash at each checkpoint, verify recovery
-
-#### Phase 3: Broker State Query (2-3 days)
-
-**Objective**: Query broker state to resolve ambiguous recovery cases.
-
-**Tasks**:
-1. Add broker state query methods
-   - `query_open_orders()`: Get all open orders from broker
-   - `query_positions()`: Get all positions from broker
-   - `query_order_status(order_id)`: Get status of specific order
-
-2. Implement broker state comparison
-   - Compare reconstructed state against broker state
-   - Detect discrepancies (orphan orders, missing fills)
-   - Generate discrepancy report
-
-3. Add broker state reconciliation
-   - For orphan orders: cancel or acknowledge
-   - For missing fills: update local state
-   - For discrepancies: flag for manual review
-
-**Verification**:
-- Integration test: Query broker state after crash
-- Integration test: Reconcile broker state with reconstructed state
-- Manual test: Crash during order submission, verify broker query
-
-#### Phase 4: Warm Restart Implementation (3-4 days)
-
-**Objective**: Implement warm restart logic in rebalancer binary.
-
-**Tasks**:
-1. Add `--recover` flag to rebalancer CLI
-   - Read audit log on startup
-   - Reconstruct state
-   - Determine recovery action
-   - Execute recovery or prompt for manual review
-
-2. Implement recovery execution
-   - For `Restart`: Start new rebalance from beginning
-   - For `Resume`: Resume from last checkpoint
-   - For `ManualReview`: Print recovery report, exit
-   - For `Rollback`: Cancel orphan orders, restart
-
-3. Add recovery logging
-   - Log recovery action taken
-   - Log state reconstruction details
-   - Log broker state comparison results
-
-**Verification**:
-- Integration test: `--recover` flag with each crash scenario
-- Manual test: Kill process, run with `--recover`, verify correct action
-- End-to-end test: Full crash recovery cycle
-
-#### Phase 5: F9 Integration Test (2 days)
-
-**Objective**: End-to-end test of F9 failure mode.
-
-**Tasks**:
-1. Extend MockTws to support process crash simulation
-   - Add `simulate_crash()` method
-   - Add state persistence across crash
-   - Add crash injection at specific checkpoints
-
-2. Implement F9 integration test
-   - Start rebalancer with mock broker
-   - Inject crash at each checkpoint
-   - Restart rebalancer with `--recover`
-   - Verify correct final state
-   - Verify no double-submission
-
-3. Add checkpoint coverage test
-   - Test crash at every checkpoint
-   - Assert correct recovery for each
-   - Measure recovery time for each checkpoint
-
-**Verification**:
-- Integration test passes for all checkpoints
-- Manual test: Kill actual process, verify recovery
-- Recovery time acceptable for production use
-
-### Dependencies
-
-- Audit log (existing)
-- IBKR broker adapter (existing)
-- F6 reconnect logic (bd-w7x) - blocks state query
-
-### Risks & Mitigations
-
-**Risk**: Audit log corruption prevents recovery
-- **Mitigation**: Validate audit log on startup
-- **Mitigation**: Keep backup of previous audit log
-
-**Risk**: State reconstruction logic is complex
-- **Mitigation**: Extensive unit tests for each checkpoint
-- **Mitigation**: Manual review mode for ambiguous cases
-
-**Risk**: Broker state query may fail during recovery
-- **Mitigation**: Retry logic with exponential backoff
-- **Mitigation**: Manual review mode if query fails
-
-**Risk**: Recovery action may be incorrect
-- **Mitigation**: Conservative defaults (e.g., manual review)
-- **Mitigation**: Operator approval required for destructive actions
+**Verification:**
+- `cargo test -p nanobook-rebalancer --test recovery_integration` → 7 passing
+- `cargo test -p nanobook-rebalancer` → 92 passing total
 
 ---
 
@@ -378,7 +214,7 @@ Mirror v0.13 F7 (cron double-fire idempotency) for Binance broker adapter. The r
 
 ### Deepened Implementation Plan
 
-#### Phase 1: Binance Order Cache (2 days)
+#### Phase 1: Binance Order Cache
 
 **Objective**: Add local order cache to Binance broker adapter.
 
@@ -411,11 +247,11 @@ Mirror v0.13 F7 (cron double-fire idempotency) for Binance broker adapter. The r
    - `clear_cache()`: Clear cache on explicit request
 
 **Verification**:
-- Unit test: Order cache serialization/deserialization
-- Integration test: Cache persistence across broker restart
-- Manual test: Submit order, verify cache updated
+- `cargo test -p nanobook-broker --test binance_order_cache` passes
+- Assertion: `BinanceOrderCache` round-trips through serde: serialize to JSON, deserialize, compare — `broker/tests/binance_order_cache.rs::test_cache_serde_roundtrip`
+- Assertion: cache is persisted to disk and reloaded on `BinanceBroker::new()` — `broker/tests/binance_order_cache.rs::test_cache_persistence_across_restart`
 
-#### Phase 2: Binance Client Order IDs (2 days)
+#### Phase 2: Binance Client Order IDs
 
 **Objective**: Implement client order IDs for idempotency.
 
@@ -436,11 +272,11 @@ Mirror v0.13 F7 (cron double-fire idempotency) for Binance broker adapter. The r
    - Return error on duplicate detection
 
 **Verification**:
-- Integration test: Submit order with client order ID
-- Integration test: Duplicate submission detection
-- Manual test: Re-run rebalancer, verify no duplicate orders
+- `cargo test -p nanobook-broker --test binance_idempotency` passes
+- Assertion: second `submit_order()` call with same `client_order_id` returns `Err(BrokerError::DuplicateOrder)` — `broker/tests/binance_idempotency.rs::test_duplicate_client_order_id_rejected`
+- Assertion: `MockBinance` contains exactly one order after two submissions with same `client_order_id` — `broker/tests/binance_idempotency.rs::test_mock_has_single_order`
 
-#### Phase 3: Audit Log Integration (2 days)
+#### Phase 3: Audit Log Integration
 
 **Objective**: Integrate Binance adapter with audit log for idempotency.
 
@@ -464,11 +300,11 @@ Mirror v0.13 F7 (cron double-fire idempotency) for Binance broker adapter. The r
    ```
 
 **Verification**:
-- Integration test: Double-fire detection via audit log
-- Integration test: Sequence number tracking
-- Manual test: Re-run rebalancer, verify idempotency
+- `cargo test -p nanobook-broker --test binance_audit_idempotency` passes
+- Assertion: audit log contains exactly one `OrderSubmitted` entry for sequence number N after two `submit_order()` calls — `broker/tests/binance_audit_idempotency.rs::test_audit_log_single_entry_per_sequence`
+- Assertion: second submission with duplicate sequence N is rejected before reaching `MockBinance` — `broker/tests/binance_audit_idempotency.rs::test_double_fire_blocked_at_audit_check`
 
-#### Phase 4: Binance Mock for Failure Injection (2-3 days)
+#### Phase 4: Binance Mock for Failure Injection
 
 **Objective**: Create Binance mock for testing failure modes.
 
@@ -500,11 +336,11 @@ Mirror v0.13 F7 (cron double-fire idempotency) for Binance broker adapter. The r
    - Add state inspection methods
 
 **Verification**:
-- Unit test: Mock Binance API responses
-- Integration test: Binance broker with mock
-- Manual test: Verify mock behavior matches real API
+- `cargo test -p nanobook-broker --test binance_mock` passes
+- Assertion: `MockBinance::submit_order()` returns the expected `OrderState` for each injected failure mode — `broker/tests/binance_mock.rs::test_mock_failure_injection`
+- Assertion: `MockBinance` deduplicates by `client_order_id` consistently — `broker/tests/binance_mock.rs::test_mock_client_order_id_dedup`
 
-#### Phase 5: F-bin1 Integration Test (2 days)
+#### Phase 5: F-bin1 Integration Test
 
 **Objective**: End-to-end test of Binance idempotency.
 
@@ -525,8 +361,9 @@ Mirror v0.13 F7 (cron double-fire idempotency) for Binance broker adapter. The r
    - Verify audit log contains idempotency rejection event
 
 **Verification**:
-- Integration test passes
-- Manual test: Re-run rebalancer with mock, verify idempotency
+- `cargo test -p nanobook-broker --test binance_f_bin1_idempotency` passes
+- Assertion: after two invocations of the rebalancer with the same window/sequence, `MockBinance` contains exactly one order per symbol — `broker/tests/binance_f_bin1_idempotency.rs::test_f_bin1_end_to_end`
+- Assertion: audit log contains one `IdempotencyRejection` event for the second run — `broker/tests/binance_f_bin1_idempotency.rs::test_f_bin1_audit_log_contains_rejection`
 
 ### Dependencies
 
@@ -558,7 +395,7 @@ Mirror v0.13 F6 (TWS restart) for Binance: WebSocket drop + reconnect during ope
 
 ### Deepened Implementation Plan
 
-#### Phase 1: Binance WebSocket Implementation (3-4 days)
+#### Phase 1: Binance WebSocket Implementation
 
 **Objective**: Implement Binance WebSocket for real-time updates.
 
@@ -579,11 +416,11 @@ Mirror v0.13 F6 (TWS restart) for Binance: WebSocket drop + reconnect during ope
    - Update local state on WebSocket events
 
 **Verification**:
-- Integration test: WebSocket connection to Binance testnet
-- Integration test: Message parsing and handling
-- Manual test: Connect to Binance testnet, verify updates
+- `cargo test -p nanobook-broker --test binance_websocket` passes
+- Assertion: `BinanceWebSocket::connect()` successfully subscribes to user data stream and receives at least one `AccountUpdate` message from `MockBinanceWs` — `broker/tests/binance_websocket.rs::test_user_data_stream_subscription`
+- Assertion: execution report messages are parsed into `OrderState` variants without panic — `broker/tests/binance_websocket.rs::test_execution_report_parsing`
 
-#### Phase 2: Disconnect Detection (2 days)
+#### Phase 2: Disconnect Detection
 
 **Objective**: Add disconnect detection to Binance WebSocket.
 
@@ -604,11 +441,11 @@ Mirror v0.13 F6 (TWS restart) for Binance: WebSocket drop + reconnect during ope
    - Re-subscribe to data streams on reconnect
 
 **Verification**:
-- Integration test: Simulate disconnect, verify detection
-- Integration test: Auto-reconnect logic
-- Manual test: Kill network connection, observe reconnect
+- `cargo test -p nanobook-broker --test binance_reconnect` passes
+- Assertion: `BinanceBroker::is_connected()` returns `false` within 10s of `MockBinanceWs::simulate_disconnect()` — `broker/tests/binance_reconnect.rs::test_ws_heartbeat_timeout`
+- Assertion: after auto-reconnect, `BinanceBroker::is_connected()` returns `true` and data stream resumes — `broker/tests/binance_reconnect.rs::test_auto_reconnect_restores_stream`
 
-#### Phase 3: Account Info Query (2-3 days)
+#### Phase 3: Account Info Query
 
 **Objective**: Implement Binance account-info endpoint query for reconciliation.
 
@@ -629,11 +466,11 @@ Mirror v0.13 F6 (TWS restart) for Binance: WebSocket drop + reconnect during ope
    - Log all reconciliation discrepancies
 
 **Verification**:
-- Integration test: Query account info, verify parsing
-- Integration test: Reconcile state after reconnect
-- Manual test: Disconnect/reconnect against testnet
+- `cargo test -p nanobook-broker --test binance_account_reconcile` passes
+- Assertion: `BinanceBroker::account_info()` returns balances matching `MockBinance` state — `broker/tests/binance_account_reconcile.rs::test_account_info_parsing`
+- Assertion: after simulated disconnect, `BinanceBroker::reconcile_state()` detects orphan orders from `MockBinance` — `broker/tests/binance_account_reconcile.rs::test_orphan_order_detected_on_reconcile`
 
-#### Phase 4: WebSocket + REST Fallback (2 days)
+#### Phase 4: WebSocket + REST Fallback
 
 **Objective**: Implement REST API fallback when WebSocket is unavailable.
 
@@ -654,11 +491,11 @@ Mirror v0.13 F6 (TWS restart) for Binance: WebSocket drop + reconnect during ope
    - Document tradeoffs of each mode
 
 **Verification**:
-- Integration test: REST polling mode
-- Integration test: Auto fallback logic
-- Manual test: Force WebSocket failure, verify REST fallback
+- `cargo test -p nanobook-broker --test binance_rest_fallback` passes
+- Assertion: after `MockBinanceWs::simulate_disconnect()`, `BinanceBroker` switches to REST polling mode and `is_using_rest_fallback()` returns `true` — `broker/tests/binance_rest_fallback.rs::test_auto_fallback_to_rest`
+- Assertion: when WebSocket recovers, broker switches back and `is_using_rest_fallback()` returns `false` — `broker/tests/binance_rest_fallback.rs::test_fallback_reverts_on_ws_recovery`
 
-#### Phase 5: F-bin2 Integration Test (2 days)
+#### Phase 5: F-bin2 Integration Test
 
 **Objective**: End-to-end test of Binance reconnect drill.
 
@@ -681,9 +518,9 @@ Mirror v0.13 F6 (TWS restart) for Binance: WebSocket drop + reconnect during ope
    - Log reconciliation timing metrics
 
 **Verification**:
-- Integration test passes consistently
-- Manual test against Binance testnet
-- Performance test: Reconciliation completes within 30s target
+- `cargo test -p nanobook-broker --test binance_f_bin2_reconnect_drill` passes
+- Assertion: after `MockBinanceWs::simulate_disconnect()` + reconnect, no duplicate orders in `MockBinance` — `broker/tests/binance_f_bin2_reconnect_drill.rs::test_no_double_submit_on_reconnect`
+- Assertion: `reconcile_duration_ms < 30_000` in test output — `broker/tests/binance_f_bin2_reconnect_drill.rs::test_reconnect_within_30s`
 
 ### Dependencies
 
@@ -778,30 +615,6 @@ Mirror v0.13 F6 (TWS restart) for Binance: WebSocket drop + reconnect during ope
 - Exponential backoff for transient failures
 - Max retry limits to prevent infinite loops
 - Clear error messages for operator action
-
----
-
-## Timeline Estimate
-
-**Total Effort**: ~40-50 days
-
-**Parallelization Opportunities**:
-- bd-w7x (F6) and bd-1t4 (F9) can proceed in parallel after audit log checkpoints
-- bd-2ln (F-bin1) and bd-1pd (F-bin2) can proceed in parallel after Binance broker basics
-- Testing phases can overlap with implementation
-
-**Critical Path**:
-1. Audit log checkpoints (bd-1t4 Phase 1) - 3 days
-2. State reconstruction (bd-1t4 Phase 2) - 4 days
-3. IBKR reconnect logic (bd-w7x) - 8 days
-4. Binance broker basics (bd-2ln Phases 1-2) - 4 days
-5. Binance WebSocket (bd-1pd Phase 1) - 4 days
-
-**Recommended Sequence**:
-1. Start with bd-1t4 (F9) - foundational audit log recovery
-2. Parallel: bd-w7x (F6) - IBKR reconnect logic
-3. Parallel: bd-2ln (F-bin1) - Binance idempotency
-4. After bd-2ln: bd-1pd (F-bin2) - Binance reconnect drill
 
 ---
 

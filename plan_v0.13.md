@@ -2,7 +2,6 @@
 
 **Status:** PREVIEW — concrete spec to be written when v0.12 ships
 **Target version:** v0.13.0
-**Timeline:** 2–3 weeks
 **Baseline:** v0.12.0 (backtest case study + positioning)
 
 **Theme:** Production-readiness for the broker + rebalancer path. Failure injection, reconnect, kill switch, idempotency, warm-restart. This release was originally bundled with the paper-live soak — split out so the soak (v0.14) runs against *already-hardened* plumbing, not as a discovery exercise.
@@ -48,11 +47,11 @@ Drawn from Codex's review + standard live-trading practice (Hummingbot, Nautilus
 
 ## Acceptance criteria
 
-- [ ] All nine failure modes covered by automated tests in CI.
-- [ ] `rebalancer --cron-mode` proven idempotent: 1000 back-to-back invocations produce exactly one set of orders.
-- [ ] Warm-restart drill: kill the runner mid-rebalance via SIGKILL, restart, audit log replay produces the correct final position state. Verified end-to-end in CI.
-- [ ] Kill switch test: `rebalancer --kill` halts the runner and leaves no working orders on the (mocked) exchange.
-- [ ] Reconnect drill scripted: TWS restart simulated mid-position, runner reconnects and reconciles within 30s.
+- [ ] `cargo test -p nanobook-broker --test failure_injection` passes for all 9 injected failure modes — see `broker/tests/failure_injection/`
+- [ ] `cargo test -p nanobook-rebalancer --test cron_idempotency` passes: running `rebalancer --cron-mode` 1000 times back-to-back with the same window sequence number produces exactly one `OrderSubmitted` entry in the audit log
+- [ ] `cargo test -p nanobook-rebalancer --test warm_restart` passes: `MockTws::simulate_crash()` + `rebalancer recover` produces correct final position state with no double-submitted orders — `rebalancer/tests/warm_restart.rs`
+- [ ] `cargo test -p nanobook-rebalancer --test kill_switch` passes: `rebalancer kill` halts the mock runner and `MockTws::open_orders()` returns empty — `rebalancer/tests/kill_switch.rs`
+- [ ] `cargo test -p nanobook-broker --test ibkr_f6_reconnect_drill -- test_reconnect_within_30s` passes with `reconcile_duration_ms < 30_000` in test output
 
 ## Risks
 
@@ -75,14 +74,6 @@ Drawn from Codex's review + standard live-trading practice (Hummingbot, Nautilus
 1. Failure-injection harness language: pure Rust integration test, or a Python-driven scenario runner that exercises the binary?
 2. Binance coverage: 2 modes (Codex suggested) or full parity with IBKR?
 3. Audit-log replay: pure-replay (read-only) or also write back a "recovery completed" marker?
-
-## Phasing (3 weeks)
-
-| Week | Phase |
-|---|---|
-| 1 | Failure-injection harness scaffold; failure modes 1–3 (callbacks, cancel reject, partial fill + disconnect) |
-| 2 | Failure modes 4–6 (stale data, clock skew, TWS restart); reconnect drill |
-| 3 | Idempotency + kill switch + warm restart; docs; release |
 
 ## Out of scope → v0.14
 
