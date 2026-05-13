@@ -1,0 +1,62 @@
+name: OCaml Oracle Differential Testing
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  oracle:
+    name: Test OCaml oracle against Rust implementation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install OCaml
+        uses: ocaml/setup-ocaml@v2
+        with:
+          ocaml-version: 5.1
+      
+      - name: Cache opam
+        uses: actions/cache@v3
+        with:
+          path: ~/.opam
+          key: ${{ runner.os }}-opam-${{ hashFiles('**/oracle-ocaml/dune-project') }}
+      
+      - name: Install OCaml dependencies
+        run: |
+          cd oracle-ocaml
+          opam install . --deps-only --with-test
+      
+      - name: Build OCaml oracle
+        run: |
+          cd oracle-ocaml
+          opam exec -- dune build
+      
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+      
+      - name: Cache Rust
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: Build Rust project
+        run: cargo build --release --features event-log
+      
+      - name: Run differential tests
+        run: |
+          # TODO: Create golden corpus and run differential tests
+          echo "Golden corpus testing to be implemented"
+      
+      - name: Test OCaml oracle library
+        run: |
+          cd oracle-ocaml
+          opam exec -- dune runtest
