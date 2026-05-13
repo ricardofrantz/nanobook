@@ -45,6 +45,17 @@ For versioning purposes, public API includes:
 - Documented behavior that users may reasonably build against, even when the
   behavior is not encoded as a type signature.
 
+## Minimum supported Rust version
+
+nanobook's minimum supported Rust version (MSRV) is the `rust-version` declared
+in [`Cargo.toml`](Cargo.toml). The MSRV is part of the public compatibility
+policy: patch releases should not raise it unless a security or serious
+correctness fix makes the bump unavoidable.
+
+During `0.x`, MSRV increases may happen in minor releases. They should be
+called out in `CHANGELOG.md`, and CI should keep an explicit build check for
+the declared MSRV so accidental increases are caught before release.
+
 ## Breaking changes during 0.x
 
 In `0.x`, these changes may appear in minor releases and should be called out
