@@ -1,0 +1,14 @@
+# OCaml build artifacts
+_build/
+*.install
+*.om
+*.o
+*.a
+*.cmi
+*.cmo
+*.cmx
+*.cmt
+*.cmti
+*.cmxs
+*.exe
+*.run

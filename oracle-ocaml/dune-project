@@ -1,0 +1,10 @@
+(lang dune 3.16)
+(name oracle_ocaml)
+
+(generate_opam_files true)
+
+(package
+ (name oracle_ocaml)
+ (allow_empty)
+ (synopsis "OCaml limit-order-book reference oracle for nanobook")
+ (description "Reference LOB implementation for differential testing against the Rust nanobook engine"))

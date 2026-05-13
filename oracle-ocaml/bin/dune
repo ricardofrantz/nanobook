@@ -1,0 +1,3 @@
+(executable
+ (name replay)
+ (libraries oracle_ocaml_lib))
