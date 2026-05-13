@@ -1,0 +1,16 @@
+# Audit logs (contain sensitive information)
+audit/
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# IBKR credentials (if stored locally)
+.credentials
+.env

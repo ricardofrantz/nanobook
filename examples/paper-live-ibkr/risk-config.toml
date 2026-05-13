@@ -1,0 +1,90 @@
+# Risk configuration for paper trading IBKR dry-run
+#
+# This is a sample configuration with risk limits suitable for paper trading.
+# Adjust values based on your paper account size and risk tolerance.
+
+[general]
+# Universe of symbols to trade
+# Example: symbols = ["SPY", "QQQ", "IWM"]
+symbols = []
+
+# Risk limits
+[limits]
+# Maximum position size per symbol (in shares or USD, depending on your strategy)
+# Example: max_position_size = 1000
+max_position_size = 0
+
+# Maximum total portfolio value (USD)
+# Example: max_portfolio_value = 100000
+max_portfolio_value = 0
+
+# Maximum leverage (portfolio value / account equity)
+# Example: max_leverage = 1.0  # No leverage for conservative paper trading
+max_leverage = 1.0
+
+# Maximum number of open positions
+# Example: max_open_positions = 10
+max_open_positions = 0
+
+# Maximum daily loss (USD) - stop trading if exceeded
+# Example: max_daily_loss = 1000
+max_daily_loss = 0
+
+# Maximum order size (shares or USD)
+# Example: max_order_size = 500
+max_order_size = 0
+
+# IBKR-specific settings
+[ibkr]
+# IBKR paper trading account (NOT real money)
+# Set to true to enforce paper trading mode
+paper_trading = true
+
+# IBKR client ID (for API connection)
+# Obtain from IBKR account management
+# client_id = 0
+
+# IBKR connection settings
+host = "127.0.0.1"
+port = 7497  # Paper trading port (7497 for paper, 7496 for production)
+
+# Order settings
+[orders]
+# Order type: "market", "limit", "ioc"
+order_type = "market"
+
+# Time-in-force: "DAY", "GTC", "IOC", "FOK"
+time_in_force = "DAY"
+
+# Minimum order size (shares)
+min_order_size = 1
+
+# Audit logging
+[audit]
+# Path to audit log directory
+audit_log_path = "audit"
+
+# Enable detailed audit logging
+detailed_logging = true
+
+# Include order book snapshots in audit log (can be large)
+include_order_book = false
+
+# Failure injection (for testing hardened plumbing)
+[failure_injection]
+# Enable failure injection for testing
+enabled = false
+
+# Failure injection modes:
+# - "network_latency": Inject random network delays
+# - "order_rejection": Simulate order rejections
+# - "partial_fill": Simulate partial fills
+# - "disconnect": Simulate IBKR connection drops
+mode = "network_latency"
+
+# Failure probability (0.0 to 1.0)
+probability = 0.01
+
+# Failure injection schedule (cron-like syntax)
+# Example: "09:30-16:00" = during market hours
+schedule = "09:30-16:00"
