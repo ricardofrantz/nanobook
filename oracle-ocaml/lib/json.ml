@@ -39,9 +39,22 @@ let json_to_tif = function
   | `String "FOK" -> Order.FOK
   | _ -> invalid_arg "invalid time_in_force"
 
+let stp_to_json = function
+  | Matching.Off -> `String "Off"
+  | Matching.CancelNewest -> `String "CancelNewest"
+  | Matching.CancelOldest -> `String "CancelOldest"
+  | Matching.DecrementAndCancel -> `String "DecrementAndCancel"
+
+let json_to_stp = function
+  | `String "Off" -> Matching.Off
+  | `String "CancelNewest" -> Matching.CancelNewest
+  | `String "CancelOldest" -> Matching.CancelOldest
+  | `String "DecrementAndCancel" -> Matching.DecrementAndCancel
+  | _ -> invalid_arg "invalid stp_policy"
+
 (* Event serialization *)
 let event_to_json = function
-  | Replay.SubmitLimit { side; price; quantity; time_in_force; owner } ->
+  | Replay.SubmitLimit { side; price; quantity; time_in_force; owner; stp_policy } ->
       `Assoc [
         ("type", `String "SubmitLimit");
         ("side", side_to_json side);
@@ -49,13 +62,15 @@ let event_to_json = function
         ("quantity", int64_to_json quantity);
         ("time_in_force", tif_to_json time_in_force);
         ("owner", int_option_to_json owner);
+        ("stp_policy", stp_to_json stp_policy);
       ]
-  | Replay.SubmitMarket { side; quantity; owner } ->
+  | Replay.SubmitMarket { side; quantity; owner; stp_policy } ->
       `Assoc [
         ("type", `String "SubmitMarket");
         ("side", side_to_json side);
         ("quantity", int64_to_json quantity);
         ("owner", int_option_to_json owner);
+        ("stp_policy", stp_to_json stp_policy);
       ]
   | Replay.Cancel { order_id } ->
       `Assoc [
@@ -78,7 +93,11 @@ let json_to_event json =
              try json_to_int_option (List.assoc "owner" fields)
              with Not_found -> None
            in
-           Replay.SubmitLimit { side; price; quantity; time_in_force; owner }
+           let stp_policy = 
+             try json_to_stp (List.assoc "stp_policy" fields)
+             with Not_found -> Matching.Off
+           in
+           Replay.SubmitLimit { side; price; quantity; time_in_force; owner; stp_policy }
        | `String "SubmitMarket" ->
            let side = json_to_side (List.assoc "side" fields) in
            let quantity = json_to_int64 (List.assoc "quantity" fields) in
@@ -86,7 +105,11 @@ let json_to_event json =
              try json_to_int_option (List.assoc "owner" fields)
              with Not_found -> None
            in
-           Replay.SubmitMarket { side; quantity; owner }
+           let stp_policy = 
+             try json_to_stp (List.assoc "stp_policy" fields)
+             with Not_found -> Matching.Off
+           in
+           Replay.SubmitMarket { side; quantity; owner; stp_policy }
        | `String "Cancel" ->
            let order_id = json_to_int64 (List.assoc "order_id" fields) in
            Replay.Cancel { order_id }

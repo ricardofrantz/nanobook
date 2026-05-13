@@ -1,0 +1,2 @@
+{"type":"SubmitLimit","side":"SELL","price":10000,"quantity":50,"time_in_force":"GTC","owner":1,"stp_policy":"Off"}
+{"type":"SubmitLimit","side":"BUY","price":10000,"quantity":50,"time_in_force":"GTC","owner":1,"stp_policy":"DecrementAndCancel"}

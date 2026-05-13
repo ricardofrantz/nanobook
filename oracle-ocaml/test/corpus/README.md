@@ -43,21 +43,20 @@ FOK order that can fully fill - should execute normally.
 ### 11-owner-basic
 Orders with owner IDs (STP disabled) - should trade normally.
 
-### 12-self-trade-prevention-off
-Self-trade prevention disabled - orders from same owner can trade.
-**TODO**: Not yet implemented - requires STP policy parameter in events.
+### 12-stp-off
+STP disabled - orders from same owner can trade freely.
 
-### 13-self-trade-prevention-cancel-newest
-Self-trade prevention cancels newest order.
-**TODO**: Not yet implemented - requires STP policy parameter in events.
+### 13-stp-cancel-newest
+STP CancelNewest - incoming order cancelled when self-trade detected.
 
-### 14-self-trade-prevention-cancel-oldest
-Self-trade prevention cancels oldest resting order.
-**TODO**: Not yet implemented - requires STP policy parameter in events.
+### 14-stp-cancel-oldest
+STP CancelOldest - resting order cancelled when self-trade detected.
 
-### 15-self-trade-prevention-decrement
-Self-trade prevention decrements and cancels smaller order.
-**TODO**: Not yet implemented - requires STP policy parameter in events.
+### 15-stp-decrement
+STP DecrementAndCancel - smaller (incoming) order cancelled.
+
+### 16-stp-decrement-equal
+STP DecrementAndCancel - equal quantities, resting order cancelled.
 
 ## Running Tests
 
