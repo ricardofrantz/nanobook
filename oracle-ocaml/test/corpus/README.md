@@ -24,7 +24,6 @@ FOK order that cannot match - should be cancelled immediately.
 
 ### 05-fok-partial-cross
 FOK order that partially crosses - should be cancelled if not fully filled.
-**TODO**: Not yet implemented - tif_allows_partial function exists but is not used in matching logic.
 
 ### 06-ioc-partial-fill
 IOC order that partially fills - remainder cancelled.
@@ -38,21 +37,27 @@ Cancel a resting order on the book.
 ### 09-cancel-partially-filled
 Cancel a partially filled order.
 
-### 10-self-trade-prevention-off
+### 10-fok-full-fill
+FOK order that can fully fill - should execute normally.
+
+### 11-owner-basic
+Orders with owner IDs (STP disabled) - should trade normally.
+
+### 12-self-trade-prevention-off
 Self-trade prevention disabled - orders from same owner can trade.
-**TODO**: Not yet implemented - requires order owner support and STP policy integration.
+**TODO**: Not yet implemented - requires STP policy parameter in events.
 
-### 11-self-trade-prevention-cancel-newest
+### 13-self-trade-prevention-cancel-newest
 Self-trade prevention cancels newest order.
-**TODO**: Not yet implemented - requires order owner support and STP policy integration.
+**TODO**: Not yet implemented - requires STP policy parameter in events.
 
-### 12-self-trade-prevention-cancel-oldest
+### 14-self-trade-prevention-cancel-oldest
 Self-trade prevention cancels oldest resting order.
-**TODO**: Not yet implemented - requires order owner support and STP policy integration.
+**TODO**: Not yet implemented - requires STP policy parameter in events.
 
-### 13-self-trade-prevention-decrement
+### 15-self-trade-prevention-decrement
 Self-trade prevention decrements and cancels smaller order.
-**TODO**: Not yet implemented - requires order owner support and STP policy integration.
+**TODO**: Not yet implemented - requires STP policy parameter in events.
 
 ## Running Tests
 

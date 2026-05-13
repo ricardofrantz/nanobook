@@ -9,6 +9,16 @@ let json_to_int64 = function
   | `Float f -> Int64.of_int (int_of_float f)
   | _ -> invalid_arg "invalid int64"
 
+let int_option_to_json = function
+  | None -> `Null
+  | Some i -> `Int i
+
+let json_to_int_option = function
+  | `Null -> None
+  | `Int i -> Some i
+  | `String s -> Some (int_of_string s)
+  | _ -> invalid_arg "invalid int option"
+
 let side_to_json = function
   | Side.Buy -> `String "BUY"
   | Side.Sell -> `String "SELL"
@@ -31,19 +41,21 @@ let json_to_tif = function
 
 (* Event serialization *)
 let event_to_json = function
-  | Replay.SubmitLimit { side; price; quantity; time_in_force } ->
+  | Replay.SubmitLimit { side; price; quantity; time_in_force; owner } ->
       `Assoc [
         ("type", `String "SubmitLimit");
         ("side", side_to_json side);
         ("price", int64_to_json price);
         ("quantity", int64_to_json quantity);
         ("time_in_force", tif_to_json time_in_force);
+        ("owner", int_option_to_json owner);
       ]
-  | Replay.SubmitMarket { side; quantity } ->
+  | Replay.SubmitMarket { side; quantity; owner } ->
       `Assoc [
         ("type", `String "SubmitMarket");
         ("side", side_to_json side);
         ("quantity", int64_to_json quantity);
+        ("owner", int_option_to_json owner);
       ]
   | Replay.Cancel { order_id } ->
       `Assoc [
@@ -62,11 +74,19 @@ let json_to_event json =
            let price = json_to_int64 (List.assoc "price" fields) in
            let quantity = json_to_int64 (List.assoc "quantity" fields) in
            let time_in_force = json_to_tif (List.assoc "time_in_force" fields) in
-           Replay.SubmitLimit { side; price; quantity; time_in_force }
+           let owner = 
+             try json_to_int_option (List.assoc "owner" fields)
+             with Not_found -> None
+           in
+           Replay.SubmitLimit { side; price; quantity; time_in_force; owner }
        | `String "SubmitMarket" ->
            let side = json_to_side (List.assoc "side" fields) in
            let quantity = json_to_int64 (List.assoc "quantity" fields) in
-           Replay.SubmitMarket { side; quantity }
+           let owner = 
+             try json_to_int_option (List.assoc "owner" fields)
+             with Not_found -> None
+           in
+           Replay.SubmitMarket { side; quantity; owner }
        | `String "Cancel" ->
            let order_id = json_to_int64 (List.assoc "order_id" fields) in
            Replay.Cancel { order_id }

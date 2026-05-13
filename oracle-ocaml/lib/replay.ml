@@ -5,10 +5,12 @@ type event =
       price: Price.price;
       quantity: Order.quantity;
       time_in_force: Order.time_in_force;
+      owner: Order.order_owner option;
     }
   | SubmitMarket of {
       side: Side.side;
       quantity: Order.quantity;
+      owner: Order.order_owner option;
     }
   | Cancel of {
       order_id: Order.order_id;
@@ -38,10 +40,14 @@ let replay_events events =
   
   List.iter (fun event ->
     match event with
-    | SubmitLimit { side; price; quantity; time_in_force } ->
+    | SubmitLimit { side; price; quantity; time_in_force; owner } ->
         let order_id = Book.next_order_id book in
         let timestamp = Book.next_timestamp book in
         let order = Order.create ~id:order_id ~side ~price ~quantity ~timestamp ~time_in_force in
+        let order = match owner with
+        | Some owner_id -> Order.with_owner order owner_id
+        | None -> order
+        in
         
         (* Match the order against the book *)
         let match_result = Matching.match_order book order Matching.Off in
@@ -60,7 +66,7 @@ let replay_events events =
           let cancelled_order = fst (Order.cancel order) in
           Book.store_order book cancelled_order
           
-    | SubmitMarket { side; quantity } ->
+    | SubmitMarket { side; quantity; owner } ->
         (* Market order - match immediately at best prices *)
         let order_id = Book.next_order_id book in
         let timestamp = Book.next_timestamp book in
@@ -71,6 +77,10 @@ let replay_events events =
           | Side.Sell -> Price.min  (* Will match any bid *)
         in
         let order = Order.create ~id:order_id ~side ~price ~quantity ~timestamp ~time_in_force:Order.IOC in
+        let order = match owner with
+        | Some owner_id -> Order.with_owner order owner_id
+        | None -> order
+        in
         
         (* Match the market order *)
         let match_result = Matching.match_order book order Matching.Off in
