@@ -30,7 +30,8 @@ Submit a limit order to the book.
   "side": "BUY|SELL",
   "price": 10000,
   "quantity": 100,
-  "time_in_force": "GTC|IOC|FOK"
+  "time_in_force": "GTC|IOC|FOK",
+  "owner": null or 1
 }
 ```
 
@@ -40,6 +41,7 @@ Submit a limit order to the book.
 - `price`: Integer in smallest units (e.g., cents for USD)
 - `quantity`: Positive integer
 - `time_in_force`: "GTC" (Good-til-cancelled), "IOC" (Immediate-or-cancel), or "FOK" (Fill-or-kill)
+- `owner`: Optional integer owner ID for self-trade prevention (null if no owner)
 
 ### SubmitMarket
 
@@ -49,7 +51,8 @@ Submit a market order for immediate execution.
 {
   "type": "SubmitMarket",
   "side": "BUY|SELL",
-  "quantity": 100
+  "quantity": 100,
+  "owner": null or 1
 }
 ```
 
@@ -57,6 +60,7 @@ Submit a market order for immediate execution.
 - `type`: Event type, always "SubmitMarket"
 - `side`: "BUY" or "SELL"
 - `quantity`: Positive integer
+- `owner`: Optional integer owner ID for self-trade prevention (null if no owner)
 
 ### Cancel
 

@@ -52,11 +52,42 @@ let stp_conflict incoming_owner resting_owner policy =
   | (Some incoming, Some resting, _) when incoming = resting && policy <> Off -> true
   | _ -> false
 
+(* Calculate total available quantity at crossing prices *)
+let calculate_available_liquidity book incoming_side incoming_price =
+  (* For a BUY order, check ASK side (sells). For a SELL order, check BID side (buys). *)
+  let levels = 
+    match incoming_side with
+    | Side.Buy -> book.Book.asks
+    | Side.Sell -> book.Book.bids
+  in
+  let rec sum_liquidity acc = function
+    | [] -> acc
+    | level :: rest ->
+        if prices_cross incoming_side incoming_price level.Book.price then
+          sum_liquidity (Int64.add acc level.Book.quantity) rest
+        else
+          acc  (* Price doesn't cross, stop here *)
+  in
+  sum_liquidity 0L levels
+
 (* Match an incoming order against the book *)
 let rec match_order book incoming policy =
   let result = ref { trades = []; remaining_quantity = incoming.Order.remaining_quantity; stp_cancelled = false } in
   let incoming_ref = ref incoming in
   let continue_matching = ref true in
+  
+  (* Check FOK: if order cannot be fully filled, cancel without trades *)
+  if incoming.Order.time_in_force = Order.FOK then
+    begin
+      let available = calculate_available_liquidity book incoming.Order.side incoming.Order.price in
+      if available < incoming.Order.remaining_quantity then
+        begin
+          (* Cannot fill fully - cancel without trades *)
+          incoming_ref := fst (Order.cancel incoming);
+          result := { !result with remaining_quantity = 0L; stp_cancelled = true };
+          continue_matching := false
+        end
+    end;
   
   (* Match until no more crosses or order is filled *)
   while !incoming_ref.Order.remaining_quantity > 0L && !continue_matching do
