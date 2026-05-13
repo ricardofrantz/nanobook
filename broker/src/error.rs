@@ -56,6 +56,13 @@ pub enum BrokerError {
     #[error("connection lost during order execution (order_id={order_id}, filled_quantity={filled_quantity})")]
     ConnectionLost { order_id: i32, filled_quantity: i64 },
 
+    /// Reconnect attempt failed after multiple backoff attempts.
+    ///
+    /// This error is raised when automatic reconnection with exponential backoff
+    /// fails after the maximum number of attempts.
+    #[error("reconnect failed after {attempts} attempts: {reason}")]
+    ReconnectFailed { attempts: u32, reason: String },
+
     #[error("{0}")]
     Other(String),
 }
