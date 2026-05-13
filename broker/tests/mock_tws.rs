@@ -231,6 +231,48 @@ impl MockTws {
         self.disconnect_injected.load(Ordering::Relaxed)
     }
 
+    /// Simulate disconnect for reconnect drill testing (works regardless of connection state).
+    pub fn simulate_disconnect(&self) {
+        self.connected.store(false, Ordering::Relaxed);
+        self.record_callback("SimulatedDisconnect");
+    }
+
+    /// Simulate reconnect for reconnect drill testing (works regardless of connection state).
+    pub fn simulate_reconnect(&self) {
+        self.connected.store(true, Ordering::Relaxed);
+        self.record_callback("SimulatedReconnect");
+    }
+
+    /// Simulate partial fill for reconnect drill testing (works regardless of connection state).
+    pub fn simulate_partial_fill(&self, order_id: u64, fill_quantity: u64) -> Result<(), String> {
+        let mut orders = self.orders.lock().unwrap();
+        if let Some(order) = orders.iter_mut().find(|o| o.id == order_id) {
+            order.filled_quantity = fill_quantity;
+            order.status = if fill_quantity >= order.quantity {
+                "Filled".to_string()
+            } else {
+                "PartiallyFilled".to_string()
+            };
+            self.record_callback(&format!("SimulatedPartialFill: id={}, filled={}/{}",
+                order_id, fill_quantity, order.quantity));
+            Ok(())
+        } else {
+            Err(format!("Order {order_id} not found"))
+        }
+    }
+
+    /// Get order state by ID for inspection.
+    pub fn get_order(&self, order_id: u64) -> Option<OrderState> {
+        let orders = self.orders.lock().unwrap();
+        orders.iter().find(|o| o.id == order_id).cloned()
+    }
+
+    /// Get all orders for inspection.
+    pub fn all_orders(&self) -> Vec<OrderState> {
+        let orders = self.orders.lock().unwrap();
+        orders.clone()
+    }
+
     /// Record a callback for test verification.
     fn record_callback(&self, callback: &str) {
         self.callbacks.lock().unwrap().push(callback.to_string());
@@ -280,10 +322,11 @@ impl MockTws {
             FailureMode::F6ReconnectDrill => {
                 if timing == FailureTiming::PreSubmit {
                     self.disconnect_injected.store(true, Ordering::Relaxed);
-                    self.connected.store(false, Ordering::Relaxed);
-                    self.record_callback("InjectedDisconnect");
+                    drop(failure);
+                    self.simulate_disconnect();
+                } else {
+                    drop(failure);
                 }
-                drop(failure);
                 Ok(())
             }
             FailureMode::F7CronDoubleFire => {
