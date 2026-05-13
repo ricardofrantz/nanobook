@@ -1,11 +1,12 @@
 //! Binance spot broker implementation.
 
+pub mod audit;
 pub mod auth;
 pub mod cache;
 pub mod client;
 pub mod types;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
@@ -16,6 +17,7 @@ use crate::Broker;
 use crate::error::BrokerError;
 use crate::parse::parse_f64_or_warn;
 use crate::types::*;
+pub use audit::{check_audit_log_for_sequence, log_idempotency_rejection, log_order_submitted};
 pub use cache::BinanceOrderCache;
 use client::BinanceClient;
 
@@ -64,6 +66,12 @@ pub struct BinanceBroker {
     quote_asset: String,
     #[zeroize(skip)]
     order_cache: Mutex<BinanceOrderCache>,
+    /// Optional path to audit log file for idempotency tracking.
+    #[zeroize(skip)]
+    audit_log_path: Option<PathBuf>,
+    /// Optional sequence number for client order ID generation and audit logging.
+    #[zeroize(skip)]
+    sequence_number: Option<u64>,
 }
 
 impl BinanceBroker {
@@ -79,12 +87,26 @@ impl BinanceBroker {
             client: None,
             quote_asset: "USDT".to_string(),
             order_cache: Mutex::new(BinanceOrderCache::new()),
+            audit_log_path: None,
+            sequence_number: None,
         }
     }
 
     /// Set the quote asset (default "USDT").
     pub fn with_quote_asset(mut self, quote: &str) -> Self {
         self.quote_asset = quote.to_string();
+        self
+    }
+
+    /// Set the audit log path for idempotency tracking.
+    pub fn with_audit_log_path(mut self, path: PathBuf) -> Self {
+        self.audit_log_path = Some(path);
+        self
+    }
+
+    /// Set the sequence number for client order ID generation and audit logging.
+    pub fn with_sequence_number(mut self, seq: u64) -> Self {
+        self.sequence_number = Some(seq);
         self
     }
 
@@ -254,9 +276,38 @@ impl BinanceBroker {
             None
         };
 
+        // Check for duplicate in audit log if enabled
+        if let (Some(audit_path), Some(seq)) = (&self.audit_log_path, sequence_number) {
+            if check_audit_log_for_sequence(audit_path, seq).unwrap_or(false) {
+                let cid_str = client_order_id.as_ref().map(|c| c.as_str()).unwrap_or("");
+                log_idempotency_rejection(
+                    audit_path,
+                    order.symbol,
+                    seq,
+                    cid_str,
+                    "duplicate sequence number in audit log",
+                );
+                return Err(BrokerError::DuplicateOrder {
+                    client_order_id: cid_str.to_string(),
+                });
+            }
+        }
+
         // Check for duplicate if we have a client order ID
         if let Some(ref cid) = client_order_id {
             if self.check_duplicate_client_order_id(cid.as_str()) {
+                // Log idempotency rejection if audit log is enabled
+                if let Some(ref audit_path) = self.audit_log_path {
+                    if let Some(seq) = sequence_number {
+                        log_idempotency_rejection(
+                            audit_path,
+                            order.symbol,
+                            seq,
+                            cid.as_str(),
+                            "duplicate client order ID in cache",
+                        );
+                    }
+                }
                 return Err(BrokerError::DuplicateOrder {
                     client_order_id: cid.as_str().to_string(),
                 });
@@ -270,7 +321,16 @@ impl BinanceBroker {
         };
 
         // Call the trait implementation
-        self.submit_order(&order_with_cid)
+        let order_id = self.submit_order(&order_with_cid)?;
+
+        // Log order submission to audit log if enabled
+        if let (Some(audit_path), Some(seq), Some(cid)) =
+            (&self.audit_log_path, sequence_number, &order_with_cid.client_order_id)
+        {
+            log_order_submitted(audit_path, order_id, order.symbol, seq, cid.as_str());
+        }
+
+        Ok(order_id)
     }
 }
 
