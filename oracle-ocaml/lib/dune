@@ -1,5 +1,5 @@
 (library
- (name oracle)
- (modules price side order book matching replay json oracle)
+ (name oracle_lib)
+ (modules price side order book matching replay json)
  (libraries yojson)
  (wrapped false))
