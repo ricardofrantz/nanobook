@@ -54,6 +54,7 @@ pub struct IbkrBroker {
     client_id: i32,
     client: Option<IbkrClient>,
     connection_state: ConnectionState,
+    reconciliation_blocked: bool,
 }
 
 impl IbkrBroker {
@@ -65,6 +66,7 @@ impl IbkrBroker {
             client_id,
             client: None,
             connection_state: ConnectionState::Disconnected,
+            reconciliation_blocked: false,
         }
     }
 
@@ -99,6 +101,21 @@ impl IbkrBroker {
     /// Get the current connection state.
     pub fn connection_state(&self) -> ConnectionState {
         self.connection_state
+    }
+
+    /// Check if reconciliation is currently blocked.
+    pub fn is_reconciliation_blocked(&self) -> bool {
+        self.reconciliation_blocked
+    }
+
+    /// Block reconciliation (e.g., after detecting critical discrepancies).
+    pub fn block_reconciliation(&mut self) {
+        self.reconciliation_blocked = true;
+    }
+
+    /// Unblock reconciliation (after manual review and resolution).
+    pub fn unblock_reconciliation(&mut self) {
+        self.reconciliation_blocked = false;
     }
 
     /// Reconnect with exponential backoff.
@@ -149,7 +166,7 @@ impl IbkrBroker {
         })
     }
 
-    pub fn reconcile_state(&self) -> Result<DiscrepancyReport, BrokerError> {
+    pub fn reconcile_state(&mut self) -> Result<DiscrepancyReport, BrokerError> {
         let client = self.require_client()?;
         let open_orders = self.open_orders()?;
         let _positions = self.positions()?;
@@ -185,8 +202,15 @@ impl IbkrBroker {
             }
         }
 
+        let has_critical_issues = !discrepancies.is_empty();
+
+        // Block reconciliation if critical issues found
+        if has_critical_issues {
+            self.reconciliation_blocked = true;
+        }
+
         Ok(DiscrepancyReport {
-            has_critical_issues: !discrepancies.is_empty(),
+            has_critical_issues,
             discrepancies,
         })
     }
@@ -215,6 +239,11 @@ impl Broker for IbkrBroker {
     }
 
     fn submit_order(&self, order: &BrokerOrder) -> Result<OrderId, BrokerError> {
+        if self.reconciliation_blocked {
+            return Err(BrokerError::Order(
+                "Reconciliation blocked - manual review required".to_string(),
+            ));
+        }
         let client = self.require_client()?;
         client.submit_order(order)
     }
