@@ -1,3 +1,4 @@
 (library
  (name oracle_ocaml_lib)
- (modules price side order book matching replay))
+ (modules price side order book matching replay json)
+ (libraries yojson))

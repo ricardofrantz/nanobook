@@ -1,0 +1,3 @@
+{"schema_version":"1.0","type":"SubmitLimit","side":"SELL","price":10100,"quantity":100,"time_in_force":"GTC"}
+{"schema_version":"1.0","type":"SubmitLimit","side":"SELL","price":10200,"quantity":200,"time_in_force":"GTC"}
+{"schema_version":"1.0","type":"SubmitLimit","side":"BUY","price":10100,"quantity":50,"time_in_force":"GTC"}

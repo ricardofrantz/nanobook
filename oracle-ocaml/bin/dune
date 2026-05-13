@@ -1,3 +1,7 @@
 (executable
  (name replay)
  (libraries oracle_ocaml_lib))
+
+(executable
+ (name triage)
+ (libraries oracle_ocaml_lib))
