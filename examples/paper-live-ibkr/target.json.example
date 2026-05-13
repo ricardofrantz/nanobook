@@ -1,0 +1,18 @@
+{
+  "timestamp": "2026-05-13T15:30:00Z",
+  "metadata": {
+    "id": "paper-soak-rehearsal-2026-05-13"
+  },
+  "targets": [
+    { "symbol": "AAPL", "weight": 0.20 },
+    { "symbol": "MSFT", "weight": 0.20 },
+    { "symbol": "GOOGL", "weight": 0.20 },
+    { "symbol": "AMZN", "weight": 0.20 },
+    { "symbol": "TSLA", "weight": 0.20 }
+  ],
+  "constraints": {
+    "max_position_pct": 0.25,
+    "max_leverage": 1.0,
+    "min_trade_usd": 100.0
+  }
+}
