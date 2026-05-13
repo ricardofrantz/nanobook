@@ -5,11 +5,21 @@ pub mod market_data;
 pub mod orders;
 
 use nanobook::Symbol;
+use std::thread;
+use std::time::Duration;
 
 use crate::Broker;
 use crate::error::BrokerError;
 use crate::types::*;
 use client::IbkrClient;
+
+/// Connection state tracking for IBKR broker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionState {
+    Connected,
+    Disconnected,
+    Reconnecting,
+}
 
 /// Interactive Brokers broker, wrapping the TWS/Gateway blocking API.
 pub struct IbkrBroker {
@@ -17,6 +27,7 @@ pub struct IbkrBroker {
     port: u16,
     client_id: i32,
     client: Option<IbkrClient>,
+    connection_state: ConnectionState,
 }
 
 impl IbkrBroker {
@@ -27,6 +38,7 @@ impl IbkrBroker {
             port,
             client_id,
             client: None,
+            connection_state: ConnectionState::Disconnected,
         }
     }
 
@@ -54,17 +66,77 @@ impl IbkrBroker {
             .ok_or(BrokerError::NotConnected)?;
         client.reconnect(&self.host, self.port, self.client_id)
     }
+
+    /// Check if the broker is currently connected.
+    pub fn is_connected(&self) -> bool {
+        self.connection_state == ConnectionState::Connected
+    }
+
+    /// Get the current connection state.
+    pub fn connection_state(&self) -> ConnectionState {
+        self.connection_state
+    }
+
+    /// Reconnect with exponential backoff.
+    ///
+    /// This method attempts to reconnect with exponential backoff:
+    /// 1s, 2s, 4s, 8s, 16s (max delay). Maximum 5 attempts.
+    ///
+    /// # Returns
+    /// * `Ok(())` - Successfully reconnected
+    /// * `Err(BrokerError::ReconnectFailed)` - All attempts failed
+    pub fn reconnect_with_backoff(&mut self) -> Result<(), BrokerError> {
+        const MAX_ATTEMPTS: u32 = 5;
+        const INITIAL_DELAY_MS: u64 = 1000;
+        const MAX_DELAY_MS: u64 = 16000;
+
+        let mut last_error = String::from("unknown error");
+
+        for attempt in 1..=MAX_ATTEMPTS {
+            self.connection_state = ConnectionState::Reconnecting;
+
+            // Calculate backoff delay (exponential, capped at MAX_DELAY_MS)
+            let delay_ms = (INITIAL_DELAY_MS * 2_u64.pow(attempt - 1)).min(MAX_DELAY_MS);
+            let delay = Duration::from_millis(delay_ms);
+
+            // Sleep before attempting reconnect (except for first attempt)
+            if attempt > 1 {
+                thread::sleep(delay);
+            }
+
+            // Attempt reconnect
+            match self.reconnect() {
+                Ok(_) => {
+                    self.connection_state = ConnectionState::Connected;
+                    return Ok(());
+                }
+                Err(e) => {
+                    last_error = e.to_string();
+                    // Continue to next attempt
+                }
+            }
+        }
+
+        // All attempts failed
+        self.connection_state = ConnectionState::Disconnected;
+        Err(BrokerError::ReconnectFailed {
+            attempts: MAX_ATTEMPTS,
+            reason: last_error,
+        })
+    }
 }
 
 impl Broker for IbkrBroker {
     fn connect(&mut self) -> Result<(), BrokerError> {
         let client = IbkrClient::connect(&self.host, self.port, self.client_id)?;
         self.client = Some(client);
+        self.connection_state = ConnectionState::Connected;
         Ok(())
     }
 
     fn disconnect(&mut self) -> Result<(), BrokerError> {
         self.client = None;
+        self.connection_state = ConnectionState::Disconnected;
         Ok(())
     }
 
