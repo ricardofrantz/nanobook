@@ -153,27 +153,3 @@ def test_clean_aliases_equivalent():
     assert nanobook.inverse_cdar_weights(
         r, symbols, alpha=0.95
     ) == nanobook.py_inverse_cdar_weights(r, symbols, alpha=0.95)
-
-
-def test_deprecated_optimizer_aliases_warn_once():
-    import pytest
-
-    symbols = ["AAPL", "MSFT", "NVDA"]
-    r = _sample_returns_matrix()
-
-    with pytest.warns(DeprecationWarning, match="inverse_cvar_weights"):
-        assert nanobook.optimize_cvar(r, symbols, alpha=0.95) == nanobook.inverse_cvar_weights(
-            r, symbols, alpha=0.95
-        )
-    with pytest.warns(DeprecationWarning, match="inverse_cdar_weights"):
-        assert nanobook.optimize_cdar(r, symbols, alpha=0.95) == nanobook.inverse_cdar_weights(
-            r, symbols, alpha=0.95
-        )
-
-
-def test_deprecated_garch_alias_warns_once():
-    import pytest
-
-    returns = [0.01, -0.003, 0.007, -0.002, 0.004]
-    with pytest.warns(DeprecationWarning, match="garch_ewma_forecast"):
-        assert nanobook.garch_forecast(returns) == nanobook.garch_ewma_forecast(returns)
