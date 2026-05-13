@@ -156,6 +156,16 @@ pub struct LoggingConfig {
     pub dir: String,
     #[serde(default = "default_audit_file")]
     pub audit_file: String,
+    /// Maximum allowed backward jump in seconds before clock skew is detected.
+    /// Default: 30 seconds. Clock jumps backward beyond this threshold trigger
+    /// a warning in the audit log.
+    #[serde(default = "default_clock_skew_threshold")]
+    pub clock_skew_threshold_sec: i64,
+    /// Maximum allowed forward jump rate in seconds per second.
+    /// Default: 2.0 (2x real time). Forward jumps exceeding this rate trigger
+    /// a warning in the audit log.
+    #[serde(default = "default_max_jump_rate")]
+    pub max_jump_rate_sec_per_sec: f64,
 }
 
 fn default_log_dir() -> String {
@@ -163,6 +173,14 @@ fn default_log_dir() -> String {
 }
 fn default_audit_file() -> String {
     "audit.jsonl".into()
+}
+
+fn default_clock_skew_threshold() -> i64 {
+    30
+}
+
+fn default_max_jump_rate() -> f64 {
+    2.0
 }
 
 impl Config {
@@ -207,6 +225,12 @@ impl Config {
         }
         if self.execution.quote_staleness_threshold_sec == 0 {
             return Err(Error::Config("quote_staleness_threshold_sec must be > 0".into()));
+        }
+        if self.logging.clock_skew_threshold_sec <= 0 {
+            return Err(Error::Config("clock_skew_threshold_sec must be > 0".into()));
+        }
+        if self.logging.max_jump_rate_sec_per_sec <= 0.0 {
+            return Err(Error::Config("max_jump_rate_sec_per_sec must be > 0".into()));
         }
         Ok(())
     }
@@ -260,6 +284,8 @@ slippage_bps = 5
 [logging]
 dir = "./logs"
 audit_file = "audit.jsonl"
+clock_skew_threshold_sec = 30
+max_jump_rate_sec_per_sec = 2.0
 "#
     }
 
