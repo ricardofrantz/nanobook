@@ -63,6 +63,9 @@ pub enum BrokerError {
     #[error("reconnect failed after {attempts} attempts: {reason}")]
     ReconnectFailed { attempts: u32, reason: String },
 
+    #[error("duplicate order with client_order_id: {client_order_id}")]
+    DuplicateOrder { client_order_id: String },
+
     #[error("{0}")]
     Other(String),
 }
