@@ -16,6 +16,8 @@ use nanobook_broker::types::*;
 
 #[cfg(feature = "binance")]
 use nanobook_broker::binance::{check_audit_log_for_sequence, log_idempotency_rejection, log_order_submitted};
+#[cfg(feature = "binance")]
+use nanobook_broker::binance::types::{AccountInfo, BalanceInfo, OrderInfo};
 
 /// Failure modes that can be injected by the mock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,6 +159,56 @@ impl MockBinance {
             })
             .cloned()
             .collect()
+    }
+
+    /// Get account info (for reconciliation testing).
+    #[cfg(feature = "binance")]
+    pub fn account_info(&self) -> AccountInfo {
+        let orders = self.orders.lock().unwrap();
+        let open_orders: Vec<OrderInfo> = orders
+            .iter()
+            .filter(|(_, o)| {
+                matches!(
+                    o.status,
+                    OrderState::Pending | OrderState::Submitted | OrderState::PartiallyFilled
+                )
+            })
+            .map(|(id, o)| OrderInfo {
+                symbol: o.symbol.clone(),
+                order_id: id.parse().unwrap_or(0),
+                status: match o.status {
+                    OrderState::Submitted => "NEW".to_string(),
+                    OrderState::PartiallyFilled => "PARTIALLY_FILLED".to_string(),
+                    OrderState::Filled => "FILLED".to_string(),
+                    OrderState::Cancelled => "CANCELED".to_string(),
+                    OrderState::Rejected => "REJECTED".to_string(),
+                    _ => "NEW".to_string(),
+                },
+                side: o.side.clone(),
+                orig_qty: o.quantity.clone(),
+                executed_qty: match o.status {
+                    OrderState::Filled => o.quantity.clone(),
+                    OrderState::PartiallyFilled => {
+                        let qty: u64 = o.quantity.parse().unwrap_or(0);
+                        (qty / 2).to_string()
+                    }
+                    _ => "0".to_string(),
+                },
+            })
+            .collect();
+
+        AccountInfo {
+            balances: vec![
+                BalanceInfo {
+                    asset: "USDT".to_string(),
+                    free: "10000.0".to_string(),
+                    locked: "0.0".to_string(),
+                },
+            ],
+            positions: vec![],
+            open_orders,
+            can_trade: true,
+        }
     }
 
     /// Reset all state (clear orders and client_order_ids).
