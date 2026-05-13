@@ -45,6 +45,18 @@ For versioning purposes, public API includes:
 - Documented behavior that users may reasonably build against, even when the
   behavior is not encoded as a type signature.
 
+## Public API baselines
+
+The Rust public API baselines in [`docs/public-api/`](docs/public-api/) are
+generated with `cargo-public-api` for the workspace crates. They are a
+documentation and review aid: changes to the text make exported Rust surface
+changes visible in code review and release preparation.
+
+These baselines are not a 1.0 stability contract. During `0.x`, minor releases
+may still make breaking public API changes, but those changes should be
+intentional, visible in the baseline diff, and called out in `CHANGELOG.md`
+when they affect users.
+
 ## Minimum supported Rust version
 
 nanobook's minimum supported Rust version (MSRV) is the `rust-version` declared

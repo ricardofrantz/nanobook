@@ -1,0 +1,314 @@
+pub mod nanobook_rebalancer
+pub mod nanobook_rebalancer::audit
+pub enum nanobook_rebalancer::audit::Checkpoint
+pub nanobook_rebalancer::audit::Checkpoint::DiffComputed
+pub nanobook_rebalancer::audit::Checkpoint::OrderFilled
+pub nanobook_rebalancer::audit::Checkpoint::OrderSubmitted
+pub nanobook_rebalancer::audit::Checkpoint::PositionsFetched
+pub nanobook_rebalancer::audit::Checkpoint::RiskCheckPassed
+pub nanobook_rebalancer::audit::Checkpoint::RunCompleted
+pub nanobook_rebalancer::audit::Checkpoint::RunStarted
+impl nanobook_rebalancer::audit::Checkpoint
+pub fn nanobook_rebalancer::audit::Checkpoint::as_event_name(&self) -> &'static str
+pub fn nanobook_rebalancer::audit::Checkpoint::from_event_name(name: &str) -> core::option::Option<Self>
+pub struct nanobook_rebalancer::audit::AuditEvent
+pub nanobook_rebalancer::audit::AuditEvent::checkpoint: core::option::Option<alloc::string::String>
+pub nanobook_rebalancer::audit::AuditEvent::data: serde_json::value::Value
+pub nanobook_rebalancer::audit::AuditEvent::event: alloc::string::String
+pub nanobook_rebalancer::audit::AuditEvent::sequence_number: core::option::Option<u64>
+pub nanobook_rebalancer::audit::AuditEvent::ts: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+pub nanobook_rebalancer::audit::AuditEvent::window_id: core::option::Option<alloc::string::String>
+pub struct nanobook_rebalancer::audit::AuditLog
+impl nanobook_rebalancer::audit::AuditLog
+pub fn nanobook_rebalancer::audit::AuditLog::check_window_already_complete(&mut self, window_id: &str) -> nanobook_rebalancer::error::Result<core::option::Option<u64>>
+pub fn nanobook_rebalancer::audit::AuditLog::log(&mut self, event: &'static str, data: serde_json::value::Value) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::AuditLog::log_checkpoint(&mut self, checkpoint: nanobook_rebalancer::audit::Checkpoint, sequence_number: u64, data: serde_json::value::Value) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::AuditLog::log_simple(&mut self, event: &'static str) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::AuditLog::log_with_idempotency(&mut self, event: &'static str, sequence_number: core::option::Option<u64>, window_id: core::option::Option<alloc::string::String>, data: serde_json::value::Value) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::AuditLog::open(path: &std::path::Path) -> nanobook_rebalancer::error::Result<Self>
+pub fn nanobook_rebalancer::audit::AuditLog::open_in(path: &std::path::Path, workdir: &std::path::Path) -> nanobook_rebalancer::error::Result<Self>
+pub fn nanobook_rebalancer::audit::AuditLog::open_in_with_detector(path: &std::path::Path, workdir: &std::path::Path, detector: nanobook_rebalancer::clock_skew::ClockSkewDetector) -> nanobook_rebalancer::error::Result<Self>
+pub fn nanobook_rebalancer::audit::AuditLog::open_with_detector(path: &std::path::Path, detector: nanobook_rebalancer::clock_skew::ClockSkewDetector) -> nanobook_rebalancer::error::Result<Self>
+pub fn nanobook_rebalancer::audit::AuditLog::validate_checkpoints(&mut self) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_cron_completed(audit: &mut nanobook_rebalancer::audit::AuditLog, sequence_number: u64, window_id: &str, submitted: usize, filled: usize, failed: usize) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_cron_start(audit: &mut nanobook_rebalancer::audit::AuditLog, sequence_number: u64, window_id: &str) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_diff(audit: &mut nanobook_rebalancer::audit::AuditLog, orders: &[nanobook_rebalancer::diff::RebalanceOrder]) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_diff_checkpoint(audit: &mut nanobook_rebalancer::audit::AuditLog, sequence_number: u64, orders: &[nanobook_rebalancer::diff::RebalanceOrder]) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_idempotency_rejection(audit: &mut nanobook_rebalancer::audit::AuditLog, window_id: &str, existing_sequence: u64) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_order_filled(audit: &mut nanobook_rebalancer::audit::AuditLog, result: &nanobook_broker::ibkr::orders::OrderResult) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_order_filled_checkpoint(audit: &mut nanobook_rebalancer::audit::AuditLog, sequence_number: u64, result: &nanobook_broker::ibkr::orders::OrderResult) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_order_submitted(audit: &mut nanobook_rebalancer::audit::AuditLog, order: &nanobook_rebalancer::diff::RebalanceOrder, ibkr_id: i32) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_order_submitted_checkpoint(audit: &mut nanobook_rebalancer::audit::AuditLog, sequence_number: u64, order: &nanobook_rebalancer::diff::RebalanceOrder, ibkr_id: i32) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_positions(audit: &mut nanobook_rebalancer::audit::AuditLog, positions: &[nanobook_rebalancer::diff::CurrentPosition], equity_cents: i64) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_positions_checkpoint(audit: &mut nanobook_rebalancer::audit::AuditLog, sequence_number: u64, positions: &[nanobook_rebalancer::diff::CurrentPosition], equity_cents: i64) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_risk_check(audit: &mut nanobook_rebalancer::audit::AuditLog, report: &nanobook_risk::report::RiskReport) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_risk_check_passed_checkpoint(audit: &mut nanobook_rebalancer::audit::AuditLog, sequence_number: u64, report: &nanobook_risk::report::RiskReport) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_run_completed(audit: &mut nanobook_rebalancer::audit::AuditLog, submitted: usize, filled: usize, failed: usize) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_run_completed_checkpoint(audit: &mut nanobook_rebalancer::audit::AuditLog, sequence_number: u64, submitted: usize, filled: usize, failed: usize) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_run_started(audit: &mut nanobook_rebalancer::audit::AuditLog, target_file: &str, account_id: &str) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::audit::log_run_started_checkpoint(audit: &mut nanobook_rebalancer::audit::AuditLog, sequence_number: u64, target_file: &str, account_id: &str) -> nanobook_rebalancer::error::Result<()>
+pub mod nanobook_rebalancer::broker
+pub trait nanobook_rebalancer::broker::BrokerGateway
+pub fn nanobook_rebalancer::broker::BrokerGateway::account_summary(&self) -> nanobook_rebalancer::broker::BrokerResult<nanobook_broker::types::Account>
+pub fn nanobook_rebalancer::broker::BrokerGateway::execute_limit_order(&self, symbol: nanobook::types::Symbol, side: nanobook_broker::types::BrokerSide, shares: u64, limit_price_cents: i64, client_order_id: core::option::Option<&nanobook_broker::types::ClientOrderId>, timeout: core::time::Duration) -> nanobook_rebalancer::broker::BrokerResult<nanobook_broker::ibkr::orders::OrderResult>
+pub fn nanobook_rebalancer::broker::BrokerGateway::positions(&self) -> nanobook_rebalancer::broker::BrokerResult<alloc::vec::Vec<nanobook_broker::types::Position>>
+pub fn nanobook_rebalancer::broker::BrokerGateway::prices(&self, symbols: &[nanobook::types::Symbol]) -> nanobook_rebalancer::broker::BrokerResult<alloc::vec::Vec<(nanobook::types::Symbol, i64)>>
+pub fn nanobook_rebalancer::broker::BrokerGateway::quotes(&self, symbols: &[nanobook::types::Symbol]) -> nanobook_rebalancer::broker::BrokerResult<alloc::vec::Vec<nanobook_broker::types::Quote>>
+impl nanobook_rebalancer::broker::BrokerGateway for nanobook_broker::ibkr::client::IbkrClient
+pub fn nanobook_broker::ibkr::client::IbkrClient::account_summary(&self) -> nanobook_rebalancer::broker::BrokerResult<nanobook_broker::types::Account>
+pub fn nanobook_broker::ibkr::client::IbkrClient::execute_limit_order(&self, symbol: nanobook::types::Symbol, side: nanobook_broker::types::BrokerSide, shares: u64, limit_price_cents: i64, client_order_id: core::option::Option<&nanobook_broker::types::ClientOrderId>, timeout: core::time::Duration) -> nanobook_rebalancer::broker::BrokerResult<nanobook_broker::ibkr::orders::OrderResult>
+pub fn nanobook_broker::ibkr::client::IbkrClient::positions(&self) -> nanobook_rebalancer::broker::BrokerResult<alloc::vec::Vec<nanobook_broker::types::Position>>
+pub fn nanobook_broker::ibkr::client::IbkrClient::prices(&self, symbols: &[nanobook::types::Symbol]) -> nanobook_rebalancer::broker::BrokerResult<alloc::vec::Vec<(nanobook::types::Symbol, i64)>>
+pub fn nanobook_broker::ibkr::client::IbkrClient::quotes(&self, symbols: &[nanobook::types::Symbol]) -> nanobook_rebalancer::broker::BrokerResult<alloc::vec::Vec<nanobook_broker::types::Quote>>
+pub fn nanobook_rebalancer::broker::as_connection_error<T>(result: nanobook_rebalancer::broker::BrokerResult<T>) -> nanobook_rebalancer::error::Result<T>
+pub fn nanobook_rebalancer::broker::connect_ibkr(config: &nanobook_rebalancer::config::Config) -> nanobook_rebalancer::error::Result<alloc::boxed::Box<dyn nanobook_rebalancer::broker::BrokerGateway>>
+pub type nanobook_rebalancer::broker::BrokerResult<T> = core::result::Result<T, nanobook_broker::error::BrokerError>
+pub mod nanobook_rebalancer::clock_skew
+pub enum nanobook_rebalancer::clock_skew::SkewResult
+pub nanobook_rebalancer::clock_skew::SkewResult::BackwardJump
+pub nanobook_rebalancer::clock_skew::SkewResult::BackwardJump::duration: chrono::Duration
+pub nanobook_rebalancer::clock_skew::SkewResult::ForwardJump
+pub nanobook_rebalancer::clock_skew::SkewResult::ForwardJump::duration: chrono::Duration
+pub nanobook_rebalancer::clock_skew::SkewResult::ForwardJump::rate: f64
+pub nanobook_rebalancer::clock_skew::SkewResult::Ok
+pub struct nanobook_rebalancer::clock_skew::ClockSkewDetector
+impl nanobook_rebalancer::clock_skew::ClockSkewDetector
+pub fn nanobook_rebalancer::clock_skew::ClockSkewDetector::check(&mut self, ts: chrono::datetime::DateTime<chrono::offset::utc::Utc>) -> nanobook_rebalancer::clock_skew::SkewResult
+pub fn nanobook_rebalancer::clock_skew::ClockSkewDetector::new() -> Self
+pub fn nanobook_rebalancer::clock_skew::ClockSkewDetector::reset(&mut self)
+pub fn nanobook_rebalancer::clock_skew::ClockSkewDetector::with_thresholds(threshold_sec: i64, max_jump_rate_sec_per_sec: f64) -> Self
+impl core::default::Default for nanobook_rebalancer::clock_skew::ClockSkewDetector
+pub fn nanobook_rebalancer::clock_skew::ClockSkewDetector::default() -> Self
+pub mod nanobook_rebalancer::config
+pub enum nanobook_rebalancer::config::AccountType
+pub nanobook_rebalancer::config::AccountType::Cash
+pub nanobook_rebalancer::config::AccountType::Margin
+pub struct nanobook_rebalancer::config::AccountConfig
+pub nanobook_rebalancer::config::AccountConfig::account_type: nanobook_rebalancer::config::AccountType
+pub nanobook_rebalancer::config::AccountConfig::id: alloc::string::String
+pub struct nanobook_rebalancer::config::Config
+pub nanobook_rebalancer::config::Config::account: nanobook_rebalancer::config::AccountConfig
+pub nanobook_rebalancer::config::Config::connection: nanobook_rebalancer::config::ConnectionConfig
+pub nanobook_rebalancer::config::Config::cost: nanobook_rebalancer::config::CostConfig
+pub nanobook_rebalancer::config::Config::execution: nanobook_rebalancer::config::ExecutionConfig
+pub nanobook_rebalancer::config::Config::logging: nanobook_rebalancer::config::LoggingConfig
+pub nanobook_rebalancer::config::Config::risk: nanobook_rebalancer::config::RiskConfig
+impl nanobook_rebalancer::config::Config
+pub fn nanobook_rebalancer::config::Config::address(&self) -> alloc::string::String
+pub fn nanobook_rebalancer::config::Config::audit_path(&self) -> std::path::PathBuf
+pub fn nanobook_rebalancer::config::Config::load(path: &std::path::Path) -> nanobook_rebalancer::error::Result<Self>
+pub struct nanobook_rebalancer::config::ConnectionConfig
+pub nanobook_rebalancer::config::ConnectionConfig::client_id: i32
+pub nanobook_rebalancer::config::ConnectionConfig::host: alloc::string::String
+pub nanobook_rebalancer::config::ConnectionConfig::port: u16
+pub nanobook_rebalancer::config::ConnectionConfig::timeout_secs: u64
+pub struct nanobook_rebalancer::config::CostConfig
+pub nanobook_rebalancer::config::CostConfig::commission_min: f64
+pub nanobook_rebalancer::config::CostConfig::commission_per_share: f64
+pub nanobook_rebalancer::config::CostConfig::slippage_bps: u32
+pub struct nanobook_rebalancer::config::ExecutionConfig
+pub nanobook_rebalancer::config::ExecutionConfig::limit_offset_bps: u32
+pub nanobook_rebalancer::config::ExecutionConfig::max_orders_per_run: usize
+pub nanobook_rebalancer::config::ExecutionConfig::order_interval_ms: u64
+pub nanobook_rebalancer::config::ExecutionConfig::order_timeout_secs: u64
+pub nanobook_rebalancer::config::ExecutionConfig::quote_staleness_threshold_sec: u64
+pub struct nanobook_rebalancer::config::LoggingConfig
+pub nanobook_rebalancer::config::LoggingConfig::audit_file: alloc::string::String
+pub nanobook_rebalancer::config::LoggingConfig::clock_skew_threshold_sec: i64
+pub nanobook_rebalancer::config::LoggingConfig::dir: alloc::string::String
+pub nanobook_rebalancer::config::LoggingConfig::max_jump_rate_sec_per_sec: f64
+pub struct nanobook_rebalancer::config::RiskConfig
+pub nanobook_rebalancer::config::RiskConfig::allow_short: bool
+pub nanobook_rebalancer::config::RiskConfig::max_leverage: f64
+pub nanobook_rebalancer::config::RiskConfig::max_position_pct: f64
+pub nanobook_rebalancer::config::RiskConfig::max_short_pct: f64
+pub nanobook_rebalancer::config::RiskConfig::max_trade_usd: f64
+pub nanobook_rebalancer::config::RiskConfig::min_trade_usd: f64
+impl core::default::Default for nanobook_rebalancer::config::RiskConfig
+pub fn nanobook_rebalancer::config::RiskConfig::default() -> Self
+pub mod nanobook_rebalancer::diff
+pub enum nanobook_rebalancer::diff::Action
+pub nanobook_rebalancer::diff::Action::Buy
+pub nanobook_rebalancer::diff::Action::BuyCover
+pub nanobook_rebalancer::diff::Action::Sell
+pub nanobook_rebalancer::diff::Action::SellShort
+impl core::fmt::Display for nanobook_rebalancer::diff::Action
+pub fn nanobook_rebalancer::diff::Action::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct nanobook_rebalancer::diff::CostEstimate
+pub nanobook_rebalancer::diff::CostEstimate::commission_cents: i64
+pub nanobook_rebalancer::diff::CostEstimate::slippage_cents: i64
+impl nanobook_rebalancer::diff::CostEstimate
+pub fn nanobook_rebalancer::diff::CostEstimate::total_cents(&self) -> i64
+impl core::fmt::Display for nanobook_rebalancer::diff::CostEstimate
+pub fn nanobook_rebalancer::diff::CostEstimate::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct nanobook_rebalancer::diff::CurrentPosition
+pub nanobook_rebalancer::diff::CurrentPosition::avg_cost_cents: i64
+pub nanobook_rebalancer::diff::CurrentPosition::quantity: i64
+pub nanobook_rebalancer::diff::CurrentPosition::symbol: nanobook::types::Symbol
+pub struct nanobook_rebalancer::diff::RebalanceOrder
+pub nanobook_rebalancer::diff::RebalanceOrder::action: nanobook_rebalancer::diff::Action
+pub nanobook_rebalancer::diff::RebalanceOrder::description: &'static str
+pub nanobook_rebalancer::diff::RebalanceOrder::limit_price_cents: i64
+pub nanobook_rebalancer::diff::RebalanceOrder::notional_cents: i64
+pub nanobook_rebalancer::diff::RebalanceOrder::shares: i64
+pub nanobook_rebalancer::diff::RebalanceOrder::symbol: nanobook::types::Symbol
+pub fn nanobook_rebalancer::diff::compute_diff(equity_cents: i64, current_positions: &[nanobook_rebalancer::diff::CurrentPosition], targets: &[(nanobook::types::Symbol, f64)], prices: &[(nanobook::types::Symbol, i64)], limit_offset_bps: u32, min_trade_cents: i64) -> alloc::vec::Vec<nanobook_rebalancer::diff::RebalanceOrder>
+pub fn nanobook_rebalancer::diff::estimate_cost(orders: &[nanobook_rebalancer::diff::RebalanceOrder], commission_per_share: f64, commission_min: f64, slippage_bps: u32) -> nanobook_rebalancer::diff::CostEstimate
+pub mod nanobook_rebalancer::error
+pub enum nanobook_rebalancer::error::Error
+pub nanobook_rebalancer::error::Error::Aborted(alloc::string::String)
+pub nanobook_rebalancer::error::Error::Audit(std::io::error::Error)
+pub nanobook_rebalancer::error::Error::AuditPathOutsideWorkdir
+pub nanobook_rebalancer::error::Error::AuditPathOutsideWorkdir::path: std::path::PathBuf
+pub nanobook_rebalancer::error::Error::AuditValidation(alloc::string::String)
+pub nanobook_rebalancer::error::Error::Config(alloc::string::String)
+pub nanobook_rebalancer::error::Error::ConfigParse(toml::de::Error)
+pub nanobook_rebalancer::error::Error::ConfigRead
+pub nanobook_rebalancer::error::Error::ConfigRead::path: std::path::PathBuf
+pub nanobook_rebalancer::error::Error::ConfigRead::source: std::io::error::Error
+pub nanobook_rebalancer::error::Error::Connection(alloc::string::String)
+pub nanobook_rebalancer::error::Error::IdempotencyRejection
+pub nanobook_rebalancer::error::Error::IdempotencyRejection::sequence_number: u64
+pub nanobook_rebalancer::error::Error::IdempotencyRejection::window_id: alloc::string::String
+pub nanobook_rebalancer::error::Error::Order(alloc::string::String)
+pub nanobook_rebalancer::error::Error::Reconcile(alloc::string::String)
+pub nanobook_rebalancer::error::Error::Recovery(alloc::string::String)
+pub nanobook_rebalancer::error::Error::RiskFailed(alloc::string::String)
+pub nanobook_rebalancer::error::Error::StaleQuote
+pub nanobook_rebalancer::error::Error::StaleQuote::age_sec: u64
+pub nanobook_rebalancer::error::Error::StaleQuote::symbol: alloc::string::String
+pub nanobook_rebalancer::error::Error::StaleQuote::threshold_sec: u64
+pub nanobook_rebalancer::error::Error::Target(alloc::string::String)
+pub nanobook_rebalancer::error::Error::TargetParse(serde_json::error::Error)
+pub nanobook_rebalancer::error::Error::TargetRead
+pub nanobook_rebalancer::error::Error::TargetRead::path: std::path::PathBuf
+pub nanobook_rebalancer::error::Error::TargetRead::source: std::io::error::Error
+pub type nanobook_rebalancer::error::Result<T> = core::result::Result<T, nanobook_rebalancer::error::Error>
+pub mod nanobook_rebalancer::execution
+pub struct nanobook_rebalancer::execution::CronMode
+pub nanobook_rebalancer::execution::CronMode::sequence_number: u64
+impl nanobook_rebalancer::execution::CronMode
+pub fn nanobook_rebalancer::execution::CronMode::is_enabled(&self) -> bool
+pub fn nanobook_rebalancer::execution::CronMode::new(sequence_number: u64) -> Self
+pub struct nanobook_rebalancer::execution::RunOptions
+pub nanobook_rebalancer::execution::RunOptions::cron_mode: bool
+pub nanobook_rebalancer::execution::RunOptions::dry_run: bool
+pub nanobook_rebalancer::execution::RunOptions::force: bool
+pub nanobook_rebalancer::execution::RunOptions::target_file: alloc::string::String
+pub fn nanobook_rebalancer::execution::action_to_side(action: nanobook_rebalancer::diff::Action) -> nanobook_broker::types::BrokerSide
+pub fn nanobook_rebalancer::execution::apply_constraint_overrides(base: &nanobook_rebalancer::config::RiskConfig, target: &nanobook_rebalancer::target::TargetSpec) -> nanobook_rebalancer::config::RiskConfig
+pub fn nanobook_rebalancer::execution::check_status(config: &nanobook_rebalancer::config::Config) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::execution::collect_all_symbols(positions: &[nanobook_rebalancer::diff::CurrentPosition], target: &nanobook_rebalancer::target::TargetSpec) -> alloc::vec::Vec<nanobook::types::Symbol>
+pub fn nanobook_rebalancer::execution::derive_client_order_id(target: &nanobook_rebalancer::target::TargetSpec, order: &nanobook_rebalancer::diff::RebalanceOrder) -> nanobook_rebalancer::error::Result<nanobook_broker::types::ClientOrderId>
+pub fn nanobook_rebalancer::execution::enforce_max_orders_per_run(generated_orders: usize, max_orders_per_run: usize) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::execution::run(config: &nanobook_rebalancer::config::Config, target: &nanobook_rebalancer::target::TargetSpec, opts: &nanobook_rebalancer::execution::RunOptions) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::execution::run_reconcile(config: &nanobook_rebalancer::config::Config, target: &nanobook_rebalancer::target::TargetSpec) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::execution::show_positions(config: &nanobook_rebalancer::config::Config) -> nanobook_rebalancer::error::Result<()>
+pub mod nanobook_rebalancer::kill
+pub struct nanobook_rebalancer::kill::DanglingOrder
+pub nanobook_rebalancer::kill::DanglingOrder::action: alloc::string::String
+pub nanobook_rebalancer::kill::DanglingOrder::ibkr_id: i32
+pub nanobook_rebalancer::kill::DanglingOrder::limit_price_cents: i64
+pub nanobook_rebalancer::kill::DanglingOrder::shares: i64
+pub nanobook_rebalancer::kill::DanglingOrder::symbol: alloc::string::String
+pub nanobook_rebalancer::kill::DanglingOrder::timestamp: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+pub fn nanobook_rebalancer::kill::run_kill(config: &nanobook_rebalancer::config::Config) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::kill::send_sigterm(pid: u32) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::kill::verify_no_dangling_orders(audit_path: &std::path::Path) -> nanobook_rebalancer::error::Result<alloc::vec::Vec<nanobook_rebalancer::kill::DanglingOrder>>
+pub mod nanobook_rebalancer::pid_file
+pub const nanobook_rebalancer::pid_file::DEFAULT_PID_FILE: &str
+pub fn nanobook_rebalancer::pid_file::pid_file_exists(path: &std::path::Path) -> bool
+pub fn nanobook_rebalancer::pid_file::read_pid_file(path: &std::path::Path) -> nanobook_rebalancer::error::Result<u32>
+pub fn nanobook_rebalancer::pid_file::remove_pid_file(path: &std::path::Path) -> nanobook_rebalancer::error::Result<()>
+pub fn nanobook_rebalancer::pid_file::write_pid_file(path: &std::path::Path) -> nanobook_rebalancer::error::Result<()>
+pub mod nanobook_rebalancer::reconcile
+pub struct nanobook_rebalancer::reconcile::ReconcileEntry
+pub nanobook_rebalancer::reconcile::ReconcileEntry::actual_shares: i64
+pub nanobook_rebalancer::reconcile::ReconcileEntry::actual_weight: f64
+pub nanobook_rebalancer::reconcile::ReconcileEntry::diff_shares: i64
+pub nanobook_rebalancer::reconcile::ReconcileEntry::diff_weight: f64
+pub nanobook_rebalancer::reconcile::ReconcileEntry::symbol: alloc::string::String
+pub nanobook_rebalancer::reconcile::ReconcileEntry::target_shares: i64
+pub nanobook_rebalancer::reconcile::ReconcileEntry::target_weight: f64
+pub struct nanobook_rebalancer::reconcile::ReconcileReport
+pub nanobook_rebalancer::reconcile::ReconcileReport::entries: alloc::vec::Vec<nanobook_rebalancer::reconcile::ReconcileEntry>
+pub nanobook_rebalancer::reconcile::ReconcileReport::tracking_error_pct: f64
+impl core::fmt::Display for nanobook_rebalancer::reconcile::ReconcileReport
+pub fn nanobook_rebalancer::reconcile::ReconcileReport::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn nanobook_rebalancer::reconcile::reconcile(actual_positions: &[nanobook_rebalancer::diff::CurrentPosition], targets: &[(nanobook::types::Symbol, f64)], prices: &[(nanobook::types::Symbol, i64)], equity_cents: i64) -> nanobook_rebalancer::reconcile::ReconcileReport
+pub mod nanobook_rebalancer::recovery
+pub enum nanobook_rebalancer::recovery::Discrepancy
+pub nanobook_rebalancer::recovery::Discrepancy::MissingOrder
+pub nanobook_rebalancer::recovery::Discrepancy::MissingOrder::expected_status: alloc::string::String
+pub nanobook_rebalancer::recovery::Discrepancy::MissingOrder::symbol: alloc::string::String
+pub nanobook_rebalancer::recovery::Discrepancy::OrderStatusMismatch
+pub nanobook_rebalancer::recovery::Discrepancy::OrderStatusMismatch::broker_status: alloc::string::String
+pub nanobook_rebalancer::recovery::Discrepancy::OrderStatusMismatch::expected_status: alloc::string::String
+pub nanobook_rebalancer::recovery::Discrepancy::OrderStatusMismatch::symbol: alloc::string::String
+pub nanobook_rebalancer::recovery::Discrepancy::OrphanOrder
+pub nanobook_rebalancer::recovery::Discrepancy::OrphanOrder::broker_order_id: u64
+pub nanobook_rebalancer::recovery::Discrepancy::OrphanOrder::status: alloc::string::String
+pub nanobook_rebalancer::recovery::Discrepancy::OrphanOrder::symbol: alloc::string::String
+pub nanobook_rebalancer::recovery::Discrepancy::PositionMismatch
+pub nanobook_rebalancer::recovery::Discrepancy::PositionMismatch::broker_qty: i64
+pub nanobook_rebalancer::recovery::Discrepancy::PositionMismatch::expected_qty: i64
+pub nanobook_rebalancer::recovery::Discrepancy::PositionMismatch::symbol: alloc::string::String
+pub enum nanobook_rebalancer::recovery::RecoveryAction
+pub nanobook_rebalancer::recovery::RecoveryAction::ManualReview
+pub nanobook_rebalancer::recovery::RecoveryAction::Restart
+pub nanobook_rebalancer::recovery::RecoveryAction::Resume
+pub nanobook_rebalancer::recovery::RecoveryAction::Rollback
+pub struct nanobook_rebalancer::recovery::DiscrepancyReport
+pub nanobook_rebalancer::recovery::DiscrepancyReport::discrepancies: alloc::vec::Vec<nanobook_rebalancer::recovery::Discrepancy>
+pub nanobook_rebalancer::recovery::DiscrepancyReport::has_critical_issues: bool
+pub struct nanobook_rebalancer::recovery::RecoveredOrder
+pub nanobook_rebalancer::recovery::RecoveredOrder::action: alloc::string::String
+pub nanobook_rebalancer::recovery::RecoveredOrder::filled: bool
+pub nanobook_rebalancer::recovery::RecoveredOrder::ibkr_id: i32
+pub nanobook_rebalancer::recovery::RecoveredOrder::limit_price_cents: i64
+pub nanobook_rebalancer::recovery::RecoveredOrder::shares: i64
+pub nanobook_rebalancer::recovery::RecoveredOrder::submitted: bool
+pub nanobook_rebalancer::recovery::RecoveredOrder::symbol: nanobook::types::Symbol
+pub struct nanobook_rebalancer::recovery::RecoveredState
+pub nanobook_rebalancer::recovery::RecoveredState::checkpoint: nanobook_rebalancer::audit::Checkpoint
+pub nanobook_rebalancer::recovery::RecoveredState::equity_cents: i64
+pub nanobook_rebalancer::recovery::RecoveredState::orders: alloc::vec::Vec<nanobook_rebalancer::recovery::RecoveredOrder>
+pub nanobook_rebalancer::recovery::RecoveredState::positions: alloc::vec::Vec<nanobook_rebalancer::diff::CurrentPosition>
+pub nanobook_rebalancer::recovery::RecoveredState::run_completed: bool
+pub nanobook_rebalancer::recovery::RecoveredState::sequence_number: u64
+pub nanobook_rebalancer::recovery::RecoveredState::timestamp: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+impl nanobook_rebalancer::recovery::RecoveredState
+pub fn nanobook_rebalancer::recovery::RecoveredState::determine_recovery_action(&self) -> nanobook_rebalancer::recovery::RecoveryAction
+pub fn nanobook_rebalancer::recovery::RecoveredState::new() -> Self
+impl core::default::Default for nanobook_rebalancer::recovery::RecoveredState
+pub fn nanobook_rebalancer::recovery::RecoveredState::default() -> Self
+pub fn nanobook_rebalancer::recovery::compare_broker_state(broker: &dyn nanobook_broker::Broker, recovered_state: &nanobook_rebalancer::recovery::RecoveredState) -> nanobook_rebalancer::error::Result<nanobook_rebalancer::recovery::DiscrepancyReport>
+pub fn nanobook_rebalancer::recovery::reconstruct_state(audit_log_path: &std::path::Path) -> nanobook_rebalancer::error::Result<(nanobook_rebalancer::recovery::RecoveredState, nanobook_rebalancer::recovery::RecoveryAction)>
+pub fn nanobook_rebalancer::recovery::run_recover(config: &nanobook_rebalancer::config::Config, _target_spec: &nanobook_rebalancer::target::TargetSpec, dry_run: bool, broker: core::option::Option<&dyn nanobook_broker::Broker>) -> nanobook_rebalancer::error::Result<()>
+pub mod nanobook_rebalancer::risk
+pub use nanobook_rebalancer::risk::RiskCheck
+pub use nanobook_rebalancer::risk::RiskReport
+pub use nanobook_rebalancer::risk::RiskStatus
+pub fn nanobook_rebalancer::risk::check_risk(orders: &[nanobook_rebalancer::diff::RebalanceOrder], equity_cents: i64, targets: &[(nanobook::types::Symbol, f64)], prices: &[(nanobook::types::Symbol, i64)], current_qty: &rustc_hash::FxHashMap<nanobook::types::Symbol, i64>, config: &nanobook_rebalancer::config::RiskConfig) -> nanobook_risk::report::RiskReport
+pub mod nanobook_rebalancer::target
+pub struct nanobook_rebalancer::target::Constraints
+pub nanobook_rebalancer::target::Constraints::max_leverage: core::option::Option<f64>
+pub nanobook_rebalancer::target::Constraints::max_position_pct: core::option::Option<f64>
+pub nanobook_rebalancer::target::Constraints::min_trade_usd: core::option::Option<f64>
+pub struct nanobook_rebalancer::target::TargetMetadata
+pub nanobook_rebalancer::target::TargetMetadata::id: alloc::string::String
+pub struct nanobook_rebalancer::target::TargetPosition
+pub nanobook_rebalancer::target::TargetPosition::symbol: alloc::string::String
+pub nanobook_rebalancer::target::TargetPosition::weight: f64
+pub struct nanobook_rebalancer::target::TargetSpec
+pub nanobook_rebalancer::target::TargetSpec::constraints: core::option::Option<nanobook_rebalancer::target::Constraints>
+pub nanobook_rebalancer::target::TargetSpec::metadata: nanobook_rebalancer::target::TargetMetadata
+pub nanobook_rebalancer::target::TargetSpec::targets: alloc::vec::Vec<nanobook_rebalancer::target::TargetPosition>
+pub nanobook_rebalancer::target::TargetSpec::timestamp: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+impl nanobook_rebalancer::target::TargetSpec
+pub fn nanobook_rebalancer::target::TargetSpec::as_target_pairs(&self) -> alloc::vec::Vec<(nanobook::types::Symbol, f64)>
+pub fn nanobook_rebalancer::target::TargetSpec::from_json(json: &str) -> nanobook_rebalancer::error::Result<Self>
+pub fn nanobook_rebalancer::target::TargetSpec::idempotency_scope(&self) -> alloc::string::String
+pub fn nanobook_rebalancer::target::TargetSpec::load(path: &std::path::Path) -> nanobook_rebalancer::error::Result<Self>
+pub fn nanobook_rebalancer::target::TargetSpec::symbols(&self) -> alloc::vec::Vec<nanobook::types::Symbol>
+pub fn nanobook_rebalancer::target::TargetSpec::window_id(&self) -> alloc::string::String
