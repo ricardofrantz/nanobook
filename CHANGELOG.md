@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-05-13 - OCaml Oracle
+
+This release adds an OCaml reference implementation of the limit-order-book engine for differential testing against the Rust implementation. The oracle serves dual purposes: (1) detecting wrong-but-consistent bugs that fuzzing misses, and (2) signaling commitment to correctness via dual-language implementation. Both engines produce byte-identical output on a comprehensive golden corpus of 18 LOB edge cases.
+
+### Added
+
+**OCaml Oracle (oracle-ocaml/):**
+- **`lib/price.ml`**: Int64 Price.t newtype (cents, matches Rust)
+- **`lib/side.ml`**: Side = Buy | Sell
+- **`lib/order.ml`**: Order variant with Limit/Market, TIF GTC/IOC/FOK, optional owner, STP policy (Off, CancelNewest, CancelOldest, DecrementAndCancel)
+- **`lib/book.ml`**: Sorted association lists for price levels (O(n) insert/remove/find, correctness-focused)
+- **`lib/matching.ml`**: Exhaustive pattern matching on every event variant, STP variants explicitly cased, FOK no-match/partial-cross behavior
+- **`lib/replay.ml`**: Event replay with JSONL I/O, order lifecycle management
+- **`lib/json.ml`**: JSON serialization/deserialization with schema_version support
+- **`bin/replay_bin.ml`**: CLI binary for JSONL event log → JSONL trades conversion
+- **`test/oracle_ocaml_tests.ml`**: 10 unit tests covering core invariants and order lifecycle
+- **`bench/bench.ml`**: Performance benchmarks (throughput, market sweep, large book, cancellation)
+- **Golden corpus**: 18 hand-curated LOB edge cases in `test/corpus/` (simple-cross, no-cross, market-order-sweep, fok variants, ioc, fifo, cancels, owner, stp policies, min/max prices)
+
+**Documentation:**
+- **`docs/event-log-schema.md`**: Formalized schema with schema_version field (optional), added owner and stp_policy fields, documented STP policy behavior
+- **`docs/ocaml-oracle-v0.15-summary.md`**: Comprehensive implementation summary (CLI module loading fix, infinite loop fix, FOK partial-cross bug fix, order owner support, STP policy implementation)
+- **`docs/solutions/oracle-design.md`**: Oracle design document explaining dual purpose (technical bug-finding + Jane Street signaling), triage protocol for divergence, and implementation invariants
+- **`oracle-ocaml/test/corpus/README.md`**: Test case catalog
+
+**CI:**
+- **`.github/workflows/oracle.yml`**: OCaml CI job that installs OCaml 5.4 via opam-installer (cached), builds oracle, runs golden corpus, verifies byte-identical output between Rust and OCaml engines
+- **Sanity-check job**: Confirms `cargo add nanobook` does NOT pull OCaml (oracle is CI-only, zero Python-surface change)
+
+### Changed
+
+- **Event-log schema**: Added optional `schema_version` field for future versioning, added `owner` field (optional int) for order ownership, added `stp_policy` field (Off, CancelNewest, CancelOldest, DecrementAndCancel) for self-trade prevention
+
+### Fixed
+
+- **CLI module loading**: Fixed runtime "Unbound module Price" errors by renaming library from `oracle` to `oracle_lib` and adding `(wrapped false)` to lib/dune
+- **Infinite loop in matching**: Fixed `Matching.match_order` while loop that ran forever when no liquidity or prices didn't cross (added `continue_matching` flag and 1000-iteration safety limit)
+- **FOK partial-cross bug**: Fixed FOK orders allowing partial fills (added `calculate_available_liquidity` to check liquidity before matching)
+- **STP CancelNewest terminal state**: Fixed CancelNewest calling `Order.fill` before `Order.cancel` causing terminal state error
+
+### Implementation Notes
+
+- **Independence**: OCaml oracle written from spec only, NOT by reading Rust source
+- **Type safety**: OCaml's type system and exhaustive pattern matching prevent entire classes of bugs
+- **Minimal dependencies**: Uses stdlib-only (~800 LOC target), no Base/Core
+- **CI-only**: OCaml oracle is repo-internal tooling, NOT published to crates.io
+- **Python surface unchanged**: Zero Python API changes in this release
+
 ## [0.13.0] - 2026-05-13 - Ops Hardening
 
 This release completes the v0.13 ops-hardening program with failure-injection testing for 9 failure modes (F1-F9) covering IBKR and Binance broker adapters, warm-restart recovery, cron idempotency, and kill-switch safety. All failure modes are now validated with end-to-end integration tests and documented operational procedures.

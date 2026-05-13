@@ -22,7 +22,7 @@ native-tls = ["reqwest?/native-tls"]
 strict-market-reject = ["ibkr"]
 
 [dependencies]
-nanobook = { version = "0.13.0", path = "..", features = ["serde"] }
+nanobook = { version = "0.14.0", path = "..", features = ["serde"] }
 thiserror = "2.0"
 sha2 = "0.10"
 
