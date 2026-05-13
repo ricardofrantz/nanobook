@@ -54,6 +54,9 @@ pub enum Error {
     #[error("audit log error: {0}")]
     Audit(#[from] std::io::Error),
 
+    #[error("audit log validation error: {0}")]
+    AuditValidation(String),
+
     /// The canonicalized audit path does not sit under the allowed
     /// working directory. Raised to stop a misconfigured or
     /// malicious `logging.dir` from redirecting audit data through
