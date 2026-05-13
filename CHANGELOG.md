@@ -7,11 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-05-13 - Documentation & Infrastructure
+
+This release focuses on documentation completeness, infrastructure hardening, and release process improvements. No new user-facing features — all changes are either documentation, CI improvements, or cleanup of deprecated APIs.
+
 ### Removed
 
 - Removed the deprecated `garch_forecast`, `optimize_cvar`, and `optimize_cdar`
   Rust APIs, along with their Python exports. Use `garch_ewma_forecast`,
   `inverse_cvar_weights`, and `inverse_cdar_weights` instead.
+
+### Added
+
+**Documentation:**
+- **`docs/staying-0x.md`**: Central argument why nanobook stays pre-1.0, covering solo maintenance constraint, evolving abstractions, learning phase, and fork-at-tag path. Conditions to revisit 1.0: ≥3 maintainers, ≥6 months stable schema, demonstrated users.
+- **`SEMVER.md`**: Explicit pre-1.0 versioning policy (0.x means minor versions MAY break), public API scope, breaking change categories, and practical guidance for users.
+- **`docs/api-surface-audit.md`**: Comprehensive inventory of all public items across 5 crates, identifying operational items exposed publicly and Python deprecation patterns.
+- **`docs/public-api/`**: cargo-public-api baselines for all workspace crates (nanobook, nanobook-broker, nanobook-risk, nanobook-rebalancer, nanobook-python). These are documentation and review aids, not a 1.0 stability contract.
+- **Rustdoc examples**: Added rustdoc examples to core APIs (OrderBook, Exchange, Order, Trade, Portfolio, RiskEngine, Broker trait) and broker/risk modules.
+
+**Infrastructure:**
+- **`docs/event-log-schema.md`**: Formalized schema versioning policy with breaking change rules, CI requirements, field stability classification, and migration path for schema changes.
+- **CI matrix row**: Added Rust 1.85 (MSRV) testing to CI matrix to ensure MSRV compliance.
+
+### Changed
+
+**Breaking (nanobook 0.14.0 → 0.15.0):**
+- Removed deprecated v0.9.3 APIs: `garch_forecast`, `optimize_cvar`, `optimize_cdar`
+
+**Breaking (nanobook-broker 0.6.0 → 0.7.0):**
+- Audit-driven breaking change to align public API surface with operational needs
+
+**Breaking (nanobook-risk 0.5.0 → 0.6.0):**
+- Audit-driven breaking change — first substantive change since v0.10
+
+**Breaking (nanobook-rebalancer 0.7.0 → 0.8.0):**
+- Audit-driven breaking change to align public API surface with operational needs
+
+**Breaking (nanobook-python 0.14.0 → 0.15.0):**
+- Follows upstream breaking changes from nanobook and workspace crates
+
+### Fixed
+
+- **Python library name collision**: Renamed python library from "nanobook" to "nanobook_python" in python/Cargo.toml to resolve rustdoc documentation collision with the main nanobook crate.
+
+### Implementation Notes
+
+- **Per-crate semver**: This release uses per-crate semantic versioning, not a unified workspace bump. Synchronizing all crates to a single 0.15.0 would be marketing, not semver — risk has had effectively one change in seven releases.
+- **No 1.0 tag**: nanobook remains pre-1.0 per docs/staying-0x.md.
+- **Public API baselines**: The cargo-public-api baselines in docs/public-api/ are documentation and review aids, not a 1.0 stability contract. During 0.x, breaking changes remain allowed but should be visible in baseline diffs and called out in CHANGELOG.md.
 
 ## [0.14.0] - 2026-05-13 - OCaml Oracle
 
