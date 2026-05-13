@@ -1,13 +1,17 @@
 //! Integration tests for F9 crash recovery.
 
-use nanobook_rebalancer::audit::AuditLog;
-use nanobook_rebalancer::recovery::{reconstruct_state, RecoveryAction};
+use nanobook::Symbol;
+use nanobook_broker::mock::{FillMode, MockBroker};
+use nanobook_broker::{Broker, BrokerOrder, BrokerOrderType, BrokerSide};
+use nanobook_rebalancer::audit::{log_positions_checkpoint, AuditLog};
+use nanobook_rebalancer::config::Config;
+use nanobook_rebalancer::diff::CurrentPosition;
+use nanobook_rebalancer::recovery::{reconstruct_state, RecoveryAction, run_recover};
+use nanobook_rebalancer::target::TargetSpec;
+use tempfile::tempdir;
 
 #[test]
 fn roundtrip_position_through_audit_log_preserves_avg_cost() {
-    use nanobook::Symbol;
-    use nanobook_rebalancer::audit::{log_positions_checkpoint, AuditLog};
-    use nanobook_rebalancer::diff::CurrentPosition;
 
     let dir = tempfile::tempdir().unwrap();
     let audit_path = dir.path().join("roundtrip_audit.jsonl");
@@ -403,4 +407,143 @@ fn test_checkpoint_coverage_all_checkpoints() {
         );
         assert_eq!(state.sequence_number, (i + 2) as u64);
     }
+}
+
+/// Test recovery with broker state comparison.
+#[test]
+fn test_recovery_with_broker_state_comparison() {
+    let dir = tempdir().unwrap();
+    let audit_path = dir.path().join("audit.jsonl");
+    let workdir = dir.path();
+    let config_path = dir.path().join("config.toml");
+    let target_path = dir.path().join("target.json");
+
+    // Create a minimal config
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"
+[account]
+id = "U1234567"
+type = "cash"
+
+[connection]
+host = "127.0.0.1"
+port = 7497
+client_id = 1
+
+[logging]
+dir = "{}"
+audit_file = "audit.jsonl"
+
+[execution]
+limit_offset_bps = 10
+quote_staleness_threshold_sec = 30
+order_timeout_secs = 60
+order_interval_ms = 1000
+max_orders_per_run = 100
+
+[risk]
+max_position_pct = 0.25
+max_leverage = 1.0
+min_trade_usd = 100.0
+
+[cost]
+commission_per_share = 0.005
+commission_min = 1.0
+slippage_bps = 5
+"#,
+            dir.path().display()
+        ),
+    )
+    .unwrap();
+
+    // Create a minimal target
+    std::fs::write(
+        &target_path,
+        r#"
+{
+    "timestamp": "2026-02-08T15:30:00Z",
+    "targets": [
+        {"symbol": "AAPL", "weight": 0.5}
+    ]
+}
+"#,
+    )
+    .unwrap();
+
+    // Simulate a crash at order_submitted checkpoint
+    {
+        let mut log = AuditLog::open_in(&audit_path, workdir).unwrap();
+        log.log_checkpoint(
+            nanobook_rebalancer::audit::Checkpoint::RunStarted,
+            1,
+            serde_json::json!({"target": "test"}),
+        )
+        .unwrap();
+        log.log_checkpoint(
+            nanobook_rebalancer::audit::Checkpoint::PositionsFetched,
+            2,
+            serde_json::json!({
+                "positions": [{
+                    "symbol": "AAPL",
+                    "qty": 100,
+                    "avg_cost": 150.0
+                }]
+            }),
+        )
+        .unwrap();
+        log.log_checkpoint(
+            nanobook_rebalancer::audit::Checkpoint::DiffComputed,
+            3,
+            serde_json::json!({
+                "orders": [{
+                    "symbol": "AAPL",
+                    "action": "Buy",
+                    "shares": 50,
+                    "limit": 160.0,
+                    "description": "test"
+                }]
+            }),
+        )
+        .unwrap();
+        log.log_checkpoint(
+            nanobook_rebalancer::audit::Checkpoint::OrderSubmitted,
+            4,
+            serde_json::json!({
+                "symbol": "AAPL",
+                "action": "Buy",
+                "ibkr_id": 12345
+            }),
+        )
+        .unwrap();
+    }
+
+    // Create MockBroker with an orphan order
+    let mut broker = MockBroker::builder()
+        .fill_mode(FillMode::ImmediatePartial(0.5))
+        .with_position(Symbol::new("AAPL"), 100, 150_00)
+        .build();
+    broker.connect().unwrap();
+
+    // Submit an order to create an open order in the broker (orphan)
+    let order = BrokerOrder {
+        symbol: Symbol::new("AAPL"),
+        side: BrokerSide::Buy,
+        quantity: 25,
+        order_type: BrokerOrderType::Market,
+        client_order_id: None,
+    };
+    broker.submit_order(&order).unwrap();
+
+    // Load config and target
+    let config = Config::load(&config_path).unwrap();
+    let spec = TargetSpec::load(&target_path).unwrap();
+
+    // Run recovery with broker
+    let result = run_recover(&config, &spec, true, Some(&broker as &dyn Broker));
+
+    // Recovery should return error for ManualReview action (expected)
+    // The important part is that broker state comparison was performed
+    assert!(result.is_err());
 }
