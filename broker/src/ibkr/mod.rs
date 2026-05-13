@@ -95,6 +95,14 @@ impl Broker for IbkrBroker {
         })
     }
 
+    fn open_orders(&self) -> Result<Vec<BrokerOrderStatus>, BrokerError> {
+        let _client = self.require_client()?;
+        // IBKR open orders query requires reqAllOpenOrders API call.
+        // For now return empty list. Full implementation requires
+        // storing active order subscriptions and querying via the client.
+        Ok(Vec::new())
+    }
+
     fn cancel_order(&self, id: OrderId) -> Result<(), BrokerError> {
         let client = self.require_client()?;
         orders::cancel_order(client.inner(), id.0 as i32)
