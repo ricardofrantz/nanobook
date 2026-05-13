@@ -2,7 +2,7 @@
 #
 # Cron-friendly runner script for paper trading IBKR dry-run
 #
-# Usage: ./runner.sh <config-file>
+# Usage: ./runner.sh <config-file> <target-file>
 #
 # This script:
 # - Uses rebalancer --cron-mode for idempotent execution
@@ -20,6 +20,7 @@ cd "$SCRIPT_DIR"
 
 # Configuration
 CONFIG_FILE="${1:-risk-config.toml}"
+TARGET_FILE="${2:-target.json}"
 LOG_DIR="$SCRIPT_DIR/logs"
 AUDIT_DIR="$SCRIPT_DIR/audit"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -35,10 +36,17 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
+# Check if target file exists
+if [ ! -f "$TARGET_FILE" ]; then
+    echo "[$(date)] ERROR: Target file not found: $TARGET_FILE" | tee -a "$LOG_FILE"
+    exit 1
+fi
+
 # Log header
 echo "========================================" | tee -a "$LOG_FILE"
 echo "[$(date)] Starting rebalancer run" | tee -a "$LOG_FILE"
 echo "[$(date)] Config: $CONFIG_FILE" | tee -a "$LOG_FILE"
+echo "[$(date)] Target: $TARGET_FILE" | tee -a "$LOG_FILE"
 echo "[$(date)] Log: $LOG_FILE" | tee -a "$LOG_FILE"
 echo "========================================" | tee -a "$LOG_FILE"
 
@@ -50,9 +58,9 @@ if [ ! -f "$REBALANCER_BIN" ]; then
     exit 1
 fi
 
-if "$REBALANCER_BIN" --cron-mode \
+if "$REBALANCER_BIN" run --cron-mode \
     --config "$CONFIG_FILE" \
-    --audit-log "$AUDIT_DIR/audit.jsonl" \
+    "$TARGET_FILE" \
     2>&1 | tee -a "$LOG_FILE"; then
     EXIT_CODE=0
     STATUS="SUCCESS"
