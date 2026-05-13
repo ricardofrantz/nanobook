@@ -605,4 +605,340 @@ mod tests {
         assert_eq!(result.stop_events[0].reason, "trailing");
         assert_eq!(result.stop_events[0].trigger_price, 104_50);
     }
+
+    #[test]
+    fn atr_stop_triggers_on_high_volatility() {
+        let weights = vec![
+            vec![(aapl(), 1.0)],
+            vec![(aapl(), 1.0)],
+            vec![(aapl(), 1.0)],
+            vec![(aapl(), 1.0)],
+        ];
+        // High volatility: 100 -> 110 -> 95 -> 85 (large moves)
+        let prices = vec![
+            vec![(aapl(), 100_00)],
+            vec![(aapl(), 110_00)],
+            vec![(aapl(), 95_00)],
+            vec![(aapl(), 85_00)],
+        ];
+
+        let options = BacktestBridgeOptions {
+            stop_cfg: Some(BacktestStopConfig {
+                fixed_stop_pct: None,
+                trailing_stop_pct: None,
+                atr_multiple: Some(2.0), // 2x ATR stop
+                atr_period: 3,
+            }),
+        };
+
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
+
+        // Should trigger on high volatility
+        assert!(!result.stop_events.is_empty());
+        assert_eq!(result.stop_events[0].reason, "atr");
+    }
+
+    #[test]
+    fn short_position_fixed_stop_triggers_on_rise() {
+        let weights = vec![vec![(aapl(), -1.0)], vec![(aapl(), -1.0)]];
+        // Short position: stop triggers when price rises
+        let prices = vec![vec![(aapl(), 100_00)], vec![(aapl(), 115_00)]];
+
+        let options = BacktestBridgeOptions {
+            stop_cfg: Some(BacktestStopConfig {
+                fixed_stop_pct: Some(0.10), // 10% stop
+                trailing_stop_pct: None,
+                atr_multiple: None,
+                atr_period: 14,
+            }),
+        };
+
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
+
+        assert_eq!(result.stop_events.len(), 1);
+        assert_eq!(result.stop_events[0].reason, "fixed");
+        assert_eq!(result.stop_events[0].trigger_price, 110_00); // 100 * 1.10
+        assert_eq!(result.stop_events[0].exit_price, 115_00);
+    }
+
+    #[test]
+    fn short_position_trailing_stop_adjusts_downward() {
+        let weights = vec![
+            vec![(aapl(), -1.0)],
+            vec![(aapl(), -1.0)],
+            vec![(aapl(), -1.0)],
+        ];
+        // Short: trailing stop moves down as price falls (protects profit)
+        let prices = vec![
+            vec![(aapl(), 100_00)],
+            vec![(aapl(), 90_00)], // profit, trailing stop adjusts down
+            vec![(aapl(), 98_00)], // rises but doesn't hit adjusted stop
+        ];
+
+        let options = BacktestBridgeOptions {
+            stop_cfg: Some(BacktestStopConfig {
+                fixed_stop_pct: None,
+                trailing_stop_pct: Some(0.05),
+                atr_multiple: None,
+                atr_period: 14,
+            }),
+        };
+
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
+
+        // Should not trigger - price rose but trailing stop adjusted down
+        assert!(result.stop_events.is_empty());
+    }
+
+    #[test]
+    fn multiple_symbols_independent_stops() {
+        let weights = vec![
+            vec![(aapl(), 0.5), (msft(), 0.5)],
+            vec![(aapl(), 0.5), (msft(), 0.5)],
+        ];
+        // AAPL drops 15% (triggers 10% stop), MSFT drops 5% (no trigger)
+        let prices = vec![
+            vec![(aapl(), 100_00), (msft(), 100_00)],
+            vec![(aapl(), 85_00), (msft(), 95_00)],
+        ];
+
+        let options = BacktestBridgeOptions {
+            stop_cfg: Some(BacktestStopConfig {
+                fixed_stop_pct: Some(0.10),
+                trailing_stop_pct: None,
+                atr_multiple: None,
+                atr_period: 14,
+            }),
+        };
+
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
+
+        assert_eq!(result.stop_events.len(), 1);
+        assert_eq!(result.stop_events[0].symbol, aapl());
+        assert!(result.holdings[1].iter().all(|(sym, _)| *sym != aapl()));
+    }
+
+    #[test]
+    fn stop_loss_with_transaction_costs() {
+        let weights = vec![vec![(aapl(), 1.0)], vec![(aapl(), 1.0)]];
+        let prices = vec![vec![(aapl(), 100_00)], vec![(aapl(), 85_00)]];
+
+        let options = BacktestBridgeOptions {
+            stop_cfg: Some(BacktestStopConfig {
+                fixed_stop_pct: Some(0.10),
+                trailing_stop_pct: None,
+                atr_multiple: None,
+                atr_period: 14,
+            }),
+        };
+
+        // 10 bps cost
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 10, 252.0, 0.0, options);
+
+        assert_eq!(result.stop_events.len(), 1);
+        // Stop should still trigger despite costs
+        assert_eq!(result.stop_events[0].reason, "fixed");
+    }
+
+    #[test]
+    fn stop_loss_sanitizes_invalid_config() {
+        let weights = vec![vec![(aapl(), 1.0)], vec![(aapl(), 1.0)]];
+        let prices = vec![vec![(aapl(), 100_00)], vec![(aapl(), 85_00)]];
+
+        // Invalid: negative percentage (should be ignored)
+        let options = BacktestBridgeOptions {
+            stop_cfg: Some(BacktestStopConfig {
+                fixed_stop_pct: Some(-0.10), // invalid
+                trailing_stop_pct: None,
+                atr_multiple: None,
+                atr_period: 14,
+            }),
+        };
+
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
+
+        // Should not trigger - invalid config ignored
+        assert!(result.stop_events.is_empty());
+    }
+
+    #[test]
+    fn stop_loss_sanitizes_extreme_percentage() {
+        let weights = vec![vec![(aapl(), 1.0)], vec![(aapl(), 1.0)]];
+        let prices = vec![vec![(aapl(), 100_00)], vec![(aapl(), 85_00)]];
+
+        // Invalid: percentage >= 100% (should be ignored)
+        let options = BacktestBridgeOptions {
+            stop_cfg: Some(BacktestStopConfig {
+                fixed_stop_pct: Some(1.50), // 150% - invalid
+                trailing_stop_pct: None,
+                atr_multiple: None,
+                atr_period: 14,
+            }),
+        };
+
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
+
+        // Should not trigger - invalid config ignored
+        assert!(result.stop_events.is_empty());
+    }
+
+    #[test]
+    fn position_flip_resets_stop_tracker() {
+        let weights = vec![
+            vec![(aapl(), 1.0)],   // long
+            vec![(aapl(), -1.0)],  // flip to short
+            vec![(aapl(), -1.0)],
+        ];
+        let prices = vec![
+            vec![(aapl(), 100_00)],
+            vec![(aapl(), 95_00)],
+            vec![(aapl(), 110_00)], // short stop would trigger at 105
+        ];
+
+        let options = BacktestBridgeOptions {
+            stop_cfg: Some(BacktestStopConfig {
+                fixed_stop_pct: Some(0.10),
+                trailing_stop_pct: None,
+                atr_multiple: None,
+                atr_period: 14,
+            }),
+        };
+
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
+
+        // Should trigger on short position after flip
+        assert_eq!(result.stop_events.len(), 1);
+        assert_eq!(result.stop_events[0].period_index, 2);
+    }
+
+    #[test]
+    fn stop_loss_with_low_volatility_no_atr_trigger() {
+        let weights = vec![
+            vec![(aapl(), 1.0)],
+            vec![(aapl(), 1.0)],
+            vec![(aapl(), 1.0)],
+            vec![(aapl(), 1.0)],
+        ];
+        // Low volatility: small price moves
+        let prices = vec![
+            vec![(aapl(), 100_00)],
+            vec![(aapl(), 101_00)],
+            vec![(aapl(), 102_00)],
+            vec![(aapl(), 101_50)],
+        ];
+
+        let options = BacktestBridgeOptions {
+            stop_cfg: Some(BacktestStopConfig {
+                fixed_stop_pct: None,
+                trailing_stop_pct: None,
+                atr_multiple: Some(3.0), // high multiple but low volatility
+                atr_period: 3,
+            }),
+        };
+
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
+
+        // Should not trigger - low volatility keeps ATR small
+        assert!(result.stop_events.is_empty());
+    }
+
+    #[test]
+    fn stop_loss_atr_period_clamps_to_minimum() {
+        let weights = vec![vec![(aapl(), 1.0)], vec![(aapl(), 1.0)]];
+        let prices = vec![vec![(aapl(), 100_00)], vec![(aapl(), 85_00)]];
+
+        let options = BacktestBridgeOptions {
+            stop_cfg: Some(BacktestStopConfig {
+                fixed_stop_pct: None,
+                trailing_stop_pct: None,
+                atr_multiple: Some(2.0),
+                atr_period: 0, // should clamp to 1
+            }),
+        };
+
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
+
+        // Should use period 1 and potentially trigger
+        // ATR with period 1 is just the last absolute change
+        assert_eq!(result.stop_events.len(), 1);
+        assert_eq!(result.stop_events[0].reason, "atr");
+    }
+
+    #[test]
+    fn stop_loss_with_rebalance_keeps_tracking() {
+        let weights = vec![
+            vec![(aapl(), 0.8), (msft(), 0.2)],
+            vec![(aapl(), 0.6), (msft(), 0.4)], // rebalance
+            vec![(aapl(), 0.6), (msft(), 0.4)],
+        ];
+        let prices = vec![
+            vec![(aapl(), 100_00), (msft(), 100_00)],
+            vec![(aapl(), 95_00), (msft(), 95_00)], // both drop
+            vec![(aapl(), 85_00), (msft(), 95_00)], // AAPL triggers
+        ];
+
+        let options = BacktestBridgeOptions {
+            stop_cfg: Some(BacktestStopConfig {
+                fixed_stop_pct: Some(0.10),
+                trailing_stop_pct: None,
+                atr_multiple: None,
+                atr_period: 14,
+            }),
+        };
+
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
+
+        // AAPL should trigger, MSFT should continue
+        assert_eq!(result.stop_events.len(), 1);
+        assert_eq!(result.stop_events[0].symbol, aapl());
+        assert!(result.holdings[2].iter().any(|(sym, _)| *sym == msft()));
+    }
+
+    #[test]
+    fn no_stop_config_emits_no_events() {
+        let weights = vec![vec![(aapl(), 1.0)], vec![(aapl(), 1.0)]];
+        let prices = vec![vec![(aapl(), 100_00)], vec![(aapl(), 50_00)]]; // 50% drop
+
+        let options = BacktestBridgeOptions {
+            stop_cfg: None, // no stop config
+        };
+
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
+
+        // No stop events when config is None
+        assert!(result.stop_events.is_empty());
+    }
+
+    #[test]
+    fn all_stop_types_disabled_emits_no_events() {
+        let weights = vec![vec![(aapl(), 1.0)], vec![(aapl(), 1.0)]];
+        let prices = vec![vec![(aapl(), 100_00)], vec![(aapl(), 50_00)]];
+
+        let options = BacktestBridgeOptions {
+            stop_cfg: Some(BacktestStopConfig {
+                fixed_stop_pct: None,
+                trailing_stop_pct: None,
+                atr_multiple: None,
+                atr_period: 14,
+            }),
+        };
+
+        let result =
+            backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
+
+        // No stop events when all types disabled
+        assert!(result.stop_events.is_empty());
+    }
 }
