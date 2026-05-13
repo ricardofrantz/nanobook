@@ -57,6 +57,7 @@ pub struct MockBinance {
     client_order_ids: Mutex<HashSet<String>>,
     next_order_id: AtomicU64,
     active_failure: Mutex<Option<FailureMode>>,
+    websocket_disconnected: Mutex<bool>,
 }
 
 impl MockBinance {
@@ -67,6 +68,7 @@ impl MockBinance {
             client_order_ids: Mutex::new(HashSet::new()),
             next_order_id: AtomicU64::new(1),
             active_failure: Mutex::new(None),
+            websocket_disconnected: Mutex::new(false),
         }
     }
 
@@ -132,6 +134,32 @@ impl MockBinance {
     /// Get all orders.
     pub fn all_orders(&self) -> Vec<MockOrder> {
         self.orders.lock().unwrap().values().cloned().collect()
+    }
+
+    /// Simulate a WebSocket disconnect while preserving exchange-side state.
+    pub fn simulate_websocket_disconnect(&self) {
+        *self.websocket_disconnected.lock().unwrap() = true;
+    }
+
+    /// Simulate a WebSocket reconnect while preserving exchange-side state.
+    pub fn simulate_websocket_reconnect(&self) {
+        *self.websocket_disconnected.lock().unwrap() = false;
+    }
+
+    /// Return whether the simulated WebSocket is currently disconnected.
+    pub fn is_websocket_disconnected(&self) -> bool {
+        *self.websocket_disconnected.lock().unwrap()
+    }
+
+    /// Mark an order as partially filled.
+    pub fn simulate_partial_fill(&self, order_id: &str) -> Result<(), String> {
+        let mut orders = self.orders.lock().unwrap();
+        if let Some(order) = orders.get_mut(order_id) {
+            order.status = OrderState::PartiallyFilled;
+            Ok(())
+        } else {
+            Err(format!("Order {} not found", order_id))
+        }
     }
 
     /// Cancel an order by ID.
@@ -216,6 +244,7 @@ impl MockBinance {
         self.orders.lock().unwrap().clear();
         self.client_order_ids.lock().unwrap().clear();
         self.next_order_id.store(1, Ordering::Relaxed);
+        *self.websocket_disconnected.lock().unwrap() = false;
     }
 
     /// Inject a failure mode.
