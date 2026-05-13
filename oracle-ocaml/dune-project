@@ -1,15 +1,15 @@
 (lang dune 3.16)
-(name oracle_ocaml)
+(name oracle)
 
 (generate_opam_files true)
 
 (package
- (name oracle_ocaml)
+ (name oracle)
  (allow_empty)
  (synopsis "OCaml limit-order-book reference oracle for nanobook")
  (description "Reference LOB implementation for differential testing against the Rust nanobook engine")
  (depends
   (ocaml (>= 4.14))
-  (dune (>= 3.0))
+  (dune (>= 3.16))
   yojson
   crowbar))
