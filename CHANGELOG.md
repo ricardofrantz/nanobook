@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Complete deprecation cleanup**: Removed Python wrapper functions for `garch_forecast`, `optimize_cvar`, and `optimize_cdar` that were accidentally left in place during the v0.15.0 release. The Rust implementations were removed but the Python wrappers remained, causing runtime failures. Users should use the replacement functions: `garch_ewma_forecast`, `inverse_cvar_weights`, and `inverse_cdar_weights`.
+
 ## [0.15.0] - 2026-05-13 - Documentation & Infrastructure
 
 This release focuses on documentation completeness, infrastructure hardening, and release process improvements. No new user-facing features — all changes are either documentation, CI improvements, or cleanup of deprecated APIs.
