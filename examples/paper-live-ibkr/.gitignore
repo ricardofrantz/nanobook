@@ -23,3 +23,6 @@ target.json
 # User config files (user will customize for their IBKR settings)
 *.toml
 !risk-config.toml
+
+# Generated reports
+report.html
