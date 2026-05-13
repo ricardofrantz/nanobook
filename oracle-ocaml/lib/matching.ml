@@ -150,9 +150,8 @@ and match_at_price book incoming_ref price policy result =
                       match policy with
                       | Off -> ()  (* Should not happen due to stp_conflict check *)
                       | CancelNewest ->
-                          (* Cancel incoming remainder; leave resting intact *)
-                          let new_incoming = Order.fill !incoming_ref incoming_qty in
-                          let cancelled_incoming = fst (Order.cancel new_incoming) in
+                          (* Cancel incoming order; leave resting intact *)
+                          let cancelled_incoming = fst (Order.cancel !incoming_ref) in
                           incoming_ref := cancelled_incoming;
                           result := { !result with stp_cancelled = true }
                       | CancelOldest ->
@@ -168,8 +167,7 @@ and match_at_price book incoming_ref price policy result =
                           if incoming_qty < resting_qty then
                             begin
                               (* Smaller = incoming: cancel incoming, leave resting *)
-                              let new_incoming = Order.fill !incoming_ref incoming_qty in
-                              let cancelled_incoming = fst (Order.cancel new_incoming) in
+                              let cancelled_incoming = fst (Order.cancel !incoming_ref) in
                               incoming_ref := cancelled_incoming;
                               result := { !result with stp_cancelled = true }
                             end

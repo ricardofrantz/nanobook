@@ -31,7 +31,8 @@ Submit a limit order to the book.
   "price": 10000,
   "quantity": 100,
   "time_in_force": "GTC|IOC|FOK",
-  "owner": null or 1
+  "owner": null or 1,
+  "stp_policy": "Off|CancelNewest|CancelOldest|DecrementAndCancel"
 }
 ```
 
@@ -42,6 +43,7 @@ Submit a limit order to the book.
 - `quantity`: Positive integer
 - `time_in_force`: "GTC" (Good-til-cancelled), "IOC" (Immediate-or-cancel), or "FOK" (Fill-or-kill)
 - `owner`: Optional integer owner ID for self-trade prevention (null if no owner)
+- `stp_policy`: Self-trade prevention policy (default: "Off")
 
 ### SubmitMarket
 
@@ -52,7 +54,8 @@ Submit a market order for immediate execution.
   "type": "SubmitMarket",
   "side": "BUY|SELL",
   "quantity": 100,
-  "owner": null or 1
+  "owner": null or 1,
+  "stp_policy": "Off|CancelNewest|CancelOldest|DecrementAndCancel"
 }
 ```
 
@@ -61,6 +64,7 @@ Submit a market order for immediate execution.
 - `side`: "BUY" or "SELL"
 - `quantity`: Positive integer
 - `owner`: Optional integer owner ID for self-trade prevention (null if no owner)
+- `stp_policy`: Self-trade prevention policy (default: "Off")
 
 ### Cancel
 
@@ -77,7 +81,16 @@ Cancel an existing order by ID.
 - `type`: Event type, always "Cancel"
 - `order_id`: Integer order ID to cancel
 
-## Trade Format
+## Self-Trade Prevention (STP) Policies
+
+STP policies control what happens when an order would trade with another order from the same owner:
+
+- `Off`: No self-trade prevention - orders from same owner can trade freely
+- `CancelNewest`: Cancel the newest (incoming) order when self-trade detected
+- `CancelOldest`: Cancel the oldest (resting) order when self-trade detected
+- `DecrementAndCancel`: Cancel the smaller order; if equal, cancel the resting order
+
+STP only applies when both orders have the same `owner` ID. Orders with `owner: null` are not subject to STP.
 
 When replaying events, trades are emitted in JSONL format:
 

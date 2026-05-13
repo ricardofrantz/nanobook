@@ -6,11 +6,13 @@ type event =
       quantity: Order.quantity;
       time_in_force: Order.time_in_force;
       owner: Order.order_owner option;
+      stp_policy: Matching.stp_policy;
     }
   | SubmitMarket of {
       side: Side.side;
       quantity: Order.quantity;
       owner: Order.order_owner option;
+      stp_policy: Matching.stp_policy;
     }
   | Cancel of {
       order_id: Order.order_id;
@@ -40,7 +42,7 @@ let replay_events events =
   
   List.iter (fun event ->
     match event with
-    | SubmitLimit { side; price; quantity; time_in_force; owner } ->
+    | SubmitLimit { side; price; quantity; time_in_force; owner; stp_policy } ->
         let order_id = Book.next_order_id book in
         let timestamp = Book.next_timestamp book in
         let order = Order.create ~id:order_id ~side ~price ~quantity ~timestamp ~time_in_force in
@@ -50,7 +52,7 @@ let replay_events events =
         in
         
         (* Match the order against the book *)
-        let match_result = Matching.match_order book order Matching.Off in
+        let match_result = Matching.match_order book order stp_policy in
         
         (* Store the potentially modified order *)
         Book.store_order book order;
@@ -66,7 +68,7 @@ let replay_events events =
           let cancelled_order = fst (Order.cancel order) in
           Book.store_order book cancelled_order
           
-    | SubmitMarket { side; quantity; owner } ->
+    | SubmitMarket { side; quantity; owner; stp_policy } ->
         (* Market order - match immediately at best prices *)
         let order_id = Book.next_order_id book in
         let timestamp = Book.next_timestamp book in
@@ -83,7 +85,7 @@ let replay_events events =
         in
         
         (* Match the market order *)
-        let match_result = Matching.match_order book order Matching.Off in
+        let match_result = Matching.match_order book order stp_policy in
         
         (* Store the order (should be fully filled or cancelled) *)
         Book.store_order book order;
