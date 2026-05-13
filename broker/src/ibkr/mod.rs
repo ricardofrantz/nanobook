@@ -21,6 +21,32 @@ pub enum ConnectionState {
     Reconnecting,
 }
 
+#[derive(Debug, Clone)]
+pub struct DiscrepancyReport {
+    pub discrepancies: Vec<Discrepancy>,
+    pub has_critical_issues: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Discrepancy {
+    OrphanOrder {
+        order_id: OrderId,
+    },
+    MissingOrder {
+        order_id: OrderId,
+    },
+    OrderStatusMismatch {
+        order_id: OrderId,
+        local_status: String,
+        broker_status: OrderState,
+    },
+    PositionMismatch {
+        symbol: Symbol,
+        local_quantity: i64,
+        broker_quantity: i64,
+    },
+}
+
 /// Interactive Brokers broker, wrapping the TWS/Gateway blocking API.
 pub struct IbkrBroker {
     host: String,
@@ -61,9 +87,7 @@ impl IbkrBroker {
     /// * `Ok(Vec<Position>)` - Current positions after reconnect (for reconciliation)
     /// * `Err(BrokerError)` - If reconnection or position query fails
     pub fn reconnect(&mut self) -> Result<Vec<Position>, BrokerError> {
-        let client = self.client
-            .as_mut()
-            .ok_or(BrokerError::NotConnected)?;
+        let client = self.client.as_mut().ok_or(BrokerError::NotConnected)?;
         client.reconnect(&self.host, self.port, self.client_id)
     }
 
@@ -124,6 +148,48 @@ impl IbkrBroker {
             reason: last_error,
         })
     }
+
+    pub fn reconcile_state(&self) -> Result<DiscrepancyReport, BrokerError> {
+        let client = self.require_client()?;
+        let open_orders = self.open_orders()?;
+        let _positions = self.positions()?;
+        let cached_orders = client.cached_orders()?;
+
+        let mut discrepancies = Vec::new();
+        for broker_order in &open_orders {
+            match client.get_cached_order(broker_order.id.0 as i32)? {
+                Some(cached) => {
+                    let local_status = orders::map_ibkr_order_status(&cached.status);
+                    if local_status != broker_order.status {
+                        discrepancies.push(Discrepancy::OrderStatusMismatch {
+                            order_id: broker_order.id,
+                            local_status: cached.status,
+                            broker_status: broker_order.status,
+                        });
+                    }
+                }
+                None => discrepancies.push(Discrepancy::OrphanOrder {
+                    order_id: broker_order.id,
+                }),
+            }
+        }
+
+        for cached in cached_orders {
+            if !open_orders
+                .iter()
+                .any(|broker_order| broker_order.id.0 == cached.order_id as u64)
+            {
+                discrepancies.push(Discrepancy::MissingOrder {
+                    order_id: OrderId(cached.order_id as u64),
+                });
+            }
+        }
+
+        Ok(DiscrepancyReport {
+            has_critical_issues: !discrepancies.is_empty(),
+            discrepancies,
+        })
+    }
 }
 
 impl Broker for IbkrBroker {
@@ -168,11 +234,14 @@ impl Broker for IbkrBroker {
     }
 
     fn open_orders(&self) -> Result<Vec<BrokerOrderStatus>, BrokerError> {
-        let _client = self.require_client()?;
-        // IBKR open orders query requires reqAllOpenOrders API call.
-        // For now return empty list. Full implementation requires
-        // storing active order subscriptions and querying via the client.
-        Ok(Vec::new())
+        let client = self.require_client()?;
+        match client.open_orders() {
+            Ok(orders) => Ok(orders),
+            Err(err) => {
+                log::warn!("IBKR open-orders query failed: {err}");
+                Ok(Vec::new())
+            }
+        }
     }
 
     fn cancel_order(&self, id: OrderId) -> Result<(), BrokerError> {
