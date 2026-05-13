@@ -101,6 +101,7 @@ impl MockBrokerBuilder {
             cash_cents: self.cash_cents,
             next_order_id: AtomicU64::new(1),
             submitted_orders: Mutex::new(Vec::new()),
+            open_orders: Mutex::new(Vec::new()),
         }
     }
 }
@@ -115,6 +116,7 @@ pub struct MockBroker {
     cash_cents: i64,
     next_order_id: AtomicU64,
     submitted_orders: Mutex<Vec<RecordedOrder>>,
+    open_orders: Mutex<Vec<OrderId>>,
 }
 
 impl MockBroker {
@@ -185,7 +187,12 @@ impl Broker for MockBroker {
 
         match &self.fill_mode {
             FillMode::Reject => Err(BrokerError::Order("mock: order rejected".into())),
-            _ => Ok(OrderId(self.next_order_id.fetch_add(1, Ordering::Relaxed))),
+            _ => {
+                let id = OrderId(self.next_order_id.fetch_add(1, Ordering::Relaxed));
+                // Add to open orders list
+                self.open_orders.lock().unwrap().push(id);
+                Ok(id)
+            }
         }
     }
 
@@ -213,10 +220,42 @@ impl Broker for MockBroker {
         })
     }
 
-    fn cancel_order(&self, _id: OrderId) -> Result<(), BrokerError> {
+    fn open_orders(&self) -> Result<Vec<BrokerOrderStatus>, BrokerError> {
         if !self.connected {
             return Err(BrokerError::NotConnected);
         }
+
+        let open_ids = self.open_orders.lock().unwrap().clone();
+        let mut result = Vec::new();
+
+        for id in open_ids {
+            let (status, filled, remaining) = match &self.fill_mode {
+                FillMode::ImmediateFull => (OrderState::Filled, 100, 0),
+                FillMode::ImmediatePartial(frac) => {
+                    let filled = (100.0 * frac) as u64;
+                    (OrderState::PartiallyFilled, filled, 100 - filled)
+                }
+                FillMode::Reject => (OrderState::Rejected, 0, 0),
+            };
+
+            result.push(BrokerOrderStatus {
+                id,
+                status,
+                filled_quantity: filled,
+                remaining_quantity: remaining,
+                avg_fill_price_cents: 0,
+            });
+        }
+
+        Ok(result)
+    }
+
+    fn cancel_order(&self, id: OrderId) -> Result<(), BrokerError> {
+        if !self.connected {
+            return Err(BrokerError::NotConnected);
+        }
+        // Remove from open orders list
+        self.open_orders.lock().unwrap().retain(|&oid| oid != id);
         Ok(())
     }
 

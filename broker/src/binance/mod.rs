@@ -204,6 +204,13 @@ impl Broker for BinanceBroker {
         })
     }
 
+    fn open_orders(&self) -> Result<Vec<BrokerOrderStatus>, BrokerError> {
+        // Binance open orders query requires GET /api/v3/openOrders endpoint.
+        // For now return empty list. Full implementation requires
+        // querying via the client and parsing the response.
+        Ok(Vec::new())
+    }
+
     fn cancel_order(&self, id: OrderId) -> Result<(), BrokerError> {
         // Binance requires symbol + orderId. Without a local cache,
         // this is a placeholder. Full implementation would store

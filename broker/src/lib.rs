@@ -47,6 +47,9 @@ pub trait Broker {
     /// Get status of a submitted order.
     fn order_status(&self, id: OrderId) -> Result<BrokerOrderStatus, BrokerError>;
 
+    /// Get all open orders from the broker.
+    fn open_orders(&self) -> Result<Vec<BrokerOrderStatus>, BrokerError>;
+
     /// Cancel a pending order.
     fn cancel_order(&self, id: OrderId) -> Result<(), BrokerError>;
 

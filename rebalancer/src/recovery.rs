@@ -3,6 +3,7 @@
 use crate::audit::{AuditEvent, Checkpoint};
 use crate::error::{Error, Result};
 use nanobook::Symbol;
+use nanobook_broker::Broker;
 use serde::{Deserialize, Serialize};
 
 /// Recovery action to take after a crash.
@@ -55,6 +56,123 @@ pub struct RecoveredOrder {
     pub ibkr_id: i32,
     pub submitted: bool,
     pub filled: bool,
+}
+
+/// Discrepancy between broker state and reconstructed state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Discrepancy {
+    /// Order exists in broker but not in reconstructed state (orphan order)
+    OrphanOrder {
+        broker_order_id: u64,
+        symbol: String,
+        status: String,
+    },
+    /// Order exists in reconstructed state but not in broker open orders
+    MissingOrder {
+        symbol: String,
+        expected_status: String,
+    },
+    /// Order status mismatch between broker and reconstructed state
+    OrderStatusMismatch {
+        symbol: String,
+        broker_status: String,
+        expected_status: String,
+    },
+    /// Position mismatch between broker and reconstructed state
+    PositionMismatch {
+        symbol: String,
+        broker_qty: i64,
+        expected_qty: i64,
+    },
+}
+
+/// Report of discrepancies between broker state and reconstructed state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscrepancyReport {
+    pub discrepancies: Vec<Discrepancy>,
+    pub has_critical_issues: bool,
+}
+
+/// Compare broker state with reconstructed state and generate discrepancy report.
+pub fn compare_broker_state(
+    broker: &dyn Broker,
+    recovered_state: &RecoveredState,
+) -> Result<DiscrepancyReport> {
+    let mut discrepancies = Vec::new();
+
+    // Get broker open orders
+    let broker_orders = broker.open_orders()
+        .unwrap_or_else(|_| Vec::new());
+
+    // Check for orphan orders (in broker but not in reconstructed state)
+    for broker_order in &broker_orders {
+        let is_orphan = !recovered_state.orders.iter().any(|recovered_order| {
+            recovered_order.ibkr_id as u64 == broker_order.id.0
+        });
+
+        if is_orphan {
+            discrepancies.push(Discrepancy::OrphanOrder {
+                broker_order_id: broker_order.id.0,
+                symbol: "UNKNOWN".to_string(), // BrokerOrderStatus doesn't include symbol
+                status: format!("{:?}", broker_order.status),
+            });
+        }
+    }
+
+    // Check for missing orders (in reconstructed state but not in broker)
+    for recovered_order in &recovered_state.orders {
+        if recovered_order.submitted && !recovered_order.filled {
+            let is_missing = !broker_orders.iter().any(|broker_order| {
+                recovered_order.ibkr_id as u64 == broker_order.id.0
+            });
+
+            if is_missing {
+                discrepancies.push(Discrepancy::MissingOrder {
+                    symbol: recovered_order.symbol.as_str().to_string(),
+                    expected_status: "Submitted but not filled".to_string(),
+                });
+            }
+        }
+    }
+
+    // Get broker positions
+    let broker_positions = broker.positions()
+        .unwrap_or_else(|_| Vec::new());
+
+    // Check for position mismatches
+    for broker_position in &broker_positions {
+        let recovered_position = recovered_state.positions.iter()
+            .find(|rp| rp.symbol == broker_position.symbol);
+
+        if let Some(recovered_position) = recovered_position {
+            if recovered_position.quantity != broker_position.quantity {
+                discrepancies.push(Discrepancy::PositionMismatch {
+                    symbol: broker_position.symbol.as_str().to_string(),
+                    broker_qty: broker_position.quantity,
+                    expected_qty: recovered_position.quantity,
+                });
+            }
+        }
+    }
+
+    // Check for positions in recovered state but not in broker
+    for recovered_position in &recovered_state.positions {
+        let is_missing = !broker_positions.iter().any(|bp| bp.symbol == recovered_position.symbol);
+        if is_missing {
+            discrepancies.push(Discrepancy::PositionMismatch {
+                symbol: recovered_position.symbol.as_str().to_string(),
+                broker_qty: 0,
+                expected_qty: recovered_position.quantity,
+            });
+        }
+    }
+
+    let has_critical_issues = !discrepancies.is_empty();
+
+    Ok(DiscrepancyReport {
+        discrepancies,
+        has_critical_issues,
+    })
 }
 
 impl RecoveredState {
@@ -443,5 +561,103 @@ mod tests {
         assert_eq!(state.sequence_number, 2);
         assert!(state.run_completed);
         assert_eq!(action, RecoveryAction::Restart);
+    }
+
+    #[test]
+    fn compare_broker_state_no_discrepancies() {
+        use nanobook_broker::mock::{MockBroker, FillMode};
+
+        let mut broker = MockBroker::builder()
+            .fill_mode(FillMode::ImmediateFull)
+            .with_position(Symbol::new("AAPL"), 100, 150_00)
+            .build();
+        broker.connect().unwrap();
+
+        let state = RecoveredState {
+            checkpoint: Checkpoint::RunCompleted,
+            sequence_number: 1,
+            timestamp: chrono::Utc::now(),
+            positions: vec![RecoveredPosition {
+                symbol: Symbol::new("AAPL"),
+                quantity: 100,
+                avg_cost_cents: 150_00,
+            }],
+            orders: vec![],
+            equity_cents: 100_000_00,
+            run_completed: true,
+        };
+
+        let report = compare_broker_state(&broker, &state).unwrap();
+        assert!(!report.has_critical_issues);
+        assert!(report.discrepancies.is_empty());
+    }
+
+    #[test]
+    fn compare_broker_state_orphan_order() {
+        use nanobook_broker::mock::{MockBroker, FillMode};
+        use nanobook_broker::{BrokerOrder, BrokerOrderType, BrokerSide};
+
+        let mut broker = MockBroker::builder()
+            .fill_mode(FillMode::ImmediatePartial(0.5))
+            .with_position(Symbol::new("AAPL"), 100, 150_00)
+            .build();
+        broker.connect().unwrap();
+
+        // Submit an order to create an open order in the broker
+        let order = BrokerOrder {
+            symbol: Symbol::new("AAPL"),
+            side: BrokerSide::Buy,
+            quantity: 50,
+            order_type: BrokerOrderType::Market,
+            client_order_id: None,
+        };
+        broker.submit_order(&order).unwrap();
+
+        let state = RecoveredState {
+            checkpoint: Checkpoint::OrderSubmitted,
+            sequence_number: 1,
+            timestamp: chrono::Utc::now(),
+            positions: vec![RecoveredPosition {
+                symbol: Symbol::new("AAPL"),
+                quantity: 100,
+                avg_cost_cents: 150_00,
+            }],
+            orders: vec![], // No orders in recovered state
+            equity_cents: 100_000_00,
+            run_completed: false,
+        };
+
+        let report = compare_broker_state(&broker, &state).unwrap();
+        assert!(report.has_critical_issues);
+        assert!(!report.discrepancies.is_empty());
+    }
+
+    #[test]
+    fn compare_broker_state_position_mismatch() {
+        use nanobook_broker::mock::{MockBroker, FillMode};
+
+        let mut broker = MockBroker::builder()
+            .fill_mode(FillMode::ImmediateFull)
+            .with_position(Symbol::new("AAPL"), 150, 150_00) // Different quantity
+            .build();
+        broker.connect().unwrap();
+
+        let state = RecoveredState {
+            checkpoint: Checkpoint::RunCompleted,
+            sequence_number: 1,
+            timestamp: chrono::Utc::now(),
+            positions: vec![RecoveredPosition {
+                symbol: Symbol::new("AAPL"),
+                quantity: 100, // Different from broker
+                avg_cost_cents: 150_00,
+            }],
+            orders: vec![],
+            equity_cents: 100_000_00,
+            run_completed: true,
+        };
+
+        let report = compare_broker_state(&broker, &state).unwrap();
+        assert!(report.has_critical_issues);
+        assert!(!report.discrepancies.is_empty());
     }
 }
