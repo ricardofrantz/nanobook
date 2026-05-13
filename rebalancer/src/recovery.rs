@@ -399,6 +399,9 @@ pub fn run_recover(config: &Config, _target_spec: &TargetSpec, dry_run: bool) ->
     println!("\n=== Recovery Action ===");
     println!("{:?}", recovery_action);
 
+    println!("\n=== Broker State Verification ===");
+    println!("To verify broker state, manually check IBKR TWS for open orders and positions.");
+
     println!("\n=== Recovery Guidance ===");
     match recovery_action {
         RecoveryAction::Restart => {
@@ -417,12 +420,14 @@ pub fn run_recover(config: &Config, _target_spec: &TargetSpec, dry_run: bool) ->
             println!("Manual review required.");
             println!("The crash occurred at an ambiguous point.");
             println!("Please review broker state and decide on the appropriate action.");
+            println!("IMPORTANT: Verify IBKR TWS for open orders and positions before proceeding.");
             return Err(Error::Recovery("Manual review required".to_string()));
         }
         RecoveryAction::Rollback => {
             println!("Rollback recommended.");
             println!("Orders were submitted but may be in an unknown state.");
             println!("Please review broker open orders and cancel if necessary.");
+            println!("IMPORTANT: Verify IBKR TWS for open orders and positions before proceeding.");
             return Err(Error::Recovery(
                 "Rollback required - manual intervention needed".to_string(),
             ));
