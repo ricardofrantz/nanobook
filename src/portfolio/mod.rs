@@ -8,7 +8,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```
 //! use nanobook::portfolio::{Portfolio, CostModel};
 //! use nanobook::Symbol;
 //!
@@ -18,6 +18,11 @@
 //! let targets = [(Symbol::new("AAPL"), 0.6), (Symbol::new("MSFT"), 0.4)];
 //! let prices = [(Symbol::new("AAPL"), 150_00), (Symbol::new("MSFT"), 300_00)];
 //! portfolio.rebalance_simple(&targets, &prices);
+//! portfolio.record_return(&prices);
+//!
+//! let snapshot = portfolio.snapshot(&prices);
+//! assert_eq!(snapshot.num_positions, 2);
+//! assert!(snapshot.equity > 0);
 //! ```
 
 pub mod cost_model;
@@ -61,6 +66,20 @@ mod serde_positions {
 /// A portfolio tracking cash, positions, returns, and equity.
 ///
 /// All monetary values (cash, equity) are in the smallest currency unit (cents).
+///
+/// ```
+/// use nanobook::portfolio::{CostModel, Portfolio};
+/// use nanobook::Symbol;
+///
+/// let mut portfolio = Portfolio::new(100_000_00, CostModel::zero());
+/// let aapl = Symbol::new("AAPL");
+///
+/// portfolio.rebalance_simple(&[(aapl, 0.50)], &[(aapl, 200_00)]);
+///
+/// let position = portfolio.position(&aapl).unwrap();
+/// assert_eq!(position.quantity, 250);
+/// assert_eq!(portfolio.current_weights(&[(aapl, 200_00)])[0].1, 0.5);
+/// ```
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Portfolio {

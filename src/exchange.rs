@@ -27,6 +27,23 @@ use crate::{
 /// - Book snapshots for market data
 /// - Trade history
 /// - Event logging for replay
+///
+/// ```
+/// use nanobook::{Exchange, Price, Side, TimeInForce};
+///
+/// let mut exchange = Exchange::new();
+///
+/// let resting = exchange.submit_limit(Side::Sell, Price(101_00), 100, TimeInForce::GTC);
+/// assert_eq!(exchange.best_ask(), Some(Price(101_00)));
+///
+/// let taker = exchange.submit_market(Side::Buy, 40);
+/// assert_eq!(taker.filled_quantity, 40);
+/// assert_eq!(taker.trades.len(), 1);
+/// assert_eq!(exchange.trades()[0].price, Price(101_00));
+///
+/// let remaining = exchange.get_order(resting.order_id).unwrap();
+/// assert_eq!(remaining.remaining_quantity, 60);
+/// ```
 #[derive(Clone, Debug)]
 pub struct Exchange {
     /// The underlying order book

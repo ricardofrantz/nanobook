@@ -7,6 +7,23 @@ use std::fmt;
 ///
 /// Trades are created when an incoming (aggressor) order matches
 /// against a resting (passive) order on the book.
+///
+/// ```
+/// use nanobook::{OrderId, Price, Side, Trade, TradeId};
+///
+/// let trade = Trade::new(
+///     TradeId(1),
+///     Price(101_25),
+///     50,
+///     OrderId(10),
+///     OrderId(4),
+///     Side::Buy,
+///     1_700_000_000,
+/// );
+///
+/// assert_eq!(trade.passive_side(), Side::Sell);
+/// assert_eq!(trade.notional().unwrap(), 506_250);
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Trade {

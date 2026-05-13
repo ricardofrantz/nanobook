@@ -17,6 +17,28 @@ use crate::OrderStatus;
 ///
 /// Maintains both sides of the book plus a central index of all orders
 /// (active and historical) for O(1) lookup.
+///
+/// ```
+/// use nanobook::{Order, OrderBook, Price, Side, TimeInForce};
+///
+/// let mut book = OrderBook::new();
+/// let order = Order::new(
+///     book.next_order_id(),
+///     Side::Buy,
+///     Price(100_00),
+///     250,
+///     book.next_timestamp(),
+///     TimeInForce::GTC,
+/// );
+/// let order_id = order.id;
+///
+/// book.add_order(order);
+///
+/// assert_eq!(book.best_bid(), Some(Price(100_00)));
+/// assert_eq!(book.active_order_count(), 1);
+/// assert_eq!(book.cancel_order(order_id), Some(250));
+/// assert_eq!(book.active_order_count(), 0);
+/// ```
 #[derive(Clone, Debug)]
 pub struct OrderBook {
     /// Buy orders, sorted by price descending (best = highest)

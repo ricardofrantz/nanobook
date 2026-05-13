@@ -47,6 +47,27 @@ impl OrderStatus {
 }
 
 /// An order in the order book.
+///
+/// ```
+/// use nanobook::{Order, OrderId, OrderOwner, OrderStatus, Price, Side, TimeInForce};
+///
+/// let mut order = Order::new(
+///     OrderId(7),
+///     Side::Buy,
+///     Price(250_00),
+///     100,
+///     1,
+///     TimeInForce::GTC,
+/// ).with_owner(OrderOwner(42));
+///
+/// order.fill(35);
+/// assert_eq!(order.status, OrderStatus::PartiallyFilled);
+/// assert_eq!(order.remaining_quantity, 65);
+///
+/// let cancelled = order.cancel();
+/// assert_eq!(cancelled, 65);
+/// assert_eq!(order.status, OrderStatus::Cancelled);
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Order {
