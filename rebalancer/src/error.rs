@@ -60,9 +60,18 @@ pub enum Error {
     /// symlinks to arbitrary filesystem locations.
     #[error(
         "audit path {path} resolves outside the working directory — \
-         update `logging.dir` to a directory under CWD"
+         update `logging.dir` to a a directory under CWD"
     )]
     AuditPathOutsideWorkdir { path: PathBuf },
+
+    /// The rebalance window was already completed in cron mode.
+    #[error(
+        "rebalance window {window_id} already completed with sequence number {sequence_number} — refusing to run"
+    )]
+    IdempotencyRejection {
+        window_id: String,
+        sequence_number: u64,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
