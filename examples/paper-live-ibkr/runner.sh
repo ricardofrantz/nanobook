@@ -14,6 +14,8 @@ set -euo pipefail
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Workspace root (for finding rebalancer binary)
+WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$SCRIPT_DIR"
 
 # Configuration
@@ -41,8 +43,14 @@ echo "[$(date)] Log: $LOG_FILE" | tee -a "$LOG_FILE"
 echo "========================================" | tee -a "$LOG_FILE"
 
 # Run rebalancer with cron-mode
-# Note: Adjust the rebalancer path as needed for your installation
-if rebalancer --cron-mode \
+REBALANCER_BIN="$WORKSPACE_ROOT/target/release/rebalancer"
+if [ ! -f "$REBALANCER_BIN" ]; then
+    echo "[$(date)] ERROR: Rebalancer binary not found: $REBALANCER_BIN" | tee -a "$LOG_FILE"
+    echo "[$(date)] Run: cargo build --release -p nanobook-rebalancer" | tee -a "$LOG_FILE"
+    exit 1
+fi
+
+if "$REBALANCER_BIN" --cron-mode \
     --config "$CONFIG_FILE" \
     --audit-log "$AUDIT_DIR/audit.jsonl" \
     2>&1 | tee -a "$LOG_FILE"; then
