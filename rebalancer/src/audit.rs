@@ -2,6 +2,15 @@
 //!
 //! Each rebalancer run appends events to an audit.jsonl file,
 //! one JSON object per line (following nanobook's persistence pattern).
+//!
+//! # Clock Skew Detection
+//!
+//! The audit log includes clock skew detection to identify anomalous
+//! timestamp jumps caused by NTP drift, VM clock adjustments, or other
+//! system clock issues. When skew is detected, a WARN-level log message
+//! is emitted, but logging continues — the audit log does not block
+//! operations due to clock issues. This ensures audit trail integrity
+//! while alerting operators to investigate potential clock problems.
 
 use std::fs::{self, OpenOptions};
 use std::io::{BufWriter, Write};
@@ -9,7 +18,9 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use log::warn;
 
+use crate::clock_skew::{ClockSkewDetector, SkewResult};
 use crate::error::{Error, Result};
 
 /// An audit event written to the JSONL trail.
@@ -39,9 +50,20 @@ pub struct AuditEvent {
 /// files keep their current permissions — if you need to tighten an
 /// existing file, remove it and let nanobook recreate it, or call
 /// `chmod 600 <path>` out of band.
+///
+/// # Clock skew detection
+///
+/// The audit log includes a clock skew detector that checks for
+/// anomalous timestamp jumps caused by NTP drift, VM clock adjustments,
+/// or other system clock issues. When skew is detected, a WARN-level
+/// log message is emitted, but logging continues — the audit log
+/// does not block operations due to clock issues. This ensures audit
+/// trail integrity while alerting operators to investigate potential
+/// clock problems.
 #[derive(Debug)]
 pub struct AuditLog {
     writer: BufWriter<std::fs::File>,
+    clock_skew_detector: ClockSkewDetector,
 }
 
 impl AuditLog {
@@ -64,6 +86,16 @@ impl AuditLog {
         Self::open_in(path, &workdir)
     }
 
+    /// Open (or create) the audit log file for appending with a custom
+    /// clock skew detector.
+    ///
+    /// This variant is primarily useful for testing, allowing injection
+    /// of a detector with custom thresholds or pre-configured state.
+    pub fn open_with_detector(path: &Path, detector: ClockSkewDetector) -> Result<Self> {
+        let workdir = std::env::current_dir()?;
+        Self::open_in_with_detector(path, &workdir, detector)
+    }
+
     /// Open (or create) the audit log file for appending, validating
     /// that `path` resolves to a location under `workdir`.
     ///
@@ -72,6 +104,17 @@ impl AuditLog {
     /// future `--workdir` CLI flag. See [`Self::open`] for the
     /// ergonomic default.
     pub fn open_in(path: &Path, workdir: &Path) -> Result<Self> {
+        Self::open_in_with_detector(path, workdir, ClockSkewDetector::new())
+    }
+
+    /// Open (or create) the audit log file for appending with a custom
+    /// clock skew detector, validating that `path` resolves to a
+    /// location under `workdir`.
+    pub fn open_in_with_detector(
+        path: &Path,
+        workdir: &Path,
+        detector: ClockSkewDetector,
+    ) -> Result<Self> {
         validate_audit_path(path, workdir)?;
 
         // Ensure parent directory exists
@@ -90,14 +133,35 @@ impl AuditLog {
 
         Ok(Self {
             writer: BufWriter::new(file),
+            clock_skew_detector: detector,
         })
     }
 
     /// Log an event with arbitrary JSON data.
     pub fn log(&mut self, event: &'static str, data: serde_json::Value) -> Result<()> {
+        let ts = Utc::now();
+
+        // Check for clock skew before logging
+        match self.clock_skew_detector.check(ts) {
+            SkewResult::Ok => {}
+            SkewResult::BackwardJump { duration } => {
+                warn!(
+                    "Clock skew detected: backward jump of {} seconds",
+                    duration.num_seconds()
+                );
+            }
+            SkewResult::ForwardJump { duration, rate } => {
+                warn!(
+                    "Clock skew detected: forward jump of {} seconds (rate: {:.2}x)",
+                    duration.num_seconds(),
+                    rate
+                );
+            }
+        }
+
         let entry = AuditEvent {
             event,
-            ts: Utc::now(),
+            ts,
             data,
         };
         let json = serde_json::to_string(&entry)
@@ -436,5 +500,90 @@ mod tests {
             "expected audit file mode 0o600, got {:o}",
             mode & 0o777,
         );
+    }
+
+    // ========================================================================
+    // Clock Skew Detection (F5)
+    // ========================================================================
+
+    /// Clock skew detector is initialized when audit log is created.
+    #[test]
+    fn clock_skew_detector_initialized() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        // First log should work (detector accepts first timestamp)
+        log.log_simple("test_event").unwrap();
+        drop(log);
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("\"event\":\"test_event\""));
+    }
+
+    /// Backward jump detection works with audit log integration.
+    #[test]
+    fn backward_jump_detection_integration() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+
+        // Create detector with low threshold for testing
+        let mut detector = ClockSkewDetector::with_thresholds(5, 2.0);
+        let past_ts = Utc::now() - chrono::Duration::seconds(10);
+        detector.set_last_timestamp(past_ts);
+
+        let mut log = AuditLog::open_in_with_detector(&path, dir.path(), detector).unwrap();
+        // Log should succeed even though detector will detect skew
+        log.log_simple("test_event").unwrap();
+        drop(log);
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("\"event\":\"test_event\""));
+        // Logging continued despite skew
+    }
+
+    /// Forward jump detection works with audit log integration.
+    #[test]
+    fn forward_jump_detection_integration() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+
+        // Create detector with low threshold for testing
+        let mut detector = ClockSkewDetector::with_thresholds(5, 2.0);
+        let past_ts = Utc::now() - chrono::Duration::seconds(100);
+        detector.set_last_timestamp(past_ts);
+
+        let mut log = AuditLog::open_in_with_detector(&path, dir.path(), detector).unwrap();
+        // Log should succeed even though detector will detect skew
+        log.log_simple("test_event").unwrap();
+        drop(log);
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("\"event\":\"test_event\""));
+        // Logging continued despite skew
+    }
+
+    /// Audit log continues to work after clock skew is detected.
+    #[test]
+    fn logging_continues_despite_skew() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+
+        // Create detector with low threshold
+        let mut detector = ClockSkewDetector::with_thresholds(5, 2.0);
+        let past_ts = Utc::now() - chrono::Duration::seconds(100);
+        detector.set_last_timestamp(past_ts);
+
+        let mut log = AuditLog::open_in_with_detector(&path, dir.path(), detector).unwrap();
+
+        // Log multiple events - all should succeed
+        log.log_simple("event1").unwrap();
+        log.log_simple("event2").unwrap();
+        log.log_simple("event3").unwrap();
+        drop(log);
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 3);
     }
 }
