@@ -11,6 +11,8 @@ pub mod config;
 pub mod diff;
 pub mod error;
 pub mod execution;
+pub mod kill;
+pub mod pid_file;
 pub mod reconcile;
 pub mod risk;
 pub mod target;

@@ -59,6 +59,9 @@ enum Command {
         /// Path to target.json
         target: PathBuf,
     },
+
+    /// Send SIGTERM to running runner and verify no dangling orders
+    Kill,
 }
 
 fn main() {
@@ -110,6 +113,7 @@ fn main() {
             };
             execution::run_reconcile(&config, &spec)
         }
+        Command::Kill => nanobook_rebalancer::kill::run_kill(&config),
     };
 
     if let Err(e) = result {
