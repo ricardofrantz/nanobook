@@ -22,3 +22,6 @@ Thumbs.db
 
 # Agent tooling
 .ntm/
+
+# Beads history
+.beads/.br_history/
