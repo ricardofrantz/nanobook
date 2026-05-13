@@ -1,6 +1,6 @@
 //! Binance REST API client.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::debug;
 use reqwest::blocking::Client;
@@ -97,9 +97,9 @@ impl BinanceClient {
 
     /// Get account information (GET /api/v3/account).
     pub fn account_info(&self) -> Result<AccountInfo, BrokerError> {
-        let timestamp = current_timestamp_ms();
+        let timestamp = current_timestamp_ms()?;
         let query = format!("timestamp={timestamp}");
-        let signature = auth::sign(&query, &self.secret_key);
+        let signature = auth::sign(&query, &self.secret_key)?;
         let url = format!(
             "{}/api/v3/account?{query}&signature={signature}",
             self.base_url
@@ -145,9 +145,10 @@ impl BinanceClient {
             validate_query_param(cid, "newClientOrderId")?;
         }
 
-        let timestamp = current_timestamp_ms();
+        let timestamp = current_timestamp_ms()?;
         let mut query = format!(
-            "symbol={symbol}&side={side}&type={order_type}&quantity={quantity}&timestamp={timestamp}"
+            "symbol={symbol}&side={side}&type={order_type}&quantity={quantity}&timestamp={}",
+            timestamp
         );
         if let Some(p) = price {
             query.push_str(&format!("&price={p}"));
@@ -159,7 +160,7 @@ impl BinanceClient {
             query.push_str(&format!("&newClientOrderId={cid}"));
         }
 
-        let signature = auth::sign(&query, &self.secret_key);
+        let signature = auth::sign(&query, &self.secret_key)?;
         let url = format!("{}/api/v3/order", self.base_url);
 
         debug!("Submitting Binance order: {symbol} {side} qty={quantity}");
@@ -181,9 +182,9 @@ impl BinanceClient {
     /// Get order status (GET /api/v3/order).
     pub fn order_status(&self, symbol: &str, order_id: u64) -> Result<OrderResponse, BrokerError> {
         validate_query_param(symbol, "symbol")?;
-        let timestamp = current_timestamp_ms();
-        let query = format!("symbol={symbol}&orderId={order_id}&timestamp={timestamp}");
-        let signature = auth::sign(&query, &self.secret_key);
+        let timestamp = current_timestamp_ms()?;
+        let query = format!("symbol={symbol}&orderId={order_id}&timestamp={}", timestamp);
+        let signature = auth::sign(&query, &self.secret_key)?;
         let url = format!(
             "{}/api/v3/order?{query}&signature={signature}",
             self.base_url
@@ -204,9 +205,9 @@ impl BinanceClient {
     /// Cancel an order (DELETE /api/v3/order).
     pub fn cancel_order(&self, symbol: &str, order_id: u64) -> Result<(), BrokerError> {
         validate_query_param(symbol, "symbol")?;
-        let timestamp = current_timestamp_ms();
-        let query = format!("symbol={symbol}&orderId={order_id}&timestamp={timestamp}");
-        let signature = auth::sign(&query, &self.secret_key);
+        let timestamp = current_timestamp_ms()?;
+        let query = format!("symbol={symbol}&orderId={order_id}&timestamp={}", timestamp);
+        let signature = auth::sign(&query, &self.secret_key)?;
         let url = format!(
             "{}/api/v3/order?{query}&signature={signature}",
             self.base_url
@@ -241,9 +242,14 @@ impl BinanceClient {
 }
 
 /// Current timestamp in milliseconds.
-fn current_timestamp_ms() -> u64 {
+///
+/// Returns an error if the system clock is unavailable or has gone backwards.
+/// For a trading system, clock failures should be surfaced rather than silently
+/// using epoch zero, as timestamps are critical for request authentication
+/// and order sequencing.
+fn current_timestamp_ms() -> Result<u64, BrokerError> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_millis() as u64
+        .map(|d| d.as_millis() as u64)
+        .map_err(|e| BrokerError::Connection(format!("system clock error: {e}")))
 }
