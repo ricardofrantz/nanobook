@@ -108,8 +108,6 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_capabilities, m)?)?;
     m.add_function(wrap_pyfunction!(garch::garch_ewma_forecast, m)?)?;
     m.add_function(wrap_pyfunction!(garch::py_garch_ewma_forecast, m)?)?;
-    m.add_function(wrap_pyfunction!(garch::garch_forecast, m)?)?;
-    m.add_function(wrap_pyfunction!(garch::py_garch_forecast, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::optimize_min_variance, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::py_optimize_min_variance, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::optimize_max_sharpe, m)?)?;
@@ -120,10 +118,6 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(optimize::py_inverse_cvar_weights, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::inverse_cdar_weights, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::py_inverse_cdar_weights, m)?)?;
-    m.add_function(wrap_pyfunction!(optimize::optimize_cvar, m)?)?;
-    m.add_function(wrap_pyfunction!(optimize::py_optimize_cvar, m)?)?;
-    m.add_function(wrap_pyfunction!(optimize::optimize_cdar, m)?)?;
-    m.add_function(wrap_pyfunction!(optimize::py_optimize_cdar, m)?)?;
 
     Ok(())
 }

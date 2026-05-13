@@ -27,14 +27,6 @@ fn sanitize_symbols(symbols: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-fn warn_deprecated(py: Python<'_>, message: &str) -> PyResult<()> {
-    let warnings = py.import("warnings")?;
-    let builtins = py.import("builtins")?;
-    let category = builtins.getattr("DeprecationWarning")?;
-    warnings.call_method1("warn", (message, category, 2))?;
-    Ok(())
-}
-
 #[pyfunction]
 pub fn optimize_min_variance(
     py: Python<'_>,
@@ -144,65 +136,5 @@ pub fn py_inverse_cdar_weights(
     symbols: Vec<String>,
     alpha: f64,
 ) -> PyResult<Py<PyAny>> {
-    inverse_cdar_weights(py, returns_matrix, symbols, alpha)
-}
-
-#[pyfunction]
-#[pyo3(signature = (returns_matrix, symbols, alpha=0.95))]
-pub fn optimize_cvar(
-    py: Python<'_>,
-    returns_matrix: Vec<Vec<f64>>,
-    symbols: Vec<String>,
-    alpha: f64,
-) -> PyResult<Py<PyAny>> {
-    warn_deprecated(
-        py,
-        "nanobook.optimize_cvar is deprecated; use inverse_cvar_weights",
-    )?;
-    inverse_cvar_weights(py, returns_matrix, symbols, alpha)
-}
-
-#[pyfunction]
-#[pyo3(signature = (returns_matrix, symbols, alpha=0.95))]
-pub fn py_optimize_cvar(
-    py: Python<'_>,
-    returns_matrix: Vec<Vec<f64>>,
-    symbols: Vec<String>,
-    alpha: f64,
-) -> PyResult<Py<PyAny>> {
-    warn_deprecated(
-        py,
-        "nanobook.py_optimize_cvar is deprecated; use py_inverse_cvar_weights",
-    )?;
-    inverse_cvar_weights(py, returns_matrix, symbols, alpha)
-}
-
-#[pyfunction]
-#[pyo3(signature = (returns_matrix, symbols, alpha=0.95))]
-pub fn optimize_cdar(
-    py: Python<'_>,
-    returns_matrix: Vec<Vec<f64>>,
-    symbols: Vec<String>,
-    alpha: f64,
-) -> PyResult<Py<PyAny>> {
-    warn_deprecated(
-        py,
-        "nanobook.optimize_cdar is deprecated; use inverse_cdar_weights",
-    )?;
-    inverse_cdar_weights(py, returns_matrix, symbols, alpha)
-}
-
-#[pyfunction]
-#[pyo3(signature = (returns_matrix, symbols, alpha=0.95))]
-pub fn py_optimize_cdar(
-    py: Python<'_>,
-    returns_matrix: Vec<Vec<f64>>,
-    symbols: Vec<String>,
-    alpha: f64,
-) -> PyResult<Py<PyAny>> {
-    warn_deprecated(
-        py,
-        "nanobook.py_optimize_cdar is deprecated; use py_inverse_cdar_weights",
-    )?;
     inverse_cdar_weights(py, returns_matrix, symbols, alpha)
 }

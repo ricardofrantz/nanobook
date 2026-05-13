@@ -314,20 +314,6 @@ pub fn inverse_cdar_weights(returns: &[Vec<f64>], alpha: f64) -> Vec<f64> {
     inverse_risk_weights(&risks)
 }
 
-/// Deprecated alias for [`inverse_cvar_weights`]; removed in v0.11.
-#[rustfmt::skip]
-#[deprecated(since = "0.9.3", note = "use `inverse_cvar_weights`; this is a heuristic, not a CVaR LP solver")]
-pub fn optimize_cvar(returns: &[Vec<f64>], alpha: f64) -> Vec<f64> {
-    inverse_cvar_weights(returns, alpha)
-}
-
-/// Deprecated alias for [`inverse_cdar_weights`]; removed in v0.11.
-#[rustfmt::skip]
-#[deprecated(since = "0.9.3", note = "use `inverse_cdar_weights`; this is a heuristic, not a CDaR LP solver")]
-pub fn optimize_cdar(returns: &[Vec<f64>], alpha: f64) -> Vec<f64> {
-    inverse_cdar_weights(returns, alpha)
-}
-
 fn matrix_shape(matrix: &[Vec<f64>]) -> Option<(usize, usize)> {
     let rows = matrix.len();
     if rows < 2 {
@@ -715,15 +701,6 @@ mod tests {
         let r = sample_returns();
         let w = inverse_cdar_weights(&r, 0.95);
         assert_valid_weights(&w, 3);
-    }
-
-    #[allow(deprecated)]
-    #[test]
-    fn deprecated_cvar_cdar_shims_delegate() {
-        let r = sample_returns();
-
-        assert_eq!(optimize_cvar(&r, 0.95), inverse_cvar_weights(&r, 0.95));
-        assert_eq!(optimize_cdar(&r, 0.95), inverse_cdar_weights(&r, 0.95));
     }
 
     // ========================================================================

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Removed the deprecated `garch_forecast`, `optimize_cvar`, and `optimize_cdar`
+  Rust APIs, along with their Python exports. Use `garch_ewma_forecast`,
+  `inverse_cvar_weights`, and `inverse_cdar_weights` instead.
+
 ## [0.14.0] - 2026-05-13 - OCaml Oracle
 
 This release adds an OCaml reference implementation of the limit-order-book engine for differential testing against the Rust implementation. The oracle serves dual purposes: (1) detecting wrong-but-consistent bugs that fuzzing misses, and (2) signaling commitment to correctness via dual-language implementation. Both engines produce byte-identical output on a comprehensive golden corpus of 18 LOB edge cases.

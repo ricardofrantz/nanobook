@@ -100,13 +100,6 @@ pub fn garch_ewma_forecast(returns: &[f64], p: usize, q: usize, mean: &str) -> f
     }
 }
 
-/// Deprecated alias for [`garch_ewma_forecast`]; removed in v0.11.
-#[rustfmt::skip]
-#[deprecated(since = "0.9.3", note = "use `garch_ewma_forecast`; parameters are fixed, not MLE-fit")]
-pub fn garch_forecast(returns: &[f64], p: usize, q: usize, mean: &str) -> f64 {
-    garch_ewma_forecast(returns, p, q, mean)
-}
-
 fn sample_volatility(returns: &[f64]) -> f64 {
     sample_variance(returns).unwrap_or(0.0).max(0.0).sqrt()
 }
@@ -180,16 +173,6 @@ mod tests {
         let v = garch_ewma_forecast(&returns, 1, 4, "zero");
         assert!(v.is_finite());
         assert!(v >= 0.0);
-    }
-
-    #[allow(deprecated)]
-    #[test]
-    fn deprecated_garch_forecast_shim_delegates() {
-        let returns = vec![0.01, -0.004, 0.008, -0.002, 0.005, -0.003, 0.004];
-        assert_eq!(
-            garch_forecast(&returns, 2, 2, "constant"),
-            garch_ewma_forecast(&returns, 2, 2, "constant")
-        );
     }
 
     #[test]
