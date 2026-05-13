@@ -9,6 +9,7 @@ pub mod websocket;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
 use nanobook::Symbol;
@@ -20,8 +21,22 @@ use crate::parse::parse_f64_or_warn;
 use crate::types::*;
 pub use audit::{check_audit_log_for_sequence, log_idempotency_rejection, log_order_submitted};
 pub use cache::BinanceOrderCache;
-pub use types::{Discrepancy, DiscrepancyReport};
 use client::BinanceClient;
+pub use types::{Discrepancy, DiscrepancyReport};
+
+const POLLING_INTERVAL_MS: u64 = 5000;
+
+/// Binance state source selection.
+///
+/// - WebSocket: real-time updates and lower latency, but requires connection management.
+/// - Rest: reliable and stateless, but higher latency because state is refreshed by polling.
+/// - Auto: attempts WebSocket first and can fall back to REST when WebSocket handling is added.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionMode {
+    WebSocket,
+    Rest,
+    Auto,
+}
 
 #[derive(Debug, Clone)]
 pub struct CachedOrder {
@@ -62,12 +77,23 @@ pub struct BinanceBroker {
     testnet: bool,
     #[zeroize(skip)]
     client: Option<BinanceClient>,
+    #[zeroize(skip)]
+    connection_mode: ConnectionMode,
     /// Symbol → Binance trading pair mapping.
     /// nanobook symbols are like "BTC", Binance needs "BTCUSDT".
     #[zeroize(skip)]
     quote_asset: String,
     #[zeroize(skip)]
     order_cache: Mutex<BinanceOrderCache>,
+    /// Last account-state REST poll timestamp. Enforces the 5-second fallback poll cadence.
+    #[zeroize(skip)]
+    last_account_poll: Mutex<Option<SystemTime>>,
+    /// Last open-orders REST poll timestamp. Enforces the 5-second fallback poll cadence.
+    #[zeroize(skip)]
+    last_orders_poll: Mutex<Option<SystemTime>>,
+    /// Position snapshot derived from the most recent REST account-info response.
+    #[zeroize(skip)]
+    position_cache: Mutex<Vec<Position>>,
     /// Optional path to audit log file for idempotency tracking.
     #[zeroize(skip)]
     audit_log_path: Option<PathBuf>,
@@ -90,8 +116,12 @@ impl BinanceBroker {
             secret_key: secret_key.to_string(),
             testnet,
             client: None,
+            connection_mode: ConnectionMode::Auto,
             quote_asset: "USDT".to_string(),
             order_cache: Mutex::new(BinanceOrderCache::new()),
+            last_account_poll: Mutex::new(None),
+            last_orders_poll: Mutex::new(None),
+            position_cache: Mutex::new(Vec::new()),
             audit_log_path: None,
             sequence_number: None,
             reconciliation_blocked: false,
@@ -114,6 +144,94 @@ impl BinanceBroker {
     pub fn with_sequence_number(mut self, seq: u64) -> Self {
         self.sequence_number = Some(seq);
         self
+    }
+
+    /// Set the connection mode used by Binance state synchronization.
+    pub fn with_connection_mode(mut self, mode: ConnectionMode) -> Self {
+        self.connection_mode = mode;
+        self
+    }
+
+    /// Current connection mode.
+    pub fn connection_mode(&self) -> ConnectionMode {
+        self.connection_mode
+    }
+
+    /// Switch to REST polling mode.
+    pub fn switch_to_rest_mode(&mut self) {
+        if self.connection_mode != ConnectionMode::Rest {
+            log::info!(
+                "switching Binance connection mode from {:?} to Rest",
+                self.connection_mode
+            );
+        }
+        self.connection_mode = ConnectionMode::Rest;
+    }
+
+    /// Switch to WebSocket mode.
+    ///
+    /// Automatic fallback from WebSocket error handling is intentionally left for
+    /// a later phase; this phase only exposes manual transitions and REST polling.
+    pub fn switch_to_websocket_mode(&mut self) {
+        if self.connection_mode != ConnectionMode::WebSocket {
+            log::info!(
+                "switching Binance connection mode from {:?} to WebSocket",
+                self.connection_mode
+            );
+        }
+        self.connection_mode = ConnectionMode::WebSocket;
+    }
+
+    /// Return true when the REST polling interval has elapsed.
+    pub fn should_poll(&self, last_poll: Option<SystemTime>) -> bool {
+        let Some(last_poll) = last_poll else {
+            return true;
+        };
+
+        last_poll
+            .elapsed()
+            .map(|elapsed| elapsed >= Duration::from_millis(POLLING_INTERVAL_MS))
+            .unwrap_or(true)
+    }
+
+    /// Last account poll timestamp, exposed for fallback tests and diagnostics.
+    pub fn last_account_poll(&self) -> Option<SystemTime> {
+        *self
+            .last_account_poll
+            .lock()
+            .expect("Binance account poll mutex poisoned")
+    }
+
+    /// Last open-orders poll timestamp, exposed for fallback tests and diagnostics.
+    pub fn last_orders_poll(&self) -> Option<SystemTime> {
+        *self
+            .last_orders_poll
+            .lock()
+            .expect("Binance order poll mutex poisoned")
+    }
+
+    /// Set the account poll timestamp for deterministic interval tests.
+    pub fn set_last_account_poll(&self, timestamp: Option<SystemTime>) {
+        *self
+            .last_account_poll
+            .lock()
+            .expect("Binance account poll mutex poisoned") = timestamp;
+    }
+
+    /// Set the orders poll timestamp for deterministic interval tests.
+    pub fn set_last_orders_poll(&self, timestamp: Option<SystemTime>) {
+        *self
+            .last_orders_poll
+            .lock()
+            .expect("Binance order poll mutex poisoned") = timestamp;
+    }
+
+    /// Snapshot of positions derived from the most recent REST account poll.
+    pub fn cached_positions(&self) -> Vec<Position> {
+        self.position_cache
+            .lock()
+            .expect("Binance position cache mutex poisoned")
+            .clone()
     }
 
     /// Convert a nanobook Symbol to a Binance trading pair string.
@@ -210,6 +328,123 @@ impl BinanceBroker {
             .lock()
             .expect("Binance order cache mutex poisoned");
         cache.orders.clear();
+    }
+
+    /// Poll account info through REST and refresh local account-derived state.
+    pub fn poll_account_info(&self) -> Result<(), BrokerError> {
+        let last_poll = self.last_account_poll();
+        if !self.should_poll(last_poll) {
+            return Ok(());
+        }
+
+        let info = self.require_client()?.account_info()?;
+        self.update_state_from_account_info(&info)?;
+        *self
+            .last_account_poll
+            .lock()
+            .expect("Binance account poll mutex poisoned") = Some(SystemTime::now());
+        Ok(())
+    }
+
+    /// Poll open orders through REST and refresh the local order cache.
+    ///
+    /// Binance's account-info response carries the open-orders snapshot used by
+    /// this simplified fallback path.
+    pub fn poll_open_orders(&self) -> Result<(), BrokerError> {
+        let last_poll = self.last_orders_poll();
+        if !self.should_poll(last_poll) {
+            return Ok(());
+        }
+
+        let info = self.require_client()?.account_info()?;
+        self.update_order_cache_from_account_info(&info)?;
+        *self
+            .last_orders_poll
+            .lock()
+            .expect("Binance order poll mutex poisoned") = Some(SystemTime::now());
+        Ok(())
+    }
+
+    /// Apply a REST account-info snapshot to local fallback caches.
+    pub fn update_state_from_account_info(
+        &self,
+        info: &types::AccountInfo,
+    ) -> Result<(), BrokerError> {
+        let mut positions = Vec::with_capacity(info.balances.len());
+        for balance in &info.balances {
+            let free = parse_f64_or_warn(&balance.free, "binance balance.free");
+            let locked = parse_f64_or_warn(&balance.locked, "binance balance.locked");
+            let total = free + locked;
+            if total <= 0.0 {
+                continue;
+            }
+            let Some(symbol) = Symbol::try_new(&balance.asset) else {
+                continue;
+            };
+            positions.push(Position {
+                symbol,
+                quantity: f64_to_fixed_checked(total, 1e8, "binance balance")?,
+                avg_cost_cents: 0,
+                market_value_cents: 0,
+                unrealized_pnl_cents: 0,
+            });
+        }
+
+        *self
+            .position_cache
+            .lock()
+            .expect("Binance position cache mutex poisoned") = positions;
+        self.update_order_cache_from_account_info(info)?;
+        Ok(())
+    }
+
+    fn update_order_cache_from_account_info(
+        &self,
+        info: &types::AccountInfo,
+    ) -> Result<(), BrokerError> {
+        let mut cache = self
+            .order_cache
+            .lock()
+            .expect("Binance order cache mutex poisoned");
+
+        cache.orders.clear();
+        for order in &info.open_orders {
+            let base_symbol = order
+                .symbol
+                .strip_suffix(&self.quote_asset)
+                .unwrap_or(&order.symbol);
+            let Some(symbol) = Symbol::try_new(base_symbol) else {
+                continue;
+            };
+            let side = match order.side.as_str() {
+                "SELL" => BrokerSide::Sell,
+                _ => BrokerSide::Buy,
+            };
+            let status = match order.status.as_str() {
+                "NEW" => OrderState::Submitted,
+                "PARTIALLY_FILLED" => OrderState::PartiallyFilled,
+                "FILLED" => OrderState::Filled,
+                "CANCELED" => OrderState::Cancelled,
+                "REJECTED" => OrderState::Rejected,
+                "EXPIRED" => OrderState::Cancelled,
+                _ => OrderState::Submitted,
+            };
+            let quantity = parse_f64_or_warn(&order.orig_qty, "binance order.origQty") as i64;
+            cache.orders.insert(
+                OrderId(order.order_id),
+                CachedOrder {
+                    symbol,
+                    quantity,
+                    side,
+                    status,
+                    binance_order_id: order.order_id.to_string(),
+                    client_order_id: None,
+                    submitted_at: Utc::now(),
+                },
+            );
+        }
+
+        Ok(())
     }
 
     pub fn load_cache_from_disk(&self, path: &Path) -> Result<(), BrokerError> {
@@ -317,7 +552,9 @@ impl BinanceBroker {
                 .iter()
                 .any(|broker_order| broker_order.order_id == order_id.0);
             if !found && cached_order.status == OrderState::Submitted {
-                discrepancies.push(Discrepancy::MissingOrder { order_id: *order_id });
+                discrepancies.push(Discrepancy::MissingOrder {
+                    order_id: *order_id,
+                });
             }
         }
 
@@ -429,9 +666,11 @@ impl BinanceBroker {
         let order_id = self.submit_order(&order_with_cid)?;
 
         // Log order submission to audit log if enabled
-        if let (Some(audit_path), Some(seq), Some(cid)) =
-            (&self.audit_log_path, sequence_number, &order_with_cid.client_order_id)
-        {
+        if let (Some(audit_path), Some(seq), Some(cid)) = (
+            &self.audit_log_path,
+            sequence_number,
+            &order_with_cid.client_order_id,
+        ) {
             log_order_submitted(audit_path, order_id, order.symbol, seq, cid.as_str());
         }
 
