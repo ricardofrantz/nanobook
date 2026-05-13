@@ -58,6 +58,8 @@ pub struct ExecutionConfig {
     pub order_timeout_secs: u64,
     #[serde(default = "default_max_orders")]
     pub max_orders_per_run: usize,
+    #[serde(default = "default_staleness_threshold")]
+    pub quote_staleness_threshold_sec: u64,
 }
 
 fn default_interval() -> u64 {
@@ -71,6 +73,10 @@ fn default_order_timeout() -> u64 {
 }
 fn default_max_orders() -> usize {
     50
+}
+
+fn default_staleness_threshold() -> u64 {
+    30
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -199,6 +205,9 @@ impl Config {
         if self.execution.max_orders_per_run == 0 {
             return Err(Error::Config("max_orders_per_run must be > 0".into()));
         }
+        if self.execution.quote_staleness_threshold_sec == 0 {
+            return Err(Error::Config("quote_staleness_threshold_sec must be > 0".into()));
+        }
         Ok(())
     }
 
@@ -233,6 +242,7 @@ order_interval_ms = 100
 limit_offset_bps = 5
 order_timeout_secs = 300
 max_orders_per_run = 50
+quote_staleness_threshold_sec = 30
 
 [risk]
 max_position_pct = 0.25
@@ -289,6 +299,13 @@ audit_file = "audit.jsonl"
     fn validate_catches_bad_max_orders_per_run() {
         let mut config: Config = toml::from_str(example_toml()).unwrap();
         config.execution.max_orders_per_run = 0;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validate_catches_bad_staleness_threshold() {
+        let mut config: Config = toml::from_str(example_toml()).unwrap();
+        config.execution.quote_staleness_threshold_sec = 0;
         assert!(config.validate().is_err());
     }
 

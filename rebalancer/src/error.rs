@@ -32,6 +32,13 @@ pub enum Error {
     #[error("risk check failed: {0}")]
     RiskFailed(String),
 
+    #[error("stale quote detected for {symbol}: age {age_sec}s exceeds threshold {threshold_sec}s")]
+    StaleQuote {
+        symbol: String,
+        age_sec: u64,
+        threshold_sec: u64,
+    },
+
     #[error("IBKR connection error: {0}")]
     Connection(String),
 

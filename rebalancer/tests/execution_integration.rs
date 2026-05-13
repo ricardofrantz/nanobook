@@ -3,8 +3,11 @@
 
 //! Integration tests for rebalancer execution helpers.
 
+use std::time::{Duration, SystemTime};
+
 use nanobook::Symbol;
 use nanobook_broker::BrokerSide;
+use nanobook_broker::types::Quote;
 use nanobook_rebalancer::diff::{Action, CurrentPosition};
 use nanobook_rebalancer::error::Error;
 use nanobook_rebalancer::execution::{
@@ -204,4 +207,72 @@ fn enforce_max_orders_per_run_rejects_over_limit() {
         }
         _ => panic!("expected RiskFailed"),
     }
+}
+
+// ============================================================================
+// Staleness detection (F4)
+// ============================================================================
+
+#[test]
+fn fresh_quote_passes_staleness_check() {
+    let quote = Quote {
+        symbol: aapl(),
+        bid_cents: 150_00,
+        ask_cents: 150_50,
+        last_cents: 150_25,
+        volume: 1000,
+        timestamp: SystemTime::now(),
+    };
+
+    // 30 second threshold - fresh quote should not be stale
+    assert!(!quote.is_stale(30));
+    assert!(!quote.is_stale(60));
+}
+
+#[test]
+fn stale_quote_fails_staleness_check() {
+    let quote = Quote {
+        symbol: aapl(),
+        bid_cents: 150_00,
+        ask_cents: 150_50,
+        last_cents: 150_25,
+        volume: 1000,
+        timestamp: SystemTime::now() - Duration::from_secs(35),
+    };
+
+    // 30 second threshold - 35 second old quote should be stale
+    assert!(quote.is_stale(30));
+    // But should pass with 60 second threshold
+    assert!(!quote.is_stale(60));
+}
+
+#[test]
+fn quote_at_threshold_boundary_is_fresh() {
+    let quote = Quote {
+        symbol: aapl(),
+        bid_cents: 150_00,
+        ask_cents: 150_50,
+        last_cents: 150_25,
+        volume: 1000,
+        timestamp: SystemTime::now() - Duration::from_secs(30),
+    };
+
+    // Exactly at threshold is NOT stale (age > threshold, not >=)
+    assert!(!quote.is_stale(30));
+}
+
+#[test]
+fn future_timestamp_treated_as_stale() {
+    // Clock skew scenario - timestamp in the future
+    let quote = Quote {
+        symbol: aapl(),
+        bid_cents: 150_00,
+        ask_cents: 150_50,
+        last_cents: 150_25,
+        volume: 1000,
+        timestamp: SystemTime::now() + Duration::from_secs(10),
+    };
+
+    // Future timestamp should be treated as stale
+    assert!(quote.is_stale(30));
 }

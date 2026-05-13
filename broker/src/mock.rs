@@ -79,6 +79,7 @@ impl MockBrokerBuilder {
                 ask_cents: ask,
                 last_cents: (bid + ask) / 2,
                 volume: 0,
+                timestamp: std::time::SystemTime::now(),
             },
         ));
         self

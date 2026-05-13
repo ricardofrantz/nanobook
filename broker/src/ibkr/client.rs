@@ -390,6 +390,7 @@ impl IbkrClient {
             ask_cents,
             last_cents,
             volume: 0, // snapshot doesn't provide volume
+            timestamp: std::time::SystemTime::now(),
         };
 
         if let Some(best_quote) = best_quote_from_quote(&quote) {

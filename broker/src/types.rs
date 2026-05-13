@@ -1,6 +1,7 @@
 //! Shared broker types: positions, accounts, orders, quotes.
 
 use std::fmt::Write;
+use std::time::SystemTime;
 
 use nanobook::{Price, Symbol};
 use sha2::{Digest, Sha256};
@@ -159,6 +160,32 @@ pub struct Quote {
     pub ask_cents: i64,
     pub last_cents: i64,
     pub volume: u64,
+    /// Timestamp when this quote was received from the broker.
+    /// Used for staleness detection to prevent trading on outdated prices.
+    pub timestamp: SystemTime,
+}
+
+impl Quote {
+    /// Check if this quote is stale based on the given threshold.
+    ///
+    /// Returns true if the time elapsed since the quote was received
+    /// exceeds the threshold in seconds.
+    ///
+    /// # Arguments
+    /// * `threshold_sec` - Maximum age of the quote in seconds before it's considered stale
+    ///
+    /// # Returns
+    /// * `true` if the quote is stale (age > threshold)
+    /// * `false` if the quote is fresh (age <= threshold)
+    pub fn is_stale(&self, threshold_sec: u64) -> bool {
+        match self.timestamp.elapsed() {
+            Ok(elapsed) => elapsed.as_secs() > threshold_sec,
+            Err(_) => {
+                // If the timestamp is in the future (clock skew), treat as stale
+                true
+            }
+        }
+    }
 }
 
 /// Last-seen bid/ask quote used to bound market-order fallbacks.
@@ -191,4 +218,66 @@ pub enum OrderState {
     Filled,
     Cancelled,
     Rejected,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_fresh_quote() {
+        let quote = Quote {
+            symbol: Symbol::new("AAPL"),
+            bid_cents: 15000,
+            ask_cents: 15050,
+            last_cents: 15025,
+            volume: 1000,
+            timestamp: SystemTime::now(),
+        };
+        assert!(!quote.is_stale(30));
+        assert!(!quote.is_stale(60));
+    }
+
+    #[test]
+    fn test_stale_quote() {
+        let quote = Quote {
+            symbol: Symbol::new("AAPL"),
+            bid_cents: 15000,
+            ask_cents: 15050,
+            last_cents: 15025,
+            volume: 1000,
+            timestamp: SystemTime::now() - Duration::from_secs(35),
+        };
+        assert!(quote.is_stale(30));
+        assert!(!quote.is_stale(60));
+    }
+
+    #[test]
+    fn test_exactly_threshold() {
+        let quote = Quote {
+            symbol: Symbol::new("AAPL"),
+            bid_cents: 15000,
+            ask_cents: 15050,
+            last_cents: 15025,
+            volume: 1000,
+            timestamp: SystemTime::now() - Duration::from_secs(30),
+        };
+        // Exactly at threshold is NOT stale (age > threshold, not >=)
+        assert!(!quote.is_stale(30));
+    }
+
+    #[test]
+    fn test_future_timestamp() {
+        let quote = Quote {
+            symbol: Symbol::new("AAPL"),
+            bid_cents: 15000,
+            ask_cents: 15050,
+            last_cents: 15025,
+            volume: 1000,
+            timestamp: SystemTime::now() + Duration::from_secs(10),
+        };
+        // Future timestamp (clock skew) is treated as stale
+        assert!(quote.is_stale(30));
+    }
 }
