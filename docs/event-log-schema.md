@@ -5,7 +5,7 @@ This document specifies the JSONL (JSON Lines) schema used for deterministic rep
 ## Schema Version
 
 - **Current version**: `1.0`
-- **Version field**: `schema_version` (required in each event)
+- **Version field**: `schema_version` (optional in v1.0, will be required in future versions for schema evolution)
 
 ## Event Format
 
@@ -13,9 +13,7 @@ Each line in the JSONL file represents one event with the following structure:
 
 ```json
 {
-  "schema_version": "1.0",
   "type": "SubmitLimit|SubmitMarket|Cancel",
-  "timestamp": 0,
   ... // type-specific fields
 }
 ```
@@ -28,7 +26,6 @@ Submit a limit order to the book.
 
 ```json
 {
-  "schema_version": "1.0",
   "type": "SubmitLimit",
   "side": "BUY|SELL",
   "price": 10000,
@@ -38,7 +35,6 @@ Submit a limit order to the book.
 ```
 
 **Fields:**
-- `schema_version`: Schema version string (required)
 - `type`: Event type, always "SubmitLimit"
 - `side`: "BUY" or "SELL"
 - `price`: Integer in smallest units (e.g., cents for USD)
@@ -51,7 +47,6 @@ Submit a market order for immediate execution.
 
 ```json
 {
-  "schema_version": "1.0",
   "type": "SubmitMarket",
   "side": "BUY|SELL",
   "quantity": 100
@@ -59,7 +54,6 @@ Submit a market order for immediate execution.
 ```
 
 **Fields:**
-- `schema_version`: Schema version string (required)
 - `type`: Event type, always "SubmitMarket"
 - `side`: "BUY" or "SELL"
 - `quantity`: Positive integer
@@ -70,14 +64,12 @@ Cancel an existing order by ID.
 
 ```json
 {
-  "schema_version": "1.0",
   "type": "Cancel",
   "order_id": 1
 }
 ```
 
 **Fields:**
-- `schema_version`: Schema version string (required)
 - `type`: Event type, always "Cancel"
 - `order_id`: Integer order ID to cancel
 
@@ -117,19 +109,19 @@ When the schema changes:
 ## Validation
 
 Both implementations must:
-- Reject events with unknown `schema_version`
 - Reject events with unknown `type`
 - Validate all required fields are present
 - Validate field types (integers, strings, enums)
 - Validate value ranges (e.g., quantity > 0, price within valid range)
+- (Future) Reject events with unsupported `schema_version` when schema versioning is implemented
 
 ## Example Event Log
 
 ```jsonl
-{"schema_version":"1.0","type":"SubmitLimit","side":"SELL","price":10100,"quantity":100,"time_in_force":"GTC"}
-{"schema_version":"1.0","type":"SubmitLimit","side":"SELL","price":10200,"quantity":200,"time_in_force":"GTC"}
-{"schema_version":"1.0","type":"SubmitLimit","side":"BUY","price":10100,"quantity":50,"time_in_force":"GTC"}
-{"schema_version":"1.0","type":"Cancel","order_id":1}
+{"type":"SubmitLimit","side":"SELL","price":10100,"quantity":100,"time_in_force":"GTC"}
+{"type":"SubmitLimit","side":"SELL","price":10200,"quantity":200,"time_in_force":"GTC"}
+{"type":"SubmitLimit","side":"BUY","price":10100,"quantity":50,"time_in_force":"GTC"}
+{"type":"Cancel","order_id":1}
 ```
 
 ## Example Trade Output
