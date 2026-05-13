@@ -1,7 +1,9 @@
 //! Crash recovery and state reconstruction from audit logs.
 
 use crate::audit::{AuditEvent, Checkpoint};
+use crate::config::Config;
 use crate::error::{Error, Result};
+use crate::target::TargetSpec;
 use nanobook::Symbol;
 use nanobook_broker::Broker;
 use serde::{Deserialize, Serialize};
@@ -357,6 +359,83 @@ pub fn reconstruct_state(audit_log_path: &std::path::Path) -> Result<(RecoveredS
 
     let recovery_action = state.determine_recovery_action();
     Ok((state, recovery_action))
+}
+
+/// Run recovery from crash using audit log.
+///
+/// This function:
+/// 1. Reads the audit log to reconstruct state
+/// 2. Determines the appropriate recovery action
+/// 3. Prints a recovery report
+pub fn run_recover(config: &Config, _target_spec: &TargetSpec, dry_run: bool) -> Result<()> {
+    let audit_log_path = config.audit_path();
+
+    println!("Recovering from crash using audit log: {}", audit_log_path.display());
+
+    // Step 1: Reconstruct state from audit log
+    let (recovered_state, recovery_action) = reconstruct_state(&audit_log_path)?;
+
+    println!("\n=== Recovered State ===");
+    println!("Checkpoint: {:?}", recovered_state.checkpoint);
+    println!("Sequence Number: {}", recovered_state.sequence_number);
+    println!("Timestamp: {}", recovered_state.timestamp);
+    println!("Positions: {}", recovered_state.positions.len());
+    for pos in &recovered_state.positions {
+        println!("  - {}: {} shares @ ${:.2}",
+                 pos.symbol.as_str(),
+                 pos.quantity,
+                 pos.avg_cost_cents as f64 / 100.0);
+    }
+    println!("Orders: {}", recovered_state.orders.len());
+    for order in &recovered_state.orders {
+        println!("  - {}: {} {} @ ${:.2} (submitted: {}, filled: {})",
+                 order.symbol.as_str(),
+                 order.action,
+                 order.shares,
+                 order.limit_price_cents as f64 / 100.0,
+                 order.submitted,
+                 order.filled);
+    }
+    println!("Equity: ${}", recovered_state.equity_cents as f64 / 100.0);
+    println!("Run Completed: {}", recovered_state.run_completed);
+
+    println!("\n=== Recovery Action ===");
+    println!("{:?}", recovery_action);
+
+    // Step 2: Provide guidance based on recovery action
+    println!("\n=== Recovery Guidance ===");
+    match recovery_action {
+        RecoveryAction::Restart => {
+            println!("Safe to restart the entire rebalance from the beginning.");
+            println!("No orders were submitted or all orders were filled.");
+            if !dry_run {
+                println!("Run: rebalancer run <target.json>");
+            }
+        }
+        RecoveryAction::Resume => {
+            println!("Resume from the last checkpoint.");
+            println!("Some orders may have been submitted but not filled.");
+            println!("Manual review of broker state recommended before proceeding.");
+        }
+        RecoveryAction::ManualReview => {
+            println!("Manual review required.");
+            println!("The crash occurred at an ambiguous point.");
+            println!("Please review broker state and decide on the appropriate action.");
+            return Err(Error::Recovery("Manual review required".to_string()));
+        }
+        RecoveryAction::Rollback => {
+            println!("Rollback recommended.");
+            println!("Orders were submitted but may be in an unknown state.");
+            println!("Please review broker open orders and cancel if necessary.");
+            return Err(Error::Recovery("Rollback required - manual intervention needed".to_string()));
+        }
+    }
+
+    if dry_run {
+        println!("\n=== Dry Run - No Action Taken ===");
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

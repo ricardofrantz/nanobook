@@ -8,6 +8,7 @@ use clap::{Parser, Subcommand};
 use nanobook_rebalancer::config::Config;
 use nanobook_rebalancer::error::Error;
 use nanobook_rebalancer::execution::{self, RunOptions};
+use nanobook_rebalancer::recovery;
 use nanobook_rebalancer::target::TargetSpec;
 
 #[derive(Parser)]
@@ -62,6 +63,16 @@ enum Command {
 
     /// Send SIGTERM to running runner and verify no dangling orders
     Kill,
+
+    /// Recover from a crash using audit log
+    Recover {
+        /// Path to target.json (required for resume)
+        target: PathBuf,
+
+        /// Show recovery plan without executing
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 fn main() {
@@ -114,6 +125,16 @@ fn main() {
             execution::run_reconcile(&config, &spec)
         }
         Command::Kill => nanobook_rebalancer::kill::run_kill(&config),
+        Command::Recover { target, dry_run } => {
+            let spec = match TargetSpec::load(&target) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Error loading target: {e}");
+                    process::exit(1);
+                }
+            };
+            recovery::run_recover(&config, &spec, dry_run)
+        }
     };
 
     if let Err(e) = result {
