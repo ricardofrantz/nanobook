@@ -10,6 +10,7 @@ use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 use nanobook::Symbol;
+use uuid::Uuid;
 
 use crate::Broker;
 use crate::error::BrokerError;
@@ -199,6 +200,77 @@ impl BinanceBroker {
             .lock()
             .expect("Binance order cache mutex poisoned");
         cache.save_to_disk(path)
+    }
+
+    /// Generate a unique client order ID for idempotency.
+    ///
+    /// Format: "nanobook-{short_uuid}-{sequence_number}"
+    /// The UUID ensures uniqueness across runs, and the sequence number
+    /// provides traceability for ordering operations.
+    /// Uses first 16 hex characters of UUID (without hyphens) to fit within 36-character limit.
+    pub fn generate_client_order_id(&self, sequence_number: u64) -> String {
+        let uuid = Uuid::new_v4();
+        let short_uuid = uuid
+            .to_string()
+            .chars()
+            .filter(|c| *c != '-')
+            .take(16)
+            .collect::<String>();
+        format!("nanobook-{}-{}", short_uuid, sequence_number)
+    }
+
+    /// Check if a client order ID already exists in the order cache.
+    ///
+    /// Returns true if a duplicate is found, false otherwise.
+    pub fn check_duplicate_client_order_id(&self, client_order_id: &str) -> bool {
+        let cache = self
+            .order_cache
+            .lock()
+            .expect("Binance order cache mutex poisoned");
+        cache
+            .orders
+            .values()
+            .any(|order| order.client_order_id.as_deref() == Some(client_order_id))
+    }
+
+    /// Submit an order with optional sequence number for client order ID generation.
+    ///
+    /// If `sequence_number` is Some, a client order ID will be generated using
+    /// `generate_client_order_id()`. If the order already has a `client_order_id`
+    /// set, that will be used instead. Duplicate detection is performed before
+    /// submission to prevent duplicate orders.
+    pub fn submit_order_with_sequence(
+        &self,
+        order: &BrokerOrder,
+        sequence_number: Option<u64>,
+    ) -> Result<OrderId, BrokerError> {
+        // Determine the client order ID to use
+        let client_order_id = if let Some(existing_cid) = &order.client_order_id {
+            Some(existing_cid.clone())
+        } else if let Some(seq) = sequence_number {
+            let cid_str = self.generate_client_order_id(seq);
+            Some(ClientOrderId::new(cid_str)?)
+        } else {
+            None
+        };
+
+        // Check for duplicate if we have a client order ID
+        if let Some(ref cid) = client_order_id {
+            if self.check_duplicate_client_order_id(cid.as_str()) {
+                return Err(BrokerError::DuplicateOrder {
+                    client_order_id: cid.as_str().to_string(),
+                });
+            }
+        }
+
+        // Create a modified order with the client order ID
+        let order_with_cid = BrokerOrder {
+            client_order_id,
+            ..order.clone()
+        };
+
+        // Call the trait implementation
+        self.submit_order(&order_with_cid)
     }
 }
 
