@@ -4,6 +4,7 @@
 //! specific failure modes for testing broker resilience and idempotency.
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
@@ -12,6 +13,9 @@ use nanobook::Symbol;
 use nanobook_broker::Broker;
 use nanobook_broker::error::BrokerError;
 use nanobook_broker::types::*;
+
+#[cfg(feature = "binance")]
+use nanobook_broker::binance::{check_audit_log_for_sequence, log_idempotency_rejection, log_order_submitted};
 
 /// Failure modes that can be injected by the mock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -191,6 +195,8 @@ pub struct MockBroker {
     mock_positions: Vec<Position>,
     mock_account: Account,
     mock_quotes: HashMap<Symbol, Quote>,
+    /// Optional path to audit log file for idempotency tracking.
+    audit_log_path: Option<PathBuf>,
 }
 
 impl MockBroker {
@@ -207,6 +213,7 @@ impl MockBroker {
                 gross_position_value_cents: 0,
             },
             mock_quotes: HashMap::new(),
+            audit_log_path: None,
         }
     }
 
@@ -225,6 +232,12 @@ impl MockBroker {
     /// Set mock quote for a symbol.
     pub fn with_quote(mut self, symbol: Symbol, quote: Quote) -> Self {
         self.mock_quotes.insert(symbol, quote);
+        self
+    }
+
+    /// Set the audit log path for idempotency tracking.
+    pub fn with_audit_log_path(mut self, path: PathBuf) -> Self {
+        self.audit_log_path = Some(path);
         self
     }
 
@@ -278,12 +291,46 @@ impl Broker for MockBroker {
         let qty_str = order.quantity.to_string();
         let client_order_id = order.client_order_id.as_ref().map(|cid| cid.as_str());
 
-        self.binance
+        // Extract sequence number from client_order_id if it follows the pattern
+        // Format: "nanobook-{short_uuid}-{sequence}"
+        let sequence_number = client_order_id.and_then(|cid| {
+            cid.rsplit('-').next().and_then(|s| s.parse::<u64>().ok())
+        });
+
+        // Check for duplicate in audit log if enabled (requires binance feature)
+        #[cfg(feature = "binance")]
+        if let (Some(audit_path), Some(seq)) = (&self.audit_log_path, sequence_number) {
+            if check_audit_log_for_sequence(audit_path, seq).unwrap_or(false) {
+                let cid_str = client_order_id.unwrap_or("");
+                log_idempotency_rejection(
+                    audit_path,
+                    order.symbol,
+                    seq,
+                    cid_str,
+                    "duplicate sequence number in audit log",
+                );
+                return Err(BrokerError::DuplicateOrder {
+                    client_order_id: cid_str.to_string(),
+                });
+            }
+        }
+
+        // Submit the order
+        let order_id = self.binance
             .submit_order(order.symbol.as_str(), side_str, &qty_str, client_order_id)
             .map_err(|e| BrokerError::Order(e))?
             .parse::<u64>()
-            .map_err(|e| BrokerError::Order(format!("Invalid order ID: {}", e)))
-            .map(OrderId)
+            .map_err(|e| BrokerError::Order(format!("Invalid order ID: {}", e)))?;
+
+        // Log order submission to audit log if enabled (requires binance feature)
+        #[cfg(feature = "binance")]
+        if let (Some(audit_path), Some(seq), Some(cid)) =
+            (&self.audit_log_path, sequence_number, client_order_id)
+        {
+            log_order_submitted(audit_path, OrderId(order_id), order.symbol, seq, cid);
+        }
+
+        Ok(OrderId(order_id))
     }
 
     fn order_status(&self, id: OrderId) -> Result<BrokerOrderStatus, BrokerError> {
