@@ -1,16 +1,33 @@
 //! Binance spot broker implementation.
 
 pub mod auth;
+pub mod cache;
 pub mod client;
 pub mod types;
 
+use std::path::Path;
+use std::sync::Mutex;
+
+use chrono::{DateTime, Utc};
 use nanobook::Symbol;
 
 use crate::Broker;
 use crate::error::BrokerError;
 use crate::parse::parse_f64_or_warn;
 use crate::types::*;
+pub use cache::BinanceOrderCache;
 use client::BinanceClient;
+
+#[derive(Debug, Clone)]
+pub struct CachedOrder {
+    pub symbol: Symbol,
+    pub quantity: i64,
+    pub side: BrokerSide,
+    pub status: OrderState,
+    pub binance_order_id: String,
+    pub client_order_id: Option<String>,
+    pub submitted_at: DateTime<Utc>,
+}
 
 /// Binance spot broker implementing the generic Broker trait.
 ///
@@ -44,6 +61,8 @@ pub struct BinanceBroker {
     /// nanobook symbols are like "BTC", Binance needs "BTCUSDT".
     #[zeroize(skip)]
     quote_asset: String,
+    #[zeroize(skip)]
+    order_cache: Mutex<BinanceOrderCache>,
 }
 
 impl BinanceBroker {
@@ -58,6 +77,7 @@ impl BinanceBroker {
             testnet,
             client: None,
             quote_asset: "USDT".to_string(),
+            order_cache: Mutex::new(BinanceOrderCache::new()),
         }
     }
 
@@ -88,6 +108,97 @@ impl BinanceBroker {
     fn parse_price_cents(s: &str, field: &'static str) -> Result<i64, BrokerError> {
         let val = parse_f64_or_warn(s, field);
         f64_cents_checked(val, field)
+    }
+
+    pub fn cache_order(
+        &self,
+        order_id: OrderId,
+        symbol: Symbol,
+        quantity: i64,
+        side: BrokerSide,
+        client_order_id: Option<String>,
+    ) {
+        self.cache_order_with_binance_id(
+            order_id,
+            symbol,
+            quantity,
+            side,
+            order_id.0.to_string(),
+            client_order_id,
+            Utc::now(),
+        );
+    }
+
+    fn cache_order_with_binance_id(
+        &self,
+        order_id: OrderId,
+        symbol: Symbol,
+        quantity: i64,
+        side: BrokerSide,
+        binance_order_id: String,
+        client_order_id: Option<String>,
+        submitted_at: DateTime<Utc>,
+    ) {
+        let mut cache = self
+            .order_cache
+            .lock()
+            .expect("Binance order cache mutex poisoned");
+        cache.orders.insert(
+            order_id,
+            CachedOrder {
+                symbol,
+                quantity,
+                side,
+                status: OrderState::Submitted,
+                binance_order_id,
+                client_order_id,
+                submitted_at,
+            },
+        );
+    }
+
+    pub fn update_cached_order_status(&self, order_id: OrderId, status: OrderState) {
+        let mut cache = self
+            .order_cache
+            .lock()
+            .expect("Binance order cache mutex poisoned");
+        if let Some(order) = cache.orders.get_mut(&order_id) {
+            order.status = status;
+        }
+    }
+
+    pub fn get_cached_order(&self, order_id: OrderId) -> Option<CachedOrder> {
+        let cache = self
+            .order_cache
+            .lock()
+            .expect("Binance order cache mutex poisoned");
+        cache.orders.get(&order_id).cloned()
+    }
+
+    pub fn clear_cache(&self) {
+        let mut cache = self
+            .order_cache
+            .lock()
+            .expect("Binance order cache mutex poisoned");
+        cache.orders.clear();
+    }
+
+    pub fn load_cache_from_disk(&self, path: &Path) -> Result<(), BrokerError> {
+        let loaded = BinanceOrderCache::load_from_disk(path)?;
+        let mut cache = self
+            .order_cache
+            .lock()
+            .expect("Binance order cache mutex poisoned");
+        *cache = loaded;
+        Ok(())
+    }
+
+    pub fn save_cache_to_disk(&self, path: &Path) -> Result<(), BrokerError> {
+        let cache = self
+            .order_cache
+            .lock()
+            .expect("Binance order cache mutex poisoned");
+        cache.save_to_disk(path)
     }
 }
 
@@ -188,7 +299,22 @@ impl Broker for BinanceBroker {
             order.client_order_id.as_ref().map(|cid| cid.as_str()),
         )?;
 
-        Ok(OrderId(resp.order_id))
+        let order_id = OrderId(resp.order_id);
+        self.cache_order_with_binance_id(
+            order_id,
+            order.symbol,
+            i64::try_from(order.quantity)
+                .map_err(|_| BrokerError::Order("order quantity exceeds i64".into()))?,
+            order.side,
+            resp.order_id.to_string(),
+            order
+                .client_order_id
+                .as_ref()
+                .map(|cid| cid.as_str().to_string()),
+            Utc::now(),
+        );
+
+        Ok(order_id)
     }
 
     fn order_status(&self, id: OrderId) -> Result<BrokerOrderStatus, BrokerError> {
