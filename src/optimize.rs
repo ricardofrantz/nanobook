@@ -262,6 +262,265 @@ pub fn optimize_risk_parity(returns: &[Vec<f64>]) -> Vec<f64> {
     normalize_long_only(w)
 }
 
+/// One merge step in an agglomerative clustering dendrogram.
+///
+/// Leaves are indexed `0..n_assets`; internal clusters are assigned IDs
+/// `n_assets + merge_index`, matching scipy-style linkage conventions.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinkageMerge {
+    /// Left child cluster ID.
+    pub left: usize,
+    /// Right child cluster ID.
+    pub right: usize,
+    /// Single-linkage distance at which the children merged.
+    pub distance: f64,
+    /// Number of original assets contained in the merged cluster.
+    pub size: usize,
+}
+
+/// Compute the sample correlation matrix for a returns matrix.
+///
+/// Rows are time periods and columns are assets. Invalid input returns an
+/// empty matrix. The diagonal is pinned to `1.0`; off-diagonal entries with
+/// zero or non-finite variance are set to `0.0`.
+pub fn correlation_matrix(returns: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let Some((_rows, cols)) = matrix_shape(returns) else {
+        return Vec::new();
+    };
+
+    let cov = covariance_matrix(returns);
+    let mut corr = vec![vec![0.0; cols]; cols];
+
+    for i in 0..cols {
+        for j in i..cols {
+            let value = if i == j {
+                1.0
+            } else {
+                let denom = (cov[i][i] * cov[j][j]).sqrt();
+                if denom.is_finite() && denom > 1e-12 {
+                    (cov[i][j] / denom).clamp(-1.0, 1.0)
+                } else {
+                    0.0
+                }
+            };
+            corr[i][j] = value;
+            corr[j][i] = value;
+        }
+    }
+
+    corr
+}
+
+/// Convert a correlation matrix into López de Prado's clustering distance.
+///
+/// Uses `d[i][j] = sqrt(0.5 * (1 - corr[i][j]))`. Invalid or non-square input
+/// returns an empty matrix.
+pub fn distance_matrix(correlation: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let n = correlation.len();
+    if n == 0 || correlation.iter().any(|row| row.len() != n) {
+        return Vec::new();
+    }
+
+    let mut dist = vec![vec![0.0; n]; n];
+    for i in 0..n {
+        for j in i..n {
+            let value = if i == j {
+                0.0
+            } else {
+                let corr = if correlation[i][j].is_finite() {
+                    correlation[i][j].clamp(-1.0, 1.0)
+                } else {
+                    0.0
+                };
+                (0.5 * (1.0 - corr)).max(0.0).sqrt()
+            };
+            dist[i][j] = value;
+            dist[j][i] = value;
+        }
+    }
+
+    dist
+}
+
+/// Build a single-linkage hierarchical clustering dendrogram.
+///
+/// The input is a square distance matrix over assets. At each step the two
+/// clusters with the smallest pairwise asset distance are merged.
+pub fn single_linkage_clustering(distance: &[Vec<f64>]) -> Vec<LinkageMerge> {
+    let n = distance.len();
+    if n < 2 || distance.iter().any(|row| row.len() != n) {
+        return Vec::new();
+    }
+
+    #[derive(Clone)]
+    struct Cluster {
+        id: usize,
+        members: Vec<usize>,
+    }
+
+    let mut clusters: Vec<Cluster> = (0..n)
+        .map(|i| Cluster {
+            id: i,
+            members: vec![i],
+        })
+        .collect();
+    let mut linkage = Vec::with_capacity(n - 1);
+    let mut next_id = n;
+
+    while clusters.len() > 1 {
+        let mut best = (0_usize, 1_usize, f64::INFINITY);
+
+        for i in 0..clusters.len() {
+            for j in (i + 1)..clusters.len() {
+                let d =
+                    cluster_single_distance(&clusters[i].members, &clusters[j].members, distance);
+                if d < best.2 {
+                    best = (i, j, d);
+                }
+            }
+        }
+
+        if !best.2.is_finite() {
+            return Vec::new();
+        }
+
+        let (left_idx, right_idx, merge_distance) = best;
+        let right = clusters.remove(right_idx);
+        let left = clusters.remove(left_idx);
+        let mut members = left.members;
+        members.extend(right.members);
+        let size = members.len();
+
+        linkage.push(LinkageMerge {
+            left: left.id,
+            right: right.id,
+            distance: merge_distance,
+            size,
+        });
+        clusters.push(Cluster {
+            id: next_id,
+            members,
+        });
+        next_id += 1;
+    }
+
+    linkage
+}
+
+/// Reorder assets by recursively traversing the clustering tree.
+///
+/// This is the quasi-diagonalization step from López de Prado's HRP recipe:
+/// nearby leaves in the dendrogram become nearby entries in the covariance
+/// matrix ordering.
+pub fn hrp_quasi_diagonalization(linkage: &[LinkageMerge], n_assets: usize) -> Vec<usize> {
+    if n_assets == 0 {
+        return Vec::new();
+    }
+    if n_assets == 1 {
+        return vec![0];
+    }
+    if linkage.len() != n_assets - 1 {
+        return Vec::new();
+    }
+
+    let root_id = n_assets + linkage.len() - 1;
+    let mut order = Vec::with_capacity(n_assets);
+    append_linkage_leaves(root_id, n_assets, linkage, &mut order);
+
+    if order.len() == n_assets && all_unique_indices(&order, n_assets) {
+        order
+    } else {
+        Vec::new()
+    }
+}
+
+/// Allocate HRP weights by recursive bisection on quasi-diagonalized assets.
+///
+/// Cluster variance is estimated with the inverse-variance portfolio inside
+/// each cluster. Returned weights are in original asset order.
+pub fn hrp_recursive_bisection(covariance: &[Vec<f64>], ordered_indices: &[usize]) -> Vec<f64> {
+    let n = covariance.len();
+    if n == 0
+        || covariance.iter().any(|row| row.len() != n)
+        || ordered_indices.len() != n
+        || !all_unique_indices(ordered_indices, n)
+    {
+        return Vec::new();
+    }
+    if n == 1 {
+        return vec![1.0];
+    }
+
+    let mut ordered_weights = vec![1.0; n];
+    let mut ranges = vec![(0_usize, n)];
+
+    while let Some((start, end)) = ranges.pop() {
+        let len = end - start;
+        if len <= 1 {
+            continue;
+        }
+
+        let mid = start + len / 2;
+        let left = &ordered_indices[start..mid];
+        let right = &ordered_indices[mid..end];
+        let left_var = cluster_variance(covariance, left);
+        let right_var = cluster_variance(covariance, right);
+        let denom = left_var + right_var;
+        let alpha = if denom.is_finite() && denom > 1e-18 {
+            1.0 - left_var / denom
+        } else {
+            0.5
+        };
+
+        for weight in &mut ordered_weights[start..mid] {
+            *weight *= alpha;
+        }
+        for weight in &mut ordered_weights[mid..end] {
+            *weight *= 1.0 - alpha;
+        }
+
+        ranges.push((start, mid));
+        ranges.push((mid, end));
+    }
+
+    let mut weights = vec![0.0; n];
+    for (ordered_pos, asset_idx) in ordered_indices.iter().enumerate() {
+        weights[*asset_idx] = ordered_weights[ordered_pos];
+    }
+
+    normalize_long_only(weights)
+}
+
+/// Hierarchical Risk Parity optimizer following López de Prado (2016).
+///
+/// The pipeline is: sample covariance/correlation, correlation distance,
+/// single-linkage clustering, quasi-diagonalization, then recursive bisection.
+/// Invalid input returns empty weights, matching the existing optimizer API.
+pub fn optimize_hrp(returns: &[Vec<f64>]) -> Vec<f64> {
+    let Some((_rows, cols)) = matrix_shape(returns) else {
+        return Vec::new();
+    };
+    if cols == 1 {
+        return vec![1.0];
+    }
+
+    let corr = correlation_matrix(returns);
+    let dist = distance_matrix(&corr);
+    let linkage = single_linkage_clustering(&dist);
+    let ordered = hrp_quasi_diagonalization(&linkage, cols);
+    if ordered.is_empty() {
+        return Vec::new();
+    }
+
+    let cov = covariance_matrix(returns);
+    let weights = hrp_recursive_bisection(&cov, &ordered);
+    if weights.len() == cols && weights.iter().all(|w| w.is_finite() && *w >= -1e-12) {
+        normalize_long_only(weights)
+    } else {
+        Vec::new()
+    }
+}
+
 /// Compute long-only weights inversely proportional to each asset's per-asset
 /// CVaR.
 ///
@@ -559,6 +818,86 @@ fn asset_cdar(returns: &[f64], alpha: f64) -> f64 {
     drawdowns.iter().take(k).sum::<f64>() / k as f64
 }
 
+fn cluster_single_distance(left: &[usize], right: &[usize], distance: &[Vec<f64>]) -> f64 {
+    let mut best = f64::INFINITY;
+    for &i in left {
+        for &j in right {
+            let d = distance[i][j];
+            if d.is_finite() && d < best {
+                best = d;
+            }
+        }
+    }
+    best
+}
+
+fn append_linkage_leaves(
+    cluster_id: usize,
+    n_assets: usize,
+    linkage: &[LinkageMerge],
+    order: &mut Vec<usize>,
+) {
+    if cluster_id < n_assets {
+        order.push(cluster_id);
+        return;
+    }
+
+    let merge_idx = cluster_id - n_assets;
+    if let Some(merge) = linkage.get(merge_idx) {
+        append_linkage_leaves(merge.left, n_assets, linkage, order);
+        append_linkage_leaves(merge.right, n_assets, linkage, order);
+    }
+}
+
+fn all_unique_indices(indices: &[usize], n: usize) -> bool {
+    let mut seen = vec![false; n];
+    for &idx in indices {
+        if idx >= n || seen[idx] {
+            return false;
+        }
+        seen[idx] = true;
+    }
+    true
+}
+
+fn cluster_variance(covariance: &[Vec<f64>], indices: &[usize]) -> f64 {
+    debug_assert!(!indices.is_empty());
+    if indices.len() == 1 {
+        let var = covariance[indices[0]][indices[0]];
+        return if var.is_finite() && var > 0.0 {
+            var
+        } else {
+            1e-12
+        };
+    }
+
+    let diag_risks: Vec<f64> = indices
+        .iter()
+        .map(|&idx| {
+            let var = covariance[idx][idx];
+            if var.is_finite() && var > 1e-12 {
+                var
+            } else {
+                1e-12
+            }
+        })
+        .collect();
+    let weights = inverse_risk_weights(&diag_risks);
+
+    let mut variance = 0.0;
+    for (local_i, &asset_i) in indices.iter().enumerate() {
+        for (local_j, &asset_j) in indices.iter().enumerate() {
+            variance += weights[local_i] * covariance[asset_i][asset_j] * weights[local_j];
+        }
+    }
+
+    if variance.is_finite() && variance > 0.0 {
+        variance
+    } else {
+        1e-12
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -687,6 +1026,109 @@ mod tests {
         let r = sample_returns();
         let w = optimize_risk_parity(&r);
         assert_valid_weights(&w, 3);
+    }
+
+    #[test]
+    fn correlation_matrix_is_symmetric_with_unit_diagonal() {
+        let r = sample_returns();
+        let corr = correlation_matrix(&r);
+
+        assert_eq!(corr.len(), 3);
+        for i in 0..3 {
+            assert!((corr[i][i] - 1.0).abs() < 1e-12);
+            for j in 0..3 {
+                assert!((corr[i][j] - corr[j][i]).abs() < 1e-12);
+                assert!(corr[i][j].is_finite());
+                assert!((-1.0..=1.0).contains(&corr[i][j]));
+            }
+        }
+    }
+
+    #[test]
+    fn distance_matrix_uses_correlation_distance() {
+        let corr = vec![vec![1.0, 0.5], vec![0.5, 1.0]];
+        let dist = distance_matrix(&corr);
+
+        assert_eq!(dist.len(), 2);
+        assert_eq!(dist[0][0], 0.0);
+        assert_eq!(dist[1][1], 0.0);
+        let expected = 0.5;
+        assert!((dist[0][1] - expected).abs() < 1e-12);
+        assert!((dist[1][0] - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn single_linkage_and_quasi_diagonalization_cluster_nearest_assets() {
+        let dist = vec![
+            vec![0.0, 0.1, 0.8],
+            vec![0.1, 0.0, 0.7],
+            vec![0.8, 0.7, 0.0],
+        ];
+
+        let linkage = single_linkage_clustering(&dist);
+        assert_eq!(linkage.len(), 2);
+        assert_eq!(linkage[0].left, 0);
+        assert_eq!(linkage[0].right, 1);
+        assert!((linkage[0].distance - 0.1).abs() < 1e-12);
+
+        let order = hrp_quasi_diagonalization(&linkage, 3);
+        assert_eq!(order, vec![2, 0, 1]);
+    }
+
+    #[test]
+    fn hrp_weights_are_valid() {
+        let r = sample_returns();
+        let w = optimize_hrp(&r);
+        assert_valid_weights(&w, 3);
+    }
+
+    #[test]
+    fn hrp_perfectly_correlated_equal_variance_assets_get_equal_weights() {
+        let factor = [-0.02, -0.01, 0.00, 0.01, 0.02];
+        let returns: Vec<Vec<f64>> = factor.iter().map(|&x| vec![x, x, x, x]).collect();
+
+        let w = optimize_hrp(&returns);
+
+        assert_valid_weights(&w, 4);
+        assert_close(&w, &[0.25, 0.25, 0.25, 0.25], 1e-12);
+    }
+
+    #[test]
+    fn hrp_uncorrelated_equal_variance_assets_get_equal_weights() {
+        let returns = vec![
+            vec![1.0, 0.0, 1.0, 0.0],
+            vec![0.0, 1.0, 0.0, 1.0],
+            vec![-1.0, 0.0, -1.0, 0.0],
+            vec![0.0, -1.0, 0.0, -1.0],
+        ];
+
+        let w = optimize_hrp(&returns);
+
+        assert_valid_weights(&w, 4);
+        assert_close(&w, &[0.25, 0.25, 0.25, 0.25], 1e-6);
+    }
+
+    #[test]
+    fn hrp_two_asset_case_matches_inverse_variance_solution() {
+        let returns = vec![
+            vec![-2.0, -1.0],
+            vec![2.0, 1.0],
+            vec![-2.0, -1.0],
+            vec![2.0, 1.0],
+        ];
+
+        let w = optimize_hrp(&returns);
+
+        assert_valid_weights(&w, 2);
+        assert_close(&w, &[0.2, 0.8], 1e-6);
+    }
+
+    #[test]
+    fn hrp_edge_cases_follow_optimizer_contract() {
+        assert!(optimize_hrp(&[]).is_empty());
+        assert!(optimize_hrp(&[vec![0.01, 0.02], vec![0.03]]).is_empty());
+        assert_eq!(optimize_hrp(&[vec![0.01], vec![-0.02]]), vec![1.0]);
+        assert!(correlation_matrix(&[vec![0.01, f64::NAN], vec![0.02, 0.03]]).is_empty());
     }
 
     #[test]
