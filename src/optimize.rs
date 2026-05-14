@@ -316,7 +316,7 @@ pub fn correlation_matrix(returns: &[Vec<f64>]) -> Vec<Vec<f64>> {
 ///
 /// Uses `d[i][j] = sqrt(0.5 * (1 - corr[i][j]))`. Invalid or non-square input
 /// returns an empty matrix.
-pub fn distance_matrix(correlation: &[Vec<f64>]) -> Vec<Vec<f64>> {
+fn distance_matrix(correlation: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let n = correlation.len();
     if n == 0 || correlation.iter().any(|row| row.len() != n) {
         return Vec::new();
@@ -347,7 +347,12 @@ pub fn distance_matrix(correlation: &[Vec<f64>]) -> Vec<Vec<f64>> {
 ///
 /// The input is a square distance matrix over assets. At each step the two
 /// clusters with the smallest pairwise asset distance are merged.
-pub fn single_linkage_clustering(distance: &[Vec<f64>]) -> Vec<LinkageMerge> {
+///
+/// Performance note: This implementation is O(n³) in the number of assets,
+/// which is acceptable for typical portfolio sizes (n < 50). For very large
+/// portfolios (n > 100), consider using a priority-queue based approach
+/// for O(n² log n) performance.
+fn single_linkage_clustering(distance: &[Vec<f64>]) -> Vec<LinkageMerge> {
     let n = distance.len();
     if n < 2 || distance.iter().any(|row| row.len() != n) {
         return Vec::new();
@@ -413,7 +418,7 @@ pub fn single_linkage_clustering(distance: &[Vec<f64>]) -> Vec<LinkageMerge> {
 /// This is the quasi-diagonalization step from López de Prado's HRP recipe:
 /// nearby leaves in the dendrogram become nearby entries in the covariance
 /// matrix ordering.
-pub fn hrp_quasi_diagonalization(linkage: &[LinkageMerge], n_assets: usize) -> Vec<usize> {
+fn hrp_quasi_diagonalization(linkage: &[LinkageMerge], n_assets: usize) -> Vec<usize> {
     if n_assets == 0 {
         return Vec::new();
     }
@@ -439,7 +444,7 @@ pub fn hrp_quasi_diagonalization(linkage: &[LinkageMerge], n_assets: usize) -> V
 ///
 /// Cluster variance is estimated with the inverse-variance portfolio inside
 /// each cluster. Returned weights are in original asset order.
-pub fn hrp_recursive_bisection(covariance: &[Vec<f64>], ordered_indices: &[usize]) -> Vec<f64> {
+fn hrp_recursive_bisection(covariance: &[Vec<f64>], ordered_indices: &[usize]) -> Vec<f64> {
     let n = covariance.len();
     if n == 0
         || covariance.iter().any(|row| row.len() != n)
@@ -1137,6 +1142,46 @@ mod tests {
         assert!(optimize_hrp(&[vec![0.01, 0.02], vec![0.03]]).is_empty());
         assert_eq!(optimize_hrp(&[vec![0.01], vec![-0.02]]), vec![1.0]);
         assert!(correlation_matrix(&[vec![0.01, f64::NAN], vec![0.02, 0.03]]).is_empty());
+    }
+
+    #[test]
+    fn hrp_reference_test_with_known_clustering_structure() {
+        // 3-asset case with clear correlation structure:
+        // Asset 0 and 1 are highly correlated, asset 2 is uncorrelated with both
+        let returns = vec![
+            vec![0.01, 0.009, 0.0],
+            vec![-0.01, -0.011, 0.0],
+            vec![0.02, 0.019, 0.0],
+            vec![-0.02, -0.021, 0.0],
+            vec![0.015, 0.014, 0.0],
+            vec![-0.015, -0.016, 0.0],
+        ];
+
+        let corr = correlation_matrix(&returns);
+        
+        // Verify correlation structure: assets 0 and 1 highly correlated, asset 2 uncorrelated
+        assert!(corr[0][1] > 0.99, "Assets 0 and 1 should be highly correlated");
+        assert!(corr[0][2].abs() < 0.1, "Asset 2 should be uncorrelated with asset 0");
+        assert!(corr[1][2].abs() < 0.1, "Asset 2 should be uncorrelated with asset 1");
+
+        // HRP should cluster assets 0 and 1 together, separate from asset 2
+        let w = optimize_hrp(&returns);
+        
+        assert_valid_weights(&w, 3);
+        
+        // Assets 0 and 1 should get similar weights (clustered together)
+        // Asset 2 should get a different weight (separate cluster)
+        let w0 = w[0];
+        let w1 = w[1];
+        let w2 = w[2];
+        
+        let cluster_01_diff = (w0 - w1).abs();
+        let cluster_01_vs_2_diff = ((w0 + w1) / 2.0 - w2).abs();
+        
+        assert!(
+            cluster_01_diff < cluster_01_vs_2_diff,
+            "Assets 0 and 1 should have more similar weights than either vs asset 2"
+        );
     }
 
     #[test]
