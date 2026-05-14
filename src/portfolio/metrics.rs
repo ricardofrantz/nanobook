@@ -156,6 +156,7 @@ pub fn compute_metrics(returns: &[f64], periods_per_year: f64, risk_free: f64) -
     // Profit factor: sum(positive) / |sum(negative)|
     let sum_positive: f64 = returns.iter().filter(|&&r| r > 0.0).sum();
     let sum_negative: f64 = returns.iter().filter(|&&r| r < 0.0).sum();
+    // Exact zero check is appropriate: sum_negative is exactly 0.0 when there are no negative returns
     let profit_factor = if sum_negative != 0.0 {
         sum_positive / sum_negative.abs()
     } else if sum_positive > 0.0 {
@@ -175,6 +176,7 @@ pub fn compute_metrics(returns: &[f64], periods_per_year: f64, risk_free: f64) -
     } else {
         0.0
     };
+    // Exact zero check is appropriate: mean_losing is exactly 0.0 when there are no losing periods
     let payoff_ratio = if mean_losing != 0.0 {
         mean_winning / mean_losing.abs()
     } else if mean_winning > 0.0 {

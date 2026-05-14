@@ -399,11 +399,9 @@ impl AuditLog {
 
         let mut last_sequence: Option<u64> = None;
         for event in parse_audit_events(&self.path)? {
-            if event.event == "cron_completed" {
-                if event.window_id.as_deref() == Some(window_id) {
-                    if let Some(seq) = event.sequence_number {
-                        last_sequence = Some(seq);
-                    }
+            if event.event == "cron_completed" && event.window_id.as_deref() == Some(window_id) {
+                if let Some(seq) = event.sequence_number {
+                    last_sequence = Some(seq);
                 }
             }
         }

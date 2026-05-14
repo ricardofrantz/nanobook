@@ -324,6 +324,7 @@ pub fn submit_order(
 ///
 /// The deduplication logic ensures that each unique fill event (identified by
 /// order_id + status + filled_quantity) is processed exactly once.
+#[allow(clippy::too_many_arguments)]
 pub fn execute_limit_order(
     client: &Client,
     symbol: nanobook::Symbol,

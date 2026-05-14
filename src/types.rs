@@ -90,6 +90,7 @@ impl Symbol {
         }
         let mut buf = [0u8; 8];
         buf[..s.len()].copy_from_slice(s.as_bytes());
+        // Safe: s.len() <= 8, which fits in u8
         Some(Self {
             buf,
             len: s.len() as u8,
@@ -110,6 +111,7 @@ impl Symbol {
         };
         let mut buf = [0u8; 8];
         buf[..valid_len].copy_from_slice(&s.as_bytes()[..valid_len]);
+        // Safe: valid_len <= 8, which fits in u8
         Self {
             buf,
             len: valid_len as u8,
@@ -119,7 +121,9 @@ impl Symbol {
     /// Returns the symbol as a string slice.
     #[inline]
     pub fn as_str(&self) -> &str {
-        // Safety: we only accept valid str input in constructors
+        // Safety: we only accept valid str input in constructors (new, try_new, from_str_truncated)
+        // Debug assert to catch invariant violations during testing
+        debug_assert!(std::str::from_utf8(&self.buf[..self.len as usize]).is_ok());
         unsafe { std::str::from_utf8_unchecked(&self.buf[..self.len as usize]) }
     }
 }

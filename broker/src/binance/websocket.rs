@@ -157,7 +157,7 @@ impl BinanceWebSocket {
         }
         self.connected.store(false, Ordering::SeqCst);
         self.state = ConnectionState::Disconnected;
-        *self.last_heartbeat.lock().unwrap() = None;
+        *self.last_heartbeat.lock().expect("heartbeat mutex poisoned") = None;
         self.reconnect_attempts = 0;
     }
 
@@ -211,7 +211,7 @@ impl BinanceWebSocket {
     /// Returns true if the heartbeat is still valid (no timeout),
     /// false if a timeout has occurred.
     pub fn check_heartbeat(&self) -> bool {
-        let last_heartbeat = self.last_heartbeat.lock().unwrap();
+        let last_heartbeat = self.last_heartbeat.lock().expect("heartbeat mutex poisoned");
         if let Some(last) = *last_heartbeat {
             last.elapsed() < self.heartbeat_interval
         } else {
@@ -221,7 +221,7 @@ impl BinanceWebSocket {
 
     /// Update the last heartbeat timestamp to now.
     pub fn update_heartbeat(&self) {
-        *self.last_heartbeat.lock().unwrap() = Some(Instant::now());
+        *self.last_heartbeat.lock().expect("heartbeat mutex poisoned") = Some(Instant::now());
     }
 
     /// Get the current number of reconnect attempts.

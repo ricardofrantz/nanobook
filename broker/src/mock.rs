@@ -132,7 +132,7 @@ impl MockBroker {
 
     /// Get all orders that were submitted (for assertion in tests).
     pub fn submitted_orders(&self) -> Vec<RecordedOrder> {
-        self.submitted_orders.lock().unwrap().clone()
+        self.submitted_orders.lock().expect("submitted_orders mutex poisoned").clone()
     }
 }
 
@@ -177,7 +177,7 @@ impl Broker for MockBroker {
         }
 
         // Record the order
-        self.submitted_orders.lock().unwrap().push(RecordedOrder {
+        self.submitted_orders.lock().expect("submitted_orders mutex poisoned").push(RecordedOrder {
             symbol: order.symbol,
             side: order.side,
             quantity: order.quantity,
@@ -190,7 +190,7 @@ impl Broker for MockBroker {
             _ => {
                 let id = OrderId(self.next_order_id.fetch_add(1, Ordering::Relaxed));
                 // Add to open orders list
-                self.open_orders.lock().unwrap().push(id);
+                self.open_orders.lock().expect("open_orders mutex poisoned").push(id);
                 Ok(id)
             }
         }
@@ -225,7 +225,7 @@ impl Broker for MockBroker {
             return Err(BrokerError::NotConnected);
         }
 
-        let open_ids = self.open_orders.lock().unwrap().clone();
+        let open_ids = self.open_orders.lock().expect("open_orders mutex poisoned").clone();
         let mut result = Vec::new();
 
         for id in open_ids {
@@ -255,7 +255,7 @@ impl Broker for MockBroker {
             return Err(BrokerError::NotConnected);
         }
         // Remove from open orders list
-        self.open_orders.lock().unwrap().retain(|&oid| oid != id);
+        self.open_orders.lock().expect("open_orders mutex poisoned").retain(|&oid| oid != id);
         Ok(())
     }
 

@@ -44,3 +44,29 @@ pub fn py_spearman(x: Vec<f64>, y: Vec<f64>) -> (f64, f64) {
 pub fn py_quintile_spread(scores: Vec<f64>, returns: Vec<f64>, n_quantiles: usize) -> f64 {
     stats::quintile_spread(&scores, &returns, n_quantiles)
 }
+
+/// Compute the Deflated Sharpe Ratio.
+///
+/// Lopez de Prado's Deflated Sharpe Ratio adjusts an observed Sharpe ratio for
+/// multiple testing and non-normal return distributions. The result is a
+/// standard-normal probability after subtracting the expected maximum Sharpe
+/// under the null across ``n_trials``.
+///
+/// Args:
+///     sharpe: Observed Sharpe ratio.
+///     n_trials: Number of independent strategy trials.
+///     skewness: Skewness of the returns distribution.
+///     kurtosis: Kurtosis of the returns distribution.
+///
+/// Returns:
+///     Float: Deflated Sharpe Ratio probability. Returns NaN for invalid
+///     inputs. For one trial, returns ``sharpe`` unchanged.
+///
+/// Example::
+///
+///     dsr = nanobook.py_deflated_sharpe(1.5, 20, 0.0, 3.0)
+///
+#[pyfunction]
+pub fn py_deflated_sharpe(sharpe: f64, n_trials: usize, skewness: f64, kurtosis: f64) -> f64 {
+    stats::deflated_sharpe(sharpe, n_trials, skewness, kurtosis)
+}

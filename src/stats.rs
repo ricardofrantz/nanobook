@@ -81,6 +81,7 @@ fn rankdata(values: &[f64]) -> Vec<f64> {
     // fallback is unreachable.
     let mut indices: Vec<usize> = (0..n).collect();
     indices.sort_by(|&a, &b| {
+        // Safe: a and b are in [0, n), values has length n
         values[a]
             .partial_cmp(&values[b])
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -128,6 +129,7 @@ fn pearson(x: &[f64], y: &[f64]) -> f64 {
         var_y += dy * dy;
     }
 
+    // Exact zero check is appropriate here: variance is exactly 0.0 when all values are identical
     if var_x == 0.0 || var_y == 0.0 {
         return f64::NAN;
     }
@@ -265,6 +267,93 @@ fn t_distribution_two_tailed_p(t_stat: f64, df: f64) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
+// Standard normal distribution functions
+// ---------------------------------------------------------------------------
+
+fn standard_normal_cdf(x: f64) -> f64 {
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    if x == f64::INFINITY {
+        return 1.0;
+    }
+    if x == f64::NEG_INFINITY {
+        return 0.0;
+    }
+
+    // Abramowitz and Stegun 7.1.26. Maximum absolute error is around 7.5e-8.
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let z = x.abs() / std::f64::consts::SQRT_2;
+    let t = 1.0 / (1.0 + 0.327_591_1 * z);
+    let y = 1.0
+        - (((((1.061_405_429 * t - 1.453_152_027) * t + 1.421_413_741) * t - 0.284_496_736) * t
+            + 0.254_829_592)
+            * t
+            * (-z * z).exp());
+    0.5 * (1.0 + sign * y)
+}
+
+fn inverse_standard_normal_cdf(p: f64) -> f64 {
+    if p <= 0.0 {
+        return f64::NEG_INFINITY;
+    }
+    if p >= 1.0 {
+        return f64::INFINITY;
+    }
+
+    // Peter J. Acklam's rational approximation.
+    const A: [f64; 6] = [
+        -3.969_683_028_665_376e1,
+        2.209_460_984_245_205e2,
+        -2.759_285_104_469_687e2,
+        1.383_577_518_672_69e2,
+        -3.066_479_806_614_716e1,
+        2.506_628_277_459_239,
+    ];
+    const B: [f64; 5] = [
+        -5.447_609_879_822_406e1,
+        1.615_858_368_580_409e2,
+        -1.556_989_798_598_866e2,
+        6.680_131_188_771_972e1,
+        -1.328_068_155_288_572e1,
+    ];
+    const C: [f64; 6] = [
+        -7.784_894_002_430_293e-3,
+        -3.223_964_580_411_365e-1,
+        -2.400_758_277_161_838,
+        -2.549_732_539_343_734,
+        4.374_664_141_464_968,
+        2.938_163_982_698_783,
+    ];
+    const D: [f64; 4] = [
+        7.784_695_709_041_462e-3,
+        3.224_671_290_700_398e-1,
+        2.445_134_137_142_996,
+        3.754_408_661_907_416,
+    ];
+
+    const P_LOW: f64 = 0.024_25;
+    const P_HIGH: f64 = 1.0 - P_LOW;
+
+    if p < P_LOW {
+        let q = (-2.0 * p.ln()).sqrt();
+        return (((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
+            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0);
+    }
+
+    if p <= P_HIGH {
+        let q = p - 0.5;
+        let r = q * q;
+        return (((((A[0] * r + A[1]) * r + A[2]) * r + A[3]) * r + A[4]) * r + A[5]) * q
+            / (((((B[0] * r + B[1]) * r + B[2]) * r + B[3]) * r + B[4]) * r + 1.0);
+    }
+
+    let q = (-2.0 * (1.0 - p).ln()).sqrt();
+    -(((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
+        / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
+}
+
+// ---------------------------------------------------------------------------
 // Public functions
 // ---------------------------------------------------------------------------
 
@@ -307,6 +396,67 @@ pub fn spearman(x: &[f64], y: &[f64]) -> (f64, f64) {
     let p_value = t_distribution_two_tailed_p(t_stat, df);
 
     (r_clamped, p_value)
+}
+
+/// Deflated Sharpe Ratio after Lopez de Prado (2018).
+///
+/// Returns the probability that an observed Sharpe ratio remains positive
+/// after adjusting for selection across multiple trials and non-normal return
+/// moments. The implementation follows the common deflated-Sharpe structure:
+///
+/// `DSR = Phi((SR - E[max SR]) / sigma[SR])`
+///
+/// where `Phi` is the standard normal CDF, `E[max SR]` is the expected maximum
+/// Sharpe under the null across `n_trials`, and `sigma[SR]` uses the
+/// skewness/kurtosis-adjusted finite-sample standard error:
+///
+/// `sqrt((1 - skewness * SR + (kurtosis - 1) / 4 * SR^2) / (n_trials - 1))`.
+///
+/// Returns `NaN` for invalid inputs. A single trial returns the input Sharpe
+/// unchanged because there is no multiple-testing adjustment.
+///
+/// # References
+///
+/// - López de Prado, M. (2018), "Advances in Financial Machine Learning",
+///   Chapter 3: "The Deflated Sharpe Ratio".
+pub fn deflated_sharpe(sharpe: f64, n_trials: usize, skewness: f64, kurtosis: f64) -> f64 {
+    if n_trials == 0 {
+        return f64::NAN;
+    }
+    if n_trials == 1 {
+        return sharpe;
+    }
+    if !sharpe.is_finite()
+        || !skewness.is_finite()
+        || !kurtosis.is_finite()
+        || sharpe < 0.0
+        || kurtosis <= 0.0
+    {
+        return f64::NAN;
+    }
+
+    let n = n_trials as f64;
+    let variance_term = 1.0 - skewness * sharpe + 0.25 * (kurtosis - 1.0) * sharpe * sharpe;
+    if !variance_term.is_finite() || variance_term <= 0.0 {
+        return f64::NAN;
+    }
+
+    let sharpe_se = (variance_term / (n - 1.0)).sqrt();
+    if !sharpe_se.is_finite() || sharpe_se <= 0.0 {
+        return f64::NAN;
+    }
+
+    let euler_gamma = 0.577_215_664_901_532_9_f64;
+    let p1 = (1.0 - 1.0 / n).clamp(f64::EPSILON, 1.0 - f64::EPSILON);
+    let p2 = (1.0 - 1.0 / (n * std::f64::consts::E)).clamp(f64::EPSILON, 1.0 - f64::EPSILON);
+    let expected_max_standard = (1.0 - euler_gamma) * inverse_standard_normal_cdf(p1)
+        + euler_gamma * inverse_standard_normal_cdf(p2);
+    if !expected_max_standard.is_finite() {
+        return f64::NAN;
+    }
+
+    let expected_max_sharpe = sharpe_se * expected_max_standard;
+    standard_normal_cdf((sharpe - expected_max_sharpe) / sharpe_se)
 }
 
 /// Quintile spread: mean of top quintile returns minus mean of bottom quintile returns.
@@ -590,5 +740,76 @@ mod tests {
         assert!(ln_gamma(2.0).abs() < 1e-10);
         // Gamma(5) = 24, ln(24) ≈ 3.178
         assert!((ln_gamma(5.0) - 24.0_f64.ln()).abs() < 1e-8);
+    }
+
+    // --- Deflated Sharpe Ratio tests ----------------------------------------
+
+    #[test]
+    fn test_deflated_sharpe_basic() {
+        let dsr = deflated_sharpe(1.5, 20, 0.0, 3.0);
+        assert!(dsr.is_finite(), "expected finite DSR, got {dsr}");
+        assert!(
+            (0.0..=1.0).contains(&dsr),
+            "expected probability, got {dsr}"
+        );
+    }
+
+    #[test]
+    fn test_deflated_sharpe_single_trial() {
+        let sharpe = 1.25;
+        let dsr = deflated_sharpe(sharpe, 1, 0.0, 3.0);
+        assert_eq!(dsr, sharpe);
+    }
+
+    #[test]
+    fn test_deflated_sharpe_zero_skewness_kurtosis() {
+        let dsr = deflated_sharpe(1.0, 10, 0.0, 3.0);
+        assert!(
+            dsr.is_finite(),
+            "expected finite normal-case DSR, got {dsr}"
+        );
+        assert!(
+            (0.0..=1.0).contains(&dsr),
+            "expected probability, got {dsr}"
+        );
+    }
+
+    #[test]
+    fn test_deflated_sharpe_invalid_inputs() {
+        assert!(deflated_sharpe(1.0, 0, 0.0, 3.0).is_nan());
+        assert!(deflated_sharpe(-1.0, 10, 0.0, 3.0).is_nan());
+        assert!(deflated_sharpe(1.0, 10, 0.0, -3.0).is_nan());
+        assert!(deflated_sharpe(f64::INFINITY, 10, 0.0, 3.0).is_nan());
+    }
+
+    #[test]
+    fn test_deflated_sharpe_extreme_values() {
+        let large = deflated_sharpe(10.0, 1_000, 0.0, 3.0);
+        let small = deflated_sharpe(1.0e-12, 1_000, 0.0, 3.0);
+        assert!(
+            large.is_finite(),
+            "large Sharpe should stay finite, got {large}"
+        );
+        assert!(
+            small.is_finite(),
+            "small Sharpe should stay finite, got {small}"
+        );
+        assert!((0.0..=1.0).contains(&large));
+        assert!((0.0..=1.0).contains(&small));
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn prop_deflated_sharpe_does_not_exceed_unadjusted_probability(
+            sharpe in 0.01f64..10.0,
+            n_trials in 2usize..1000,
+            skewness in -5.0f64..5.0,
+            kurtosis in 0.1f64..10.0,
+        ) {
+            let dsr = deflated_sharpe(sharpe, n_trials, skewness, kurtosis);
+            if dsr.is_finite() {
+                proptest::prop_assert!((0.0..=1.0).contains(&dsr), "DSR must be in [0, 1], got {dsr}");
+            }
+        }
     }
 }

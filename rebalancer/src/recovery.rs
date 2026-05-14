@@ -207,7 +207,7 @@ impl RecoveredState {
         }
 
         // If crashed after all orders filled, safe to restart
-        return RecoveryAction::Restart;
+        RecoveryAction::Restart
     }
 }
 
@@ -264,7 +264,7 @@ pub fn reconstruct_state(
                 if let Some(equity) = event.data.get("equity") {
                     if let Some(equity_val) = equity.as_f64() {
                         // Skip equity update if value is out of i64 range; positions remain valid.
-                        if let Some(cents) = f64_cents_checked(equity_val, "equity").ok() {
+                        if let Ok(cents) = f64_cents_checked(equity_val, "equity") {
                             state.equity_cents = cents;
                         }
                     }
@@ -279,13 +279,13 @@ pub fn reconstruct_state(
                     if let Some(orders) = orders_array.as_array() {
                         state.orders = orders
                             .iter()
-                            .filter_map(|o| {
+                            .map(|o| {
                                 let symbol = o.get("symbol").and_then(|s| s.as_str()).unwrap_or("");
                                 let action = o.get("action").and_then(|a| a.as_str()).unwrap_or("");
                                 let shares = o.get("shares").and_then(|s| s.as_i64()).unwrap_or(0);
                                 let limit =
                                     o.get("limit").and_then(|l| l.as_f64()).unwrap_or(0.0) as i64;
-                                Some(RecoveredOrder {
+                                RecoveredOrder {
                                     symbol: Symbol::try_new(symbol)
                                         .unwrap_or(Symbol::try_new("UNKNOWN").unwrap()),
                                     action: action.to_string(),
@@ -294,7 +294,7 @@ pub fn reconstruct_state(
                                     ibkr_id: 0,
                                     submitted: false,
                                     filled: false,
-                                })
+                                }
                             })
                             .collect();
                     }

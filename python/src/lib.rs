@@ -95,6 +95,7 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // v0.8 — Statistics (scipy replacements)
     m.add_function(wrap_pyfunction!(stats::py_spearman, m)?)?;
     m.add_function(wrap_pyfunction!(stats::py_quintile_spread, m)?)?;
+    m.add_function(wrap_pyfunction!(stats::py_deflated_sharpe, m)?)?;
 
     // v0.8 — Cross-validation (sklearn replacement)
     m.add_function(wrap_pyfunction!(cv::py_time_series_split, m)?)?;

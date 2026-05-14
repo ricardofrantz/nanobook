@@ -86,3 +86,20 @@ class TestQuintileSpreadReference:
         returns = [float(99 - i) * 0.001 for i in range(100)]
         got = nanobook.py_quintile_spread(scores, returns, 5)
         assert got < 0.0  # inverse → negative spread
+
+
+class TestDeflatedSharpe:
+    """Basic coverage for Deflated Sharpe Ratio binding."""
+
+    def test_basic(self):
+        got = nanobook.py_deflated_sharpe(1.5, 20, 0.0, 3.0)
+        assert np.isfinite(got)
+        assert 0.0 <= got <= 1.0
+
+    def test_single_trial(self):
+        got = nanobook.py_deflated_sharpe(1.25, 1, 0.0, 3.0)
+        assert got == pytest.approx(1.25)
+
+    def test_invalid_inputs(self):
+        got = nanobook.py_deflated_sharpe(1.0, 0, 0.0, 3.0)
+        assert np.isnan(got)

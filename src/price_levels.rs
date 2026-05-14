@@ -97,7 +97,8 @@ impl PriceLevels {
             self.levels.insert(price, Level::new(price));
         }
 
-        self.levels.get_mut(&price).unwrap()
+        // Safe: we just inserted the level if it didn't exist
+        self.levels.get_mut(&price).expect("level should exist after insertion")
     }
 
     /// Add an order at the given price.

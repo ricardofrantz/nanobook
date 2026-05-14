@@ -309,6 +309,7 @@ impl StopTracker {
         }
 
         let k = atr_period.max(1).min(self.abs_changes.len());
+        // Safe: k is bounded by [1, abs_changes.len()], so len() - k >= 0
         let tail = &self.abs_changes[self.abs_changes.len() - k..];
         let mean = tail.iter().map(|x| *x as f64).sum::<f64>() / k as f64;
         Some(mean)

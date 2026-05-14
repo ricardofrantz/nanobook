@@ -176,6 +176,9 @@ impl StopBook {
                     if let Some(order) = self.orders.get_mut(&id) {
                         if order.status == StopStatus::Pending {
                             order.status = StopStatus::Triggered;
+                            // Clone needed: order must remain in book for trailing stop logic
+                            // and audit trail. Consider refactoring to return OrderIds if this
+                            // becomes a performance bottleneck.
                             triggered.push(order.clone());
                         }
                     }
@@ -196,6 +199,9 @@ impl StopBook {
                     if let Some(order) = self.orders.get_mut(&id) {
                         if order.status == StopStatus::Pending {
                             order.status = StopStatus::Triggered;
+                            // Clone needed: order must remain in book for trailing stop logic
+                            // and audit trail. Consider refactoring to return OrderIds if this
+                            // becomes a performance bottleneck.
                             triggered.push(order.clone());
                         }
                     }
@@ -261,6 +267,7 @@ impl StopBook {
             };
 
             let side = order.side;
+            // Clone is cheap: TrailMethod contains only primitive types (i64, f64, usize)
             let trail_method = order
                 .trail_method
                 .clone()

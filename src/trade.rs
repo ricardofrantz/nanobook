@@ -224,13 +224,8 @@ mod tests {
             Side::Buy,
             1,
         );
-        match trade.notional() {
-            Err(ValidationError::NotionalOverflow { price, quantity }) => {
-                assert_eq!(price, i64::MAX);
-                assert_eq!(quantity, 2);
-            }
-            other => panic!("expected NotionalOverflow, got {other:?}"),
-        }
+        let err = trade.notional().expect_err("should return NotionalOverflow error");
+        assert!(matches!(err, ValidationError::NotionalOverflow { price: i64::MAX, quantity: 2 }));
     }
 
     /// Quantity that does not fit in `i64` also routes through the
