@@ -138,3 +138,23 @@ pub fn py_inverse_cdar_weights(
 ) -> PyResult<Py<PyAny>> {
     inverse_cdar_weights(py, returns_matrix, symbols, alpha)
 }
+
+#[pyfunction]
+pub fn optimize_hrp(
+    py: Python<'_>,
+    returns_matrix: Vec<Vec<f64>>,
+    symbols: Vec<String>,
+) -> PyResult<Py<PyAny>> {
+    let symbols = sanitize_symbols(symbols);
+    let w = py.detach(|| optimize::optimize_hrp(&returns_matrix));
+    Ok(to_weights_dict(py, &symbols, w)?.into_any().unbind())
+}
+
+#[pyfunction]
+pub fn py_optimize_hrp(
+    py: Python<'_>,
+    returns_matrix: Vec<Vec<f64>>,
+    symbols: Vec<String>,
+) -> PyResult<Py<PyAny>> {
+    optimize_hrp(py, returns_matrix, symbols)
+}

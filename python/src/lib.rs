@@ -119,6 +119,8 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(optimize::py_inverse_cvar_weights, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::inverse_cdar_weights, m)?)?;
     m.add_function(wrap_pyfunction!(optimize::py_inverse_cdar_weights, m)?)?;
+    m.add_function(wrap_pyfunction!(optimize::optimize_hrp, m)?)?;
+    m.add_function(wrap_pyfunction!(optimize::py_optimize_hrp, m)?)?;
 
     Ok(())
 }

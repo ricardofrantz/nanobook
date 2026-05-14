@@ -55,4 +55,8 @@ def inverse_cdar_weights(returns_matrix, symbols, alpha=0.95):
     return py_inverse_cdar_weights(returns_matrix, symbols, alpha)
 
 
+def optimize_hrp(returns_matrix, symbols):
+    return py_optimize_hrp(returns_matrix, symbols)
+
+
 __all__ = [name for name in globals() if not name.startswith("_")]

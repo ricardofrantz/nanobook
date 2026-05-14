@@ -282,13 +282,14 @@ pub struct LinkageMerge {
 ///
 /// Rows are time periods and columns are assets. Invalid input returns an
 /// empty matrix. The diagonal is pinned to `1.0`; off-diagonal entries with
-/// zero or non-finite variance are set to `0.0`.
+/// zero or non-finite variance are set to `0.0`. Uses raw covariance
+/// (without ridge regularization) to avoid distorting clustering structure.
 pub fn correlation_matrix(returns: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let Some((_rows, cols)) = matrix_shape(returns) else {
         return Vec::new();
     };
 
-    let cov = covariance_matrix(returns);
+    let cov = raw_covariance_matrix(returns);
     let mut corr = vec![vec![0.0; cols]; cols];
 
     for i in 0..cols {
@@ -607,7 +608,7 @@ fn column_means(matrix: &[Vec<f64>]) -> Vec<f64> {
     sums.into_iter().map(|s| s / rows as f64).collect()
 }
 
-fn covariance_matrix(matrix: &[Vec<f64>]) -> Vec<Vec<f64>> {
+fn raw_covariance_matrix(matrix: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let rows = matrix.len();
     let cols = matrix[0].len();
     let means = column_means(matrix);
@@ -633,6 +634,13 @@ fn covariance_matrix(matrix: &[Vec<f64>]) -> Vec<Vec<f64>> {
             cov[j][i] = v;
         }
     }
+
+    cov
+}
+
+fn covariance_matrix(matrix: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let mut cov = raw_covariance_matrix(matrix);
+    let cols = cov.len();
 
     // Relative ridge for numerical stability.
     //
