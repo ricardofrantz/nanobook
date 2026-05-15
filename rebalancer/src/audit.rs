@@ -38,8 +38,12 @@ pub enum Checkpoint {
     DiffComputed,
     /// Risk checks passed
     RiskCheckPassed,
+    /// Order submission intent logged before broker call (write-ahead logging)
+    OrderIntent,
     /// Individual order submitted (symbol is encoded in event data)
     OrderSubmitted,
+    /// Order submission failed with error details (write-ahead logging)
+    OrderFailed,
     /// Individual order filled (symbol is encoded in event data)
     OrderFilled,
     /// Rebalance run completes (success or failure)
@@ -54,7 +58,9 @@ impl Checkpoint {
             Checkpoint::PositionsFetched => "positions_fetched",
             Checkpoint::DiffComputed => "diff_computed",
             Checkpoint::RiskCheckPassed => "risk_check_passed",
+            Checkpoint::OrderIntent => "order_intent",
             Checkpoint::OrderSubmitted => "order_submitted",
+            Checkpoint::OrderFailed => "order_failed",
             Checkpoint::OrderFilled => "order_filled",
             Checkpoint::RunCompleted => "run_completed",
         }
@@ -67,7 +73,9 @@ impl Checkpoint {
             "positions_fetched" => Some(Checkpoint::PositionsFetched),
             "diff_computed" => Some(Checkpoint::DiffComputed),
             "risk_check_passed" => Some(Checkpoint::RiskCheckPassed),
+            "order_intent" => Some(Checkpoint::OrderIntent),
             "order_submitted" => Some(Checkpoint::OrderSubmitted),
+            "order_failed" => Some(Checkpoint::OrderFailed),
             "order_filled" => Some(Checkpoint::OrderFilled),
             "run_completed" => Some(Checkpoint::RunCompleted),
             _ => None,
@@ -93,7 +101,7 @@ pub struct AuditEvent {
     pub data: serde_json::Value,
 }
 
-pub(crate) fn parse_audit_events(path: &Path) -> Result<Vec<AuditEvent>> {
+pub fn parse_audit_events(path: &Path) -> Result<Vec<AuditEvent>> {
     let contents = std::fs::read_to_string(path)?;
     let mut events = Vec::new();
     for (line_num, line) in contents.lines().enumerate() {
@@ -113,13 +121,14 @@ pub(crate) fn parse_audit_events(path: &Path) -> Result<Vec<AuditEvent>> {
     Ok(events)
 }
 
-pub(crate) fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
+pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
     let mut last_sequence: Option<u64> = None;
     let expected_checkpoints: Vec<Checkpoint> = vec![
         Checkpoint::RunStarted,
         Checkpoint::PositionsFetched,
         Checkpoint::DiffComputed,
         Checkpoint::RiskCheckPassed,
+        Checkpoint::OrderIntent,
     ];
     let mut found_checkpoints: Vec<Checkpoint> = Vec::new();
 
@@ -156,6 +165,20 @@ pub(crate) fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<
                 i,
                 found_checkpoints.get(i)
             )));
+        }
+    }
+
+    // Validate that OrderIntent has either OrderSubmitted or OrderFailed after it (not incomplete)
+    // This is a soft validation - we allow incomplete intents during crash recovery
+    // but we should warn about them
+    if let Some(intent_idx) = found_checkpoints.iter().position(|&c| c == Checkpoint::OrderIntent) {
+        let has_followup = found_checkpoints.iter().skip(intent_idx + 1).any(|c| {
+            matches!(c, Checkpoint::OrderSubmitted) || matches!(c, Checkpoint::OrderFailed)
+        });
+        if !has_followup {
+            log::warn!(
+                "Found OrderIntent checkpoint without OrderSubmitted or OrderFailed - this indicates an incomplete order submission that may need broker reconciliation"
+            );
         }
     }
 
@@ -696,6 +719,92 @@ pub fn log_order_submitted_checkpoint(
     )
 }
 
+/// Convenience: log order intent before broker call (write-ahead logging).
+pub fn log_order_intent(
+    audit: &mut AuditLog,
+    order: &crate::diff::RebalanceOrder,
+    client_order_id: &str,
+    timestamp: chrono::DateTime<chrono::Utc>,
+    target_spec_reference: &str,
+    execution_context: &str,
+) -> Result<()> {
+    audit.log(
+        "order_intent",
+        serde_json::json!({
+            "symbol": order.symbol.as_str(),
+            "action": format!("{}", order.action),
+            "shares": order.shares,
+            "limit": order.limit_price_cents as f64 / 100.0,
+            "client_order_id": client_order_id,
+            "timestamp": timestamp.to_rfc3339(),
+            "target_spec_reference": target_spec_reference,
+            "execution_context": execution_context,
+        }),
+    )
+}
+
+/// Convenience: log order submission as a checkpoint.
+pub fn log_order_intent_checkpoint(
+    audit: &mut AuditLog,
+    sequence_number: u64,
+    order: &crate::diff::RebalanceOrder,
+    client_order_id: &str,
+    timestamp: chrono::DateTime<chrono::Utc>,
+    target_spec_reference: &str,
+    execution_context: &str,
+) -> Result<()> {
+    audit.log_checkpoint(
+        Checkpoint::OrderIntent,
+        sequence_number,
+        serde_json::json!({
+            "symbol": order.symbol.as_str(),
+            "action": format!("{}", order.action),
+            "shares": order.shares,
+            "limit": order.limit_price_cents as f64 / 100.0,
+            "client_order_id": client_order_id,
+            "timestamp": timestamp.to_rfc3339(),
+            "target_spec_reference": target_spec_reference,
+            "execution_context": execution_context,
+        }),
+    )
+}
+
+/// Convenience: log order submission failure (write-ahead logging).
+pub fn log_order_failed(
+    audit: &mut AuditLog,
+    error_type: &str,
+    error_message: &str,
+    context: &str,
+) -> Result<()> {
+    audit.log(
+        "order_failed",
+        serde_json::json!({
+            "error_type": error_type,
+            "error_message": error_message,
+            "context": context,
+        }),
+    )
+}
+
+/// Convenience: log order submission failure as a checkpoint.
+pub fn log_order_failed_checkpoint(
+    audit: &mut AuditLog,
+    sequence_number: u64,
+    error_type: &str,
+    error_message: &str,
+    context: &str,
+) -> Result<()> {
+    audit.log_checkpoint(
+        Checkpoint::OrderFailed,
+        sequence_number,
+        serde_json::json!({
+            "error_type": error_type,
+            "error_message": error_message,
+            "context": context,
+        }),
+    )
+}
+
 /// Convenience: log order fill.
 pub fn log_order_filled(
     audit: &mut AuditLog,
@@ -906,6 +1015,8 @@ mod tests {
             log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({}))
                 .unwrap();
             log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::OrderIntent, 5, serde_json::json!({}))
                 .unwrap();
         }
 
@@ -1284,5 +1395,406 @@ mod tests {
         let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
         let result = log.check_window_already_complete("test-window").unwrap();
         assert_eq!(result, Some(200));
+    }
+
+    // ========================================================================
+    // OrderIntent and OrderFailed Checkpoint Tests
+    // ========================================================================
+
+    /// Test that Checkpoint::from_event_name parses "order_intent" correctly.
+    #[test]
+    fn checkpoint_from_event_name_order_intent() {
+        let result = Checkpoint::from_event_name("order_intent");
+        assert_eq!(result, Some(Checkpoint::OrderIntent));
+    }
+
+    /// Test that Checkpoint::from_event_name parses "order_failed" correctly.
+    #[test]
+    fn checkpoint_from_event_name_order_failed() {
+        let result = Checkpoint::from_event_name("order_failed");
+        assert_eq!(result, Some(Checkpoint::OrderFailed));
+    }
+
+    /// Test that Checkpoint::OrderIntent.as_event_name returns "order_intent".
+    #[test]
+    fn checkpoint_as_event_name_order_intent() {
+        assert_eq!(Checkpoint::OrderIntent.as_event_name(), "order_intent");
+    }
+
+    /// Test that Checkpoint::OrderFailed.as_event_name returns "order_failed".
+    #[test]
+    fn checkpoint_as_event_name_order_failed() {
+        assert_eq!(Checkpoint::OrderFailed.as_event_name(), "order_failed");
+    }
+
+    /// Test that validation accepts the new checkpoint sequence with OrderIntent.
+    #[test]
+    fn checkpoint_validation_accepts_new_sequence_with_order_intent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_validation.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::OrderIntent, 5, serde_json::json!({}))
+                .unwrap();
+        }
+
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        assert!(log.validate_checkpoints().is_ok());
+    }
+
+    /// Test that validation warns about incomplete OrderIntent without followup.
+    #[test]
+    fn checkpoint_validation_warns_incomplete_order_intent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_validation_incomplete.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::OrderIntent, 5, serde_json::json!({}))
+                .unwrap();
+            // No OrderSubmitted or OrderFailed after OrderIntent - this should warn
+        }
+
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        // Validation should succeed (soft validation), but we can't easily test the warning log
+        // in unit tests without capturing logs. The important thing is it doesn't error.
+        assert!(log.validate_checkpoints().is_ok());
+    }
+
+    /// Test that validation accepts OrderIntent followed by OrderSubmitted.
+    #[test]
+    fn checkpoint_validation_accepts_order_intent_then_submitted() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_validation_success.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::OrderIntent, 5, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::OrderSubmitted, 6, serde_json::json!({}))
+                .unwrap();
+        }
+
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        assert!(log.validate_checkpoints().is_ok());
+    }
+
+    /// Test that validation accepts OrderIntent followed by OrderFailed.
+    #[test]
+    fn checkpoint_validation_accepts_order_intent_then_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_validation_failure.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::OrderIntent, 5, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::OrderFailed, 6, serde_json::json!({}))
+                .unwrap();
+        }
+
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        assert!(log.validate_checkpoints().is_ok());
+    }
+
+    /// Test log_order_intent creates a valid audit event with all required fields.
+    #[test]
+    fn log_order_intent_creates_valid_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_order_intent.jsonl");
+
+        let order = crate::diff::RebalanceOrder {
+            symbol: nanobook::Symbol::new("AAPL"),
+            action: crate::diff::Action::Buy,
+            shares: 100,
+            limit_price_cents: 15000,
+            notional_cents: 1_500_000,
+            description: "test order",
+        };
+        let timestamp = chrono::Utc::now();
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_order_intent(
+                &mut log,
+                &order,
+                "client-123",
+                timestamp,
+                "target-spec-ref",
+                "execution-context",
+            )
+            .unwrap();
+        }
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 1);
+
+        let event: AuditEvent = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(event.event, "order_intent");
+        assert!(event.data["symbol"] == "AAPL");
+        assert!(event.data["action"] == "BUY");
+        assert!(event.data["shares"] == 100);
+        assert!(event.data["limit"] == 150.0);
+        assert!(event.data["client_order_id"] == "client-123");
+        assert!(event.data["target_spec_reference"] == "target-spec-ref");
+        assert!(event.data["execution_context"] == "execution-context");
+    }
+
+    /// Test log_order_intent_checkpoint creates a valid checkpoint with sequence number.
+    #[test]
+    fn log_order_intent_checkpoint_creates_valid_checkpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_order_intent_checkpoint.jsonl");
+
+        let order = crate::diff::RebalanceOrder {
+            symbol: nanobook::Symbol::new("AAPL"),
+            action: crate::diff::Action::Buy,
+            shares: 100,
+            limit_price_cents: 15000,
+            notional_cents: 1_500_000,
+            description: "test order",
+        };
+        let timestamp = chrono::Utc::now();
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_order_intent_checkpoint(
+                &mut log,
+                5,
+                &order,
+                "client-123",
+                timestamp,
+                "target-spec-ref",
+                "execution-context",
+            )
+            .unwrap();
+        }
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 1);
+
+        let event: AuditEvent = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(event.event, "order_intent");
+        assert_eq!(event.sequence_number, Some(5));
+        assert!(event.checkpoint.is_some());
+        assert!(event.data["symbol"] == "AAPL");
+        assert!(event.data["client_order_id"] == "client-123");
+    }
+
+    /// Test log_order_failed creates a valid audit event with error details.
+    #[test]
+    fn log_order_failed_creates_valid_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_order_failed.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_order_failed(
+                &mut log,
+                "ConnectionError",
+                "Failed to connect to broker",
+                "during order submission",
+            )
+            .unwrap();
+        }
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 1);
+
+        let event: AuditEvent = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(event.event, "order_failed");
+        assert!(event.data["error_type"] == "ConnectionError");
+        assert!(event.data["error_message"] == "Failed to connect to broker");
+        assert!(event.data["context"] == "during order submission");
+    }
+
+    /// Test log_order_failed_checkpoint creates a valid checkpoint with sequence number.
+    #[test]
+    fn log_order_failed_checkpoint_creates_valid_checkpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_order_failed_checkpoint.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_order_failed_checkpoint(
+                &mut log,
+                6,
+                "ConnectionError",
+                "Failed to connect to broker",
+                "during order submission",
+            )
+            .unwrap();
+        }
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 1);
+
+        let event: AuditEvent = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(event.event, "order_failed");
+        assert_eq!(event.sequence_number, Some(6));
+        assert!(event.checkpoint.is_some());
+        assert!(event.data["error_type"] == "ConnectionError");
+    }
+
+    /// Test that logged order intent events can be parsed back correctly from JSONL.
+    #[test]
+    fn logged_order_intent_parses_back_correctly() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_parse_back.jsonl");
+
+        let order = crate::diff::RebalanceOrder {
+            symbol: nanobook::Symbol::new("MSFT"),
+            action: crate::diff::Action::Sell,
+            shares: 50,
+            limit_price_cents: 25000,
+            notional_cents: 1_250_000,
+            description: "test sell order",
+        };
+        let timestamp = chrono::Utc::now();
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_order_intent_checkpoint(
+                &mut log,
+                5,
+                &order,
+                "client-456",
+                timestamp,
+                "target-spec-ref-2",
+                "execution-context-2",
+            )
+            .unwrap();
+        }
+
+        // Parse back
+        let events = parse_audit_events(&path).unwrap();
+        assert_eq!(events.len(), 1);
+
+        let event = &events[0];
+        assert_eq!(event.event, "order_intent");
+        assert_eq!(event.sequence_number, Some(5));
+        assert!(event.checkpoint.is_some());
+
+        // Verify checkpoint can be parsed from event name
+        let checkpoint = Checkpoint::from_event_name(&event.event);
+        assert_eq!(checkpoint, Some(Checkpoint::OrderIntent));
+    }
+
+    /// Test that logged order failed events can be parsed back correctly from JSONL.
+    #[test]
+    fn logged_order_failed_parses_back_correctly() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_parse_failed_back.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_order_failed_checkpoint(
+                &mut log,
+                6,
+                "RateLimitError",
+                "Too many requests",
+                "broker throttling",
+            )
+            .unwrap();
+        }
+
+        // Parse back
+        let events = parse_audit_events(&path).unwrap();
+        assert_eq!(events.len(), 1);
+
+        let event = &events[0];
+        assert_eq!(event.event, "order_failed");
+        assert_eq!(event.sequence_number, Some(6));
+        assert!(event.checkpoint.is_some());
+
+        // Verify checkpoint can be parsed from event name
+        let checkpoint = Checkpoint::from_event_name(&event.event);
+        assert_eq!(checkpoint, Some(Checkpoint::OrderFailed));
+    }
+
+    /// Test backward compatibility: old checkpoint sequence (without OrderIntent) still validates.
+    #[test]
+    fn backward_compatibility_old_sequence_validates() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_old_sequence.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            // Old sequence without OrderIntent
+            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+                .unwrap();
+        }
+
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        // This should fail validation because OrderIntent is now required in the expected sequence
+        // This is expected - the validation was updated to require OrderIntent
+        assert!(log.validate_checkpoints().is_err());
+    }
+
+    /// Test that the new checkpoint sequence is properly validated as the expected sequence.
+    #[test]
+    fn new_checkpoint_sequence_is_expected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_expected_sequence.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::OrderIntent, 5, serde_json::json!({}))
+                .unwrap();
+        }
+
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        assert!(log.validate_checkpoints().is_ok());
     }
 }

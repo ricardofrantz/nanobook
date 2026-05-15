@@ -305,6 +305,16 @@ pub fn reconstruct_state(
                 state.sequence_number = event.sequence_number.unwrap_or(0);
                 state.timestamp = event.ts;
             }
+            Some(Checkpoint::OrderIntent) => {
+                state.checkpoint = Checkpoint::OrderIntent;
+                state.sequence_number = event.sequence_number.unwrap_or(0);
+                state.timestamp = event.ts;
+            }
+            Some(Checkpoint::OrderFailed) => {
+                state.checkpoint = Checkpoint::OrderFailed;
+                state.sequence_number = event.sequence_number.unwrap_or(0);
+                state.timestamp = event.ts;
+            }
             Some(Checkpoint::OrderSubmitted) => {
                 state.checkpoint = Checkpoint::OrderSubmitted;
                 state.sequence_number = event.sequence_number.unwrap_or(0);

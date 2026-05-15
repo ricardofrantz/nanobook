@@ -369,7 +369,9 @@ fn test_checkpoint_coverage_all_checkpoints() {
         nanobook_rebalancer::audit::Checkpoint::PositionsFetched,
         nanobook_rebalancer::audit::Checkpoint::DiffComputed,
         nanobook_rebalancer::audit::Checkpoint::RiskCheckPassed,
+        nanobook_rebalancer::audit::Checkpoint::OrderIntent,
         nanobook_rebalancer::audit::Checkpoint::OrderSubmitted,
+        nanobook_rebalancer::audit::Checkpoint::OrderFailed,
         nanobook_rebalancer::audit::Checkpoint::OrderFilled,
         nanobook_rebalancer::audit::Checkpoint::RunCompleted,
     ];
