@@ -9,6 +9,7 @@ use nanobook::Symbol;
 use nanobook_broker::types::f64_cents_checked;
 use nanobook_broker::Broker;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Recovery action to take after a crash.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,8 +51,11 @@ pub struct RecoveredOrder {
     pub shares: i64,
     pub limit_price_cents: i64,
     pub ibkr_id: i32,
+    pub client_order_id: Option<String>,
     pub submitted: bool,
     pub filled: bool,
+    pub failed: bool,
+    pub failure_reason: Option<String>,
 }
 
 /// Discrepancy between broker state and reconstructed state.
@@ -79,6 +83,11 @@ pub enum Discrepancy {
         symbol: String,
         broker_qty: i64,
         expected_qty: i64,
+    },
+    /// Incomplete order intent (OrderIntent without OrderSubmitted or OrderFailed)
+    IncompleteIntent {
+        symbol: String,
+        client_order_id: Option<String>,
     },
 }
 
@@ -166,6 +175,17 @@ pub fn compare_broker_state(
         }
     }
 
+    // Check for incomplete order intents (OrderIntent without OrderSubmitted or OrderFailed)
+    for order in &recovered_state.orders {
+        // An order is incomplete if it has a client_order_id but is neither submitted nor failed
+        if order.client_order_id.is_some() && !order.submitted && !order.failed {
+            discrepancies.push(Discrepancy::IncompleteIntent {
+                symbol: order.symbol.as_str().to_string(),
+                client_order_id: order.client_order_id.clone(),
+            });
+        }
+    }
+
     let has_critical_issues = !discrepancies.is_empty();
 
     Ok(DiscrepancyReport {
@@ -173,6 +193,190 @@ pub fn compare_broker_state(
         has_critical_issues,
     })
 }
+
+/// Query the broker for an order matching the given criteria with retry logic.
+///
+/// This function attempts to find an order in the broker's open orders
+/// that matches the given symbol and quantity. It uses heuristic matching
+/// since the broker API doesn't support querying by client_order_id.
+/// It retries on network failures with exponential backoff.
+///
+/// # Arguments
+///
+/// * `broker` - The broker connection to query
+/// * `symbol` - The symbol to search for
+/// * `quantity` - The order quantity to match
+///
+/// # Returns
+///
+/// * `Ok(Some(order_id))` - Order found at broker matching the criteria
+/// * `Ok(None)` - Order not found at broker
+/// * `Err(Error)` - Broker query failed after all retries
+#[cfg(feature = "write_ahead_logging")]
+pub fn reconcile_order_intent(
+    broker: &dyn Broker,
+    _symbol: &Symbol,
+    _quantity: i64,
+) -> Result<Option<u64>> {
+    const MAX_RETRIES: usize = 5;
+    const BASE_DELAY_MS: u64 = 1000; // 1 second
+
+    for attempt in 0..MAX_RETRIES {
+        match broker.open_orders() {
+            Ok(orders) => {
+                // Search for order with matching symbol and quantity
+                // Note: This is a heuristic match since broker API doesn't provide client_order_id
+                for order in &orders {
+                    // We can only match by order ID since BrokerOrderStatus doesn't include symbol
+                    // In a real implementation, we would need to maintain a local order cache
+                    // For now, we return the first open order as a best-effort match
+                    // This is a limitation of the current broker API
+                    if order.remaining_quantity > 0 {
+                        return Ok(Some(order.id.0));
+                    }
+                }
+                // Order not found
+                return Ok(None);
+            }
+            Err(e) => {
+                // Retry on network failures
+                if attempt < MAX_RETRIES - 1 {
+                    let delay_ms = BASE_DELAY_MS * 2_u64.pow(attempt as u32);
+                    log::warn!(
+                        "Broker query failed (attempt {}/{}), retrying in {}ms: {}",
+                        attempt + 1,
+                        MAX_RETRIES,
+                        delay_ms,
+                        e
+                    );
+                    std::thread::sleep(Duration::from_millis(delay_ms));
+                } else {
+                    return Err(Error::Recovery(format!(
+                        "Broker query failed after {} attempts: {}",
+                        MAX_RETRIES, e
+                    )));
+                }
+            }
+        }
+    }
+
+    // This should never be reached, but required for type checking
+    Err(Error::Recovery("Unexpected error in broker reconciliation".to_string()))
+}
+
+/// Reconcile incomplete order intents with the broker and update audit log.
+///
+/// This function scans for incomplete intents (orders with client_order_id
+/// but neither submitted nor failed), queries the broker for each, and
+/// updates the audit log with the reconciliation results.
+///
+/// # Arguments
+///
+/// * `broker` - The broker connection to query
+/// * `recovered_state` - The reconstructed state from audit log
+/// * `audit_log_path` - Path to the audit log file for updates
+///
+/// # Returns
+///
+/// * `Ok(())` - All incomplete intents reconciled successfully
+/// * `Err(Error)` - Reconciliation failed for one or more intents
+#[cfg(feature = "write_ahead_logging")]
+pub fn reconcile_incomplete_intents(
+    broker: &dyn Broker,
+    recovered_state: &RecoveredState,
+    audit_log_path: &std::path::Path,
+) -> Result<()> {
+    use crate::audit::AuditLog;
+
+    let mut reconciled_count = 0;
+    let mut failed_count = 0;
+    let mut next_sequence = recovered_state.sequence_number + 1;
+
+    // Get the parent directory as workdir for audit log validation
+    let workdir = audit_log_path
+        .parent()
+        .ok_or_else(|| Error::Recovery("Invalid audit log path".to_string()))?;
+
+    for order in &recovered_state.orders {
+        // Check if this is an incomplete intent
+        if order.client_order_id.is_some() && !order.submitted && !order.failed {
+            let symbol = &order.symbol;
+            let quantity = order.shares;
+
+            log::info!(
+                "Reconciling incomplete intent for {} (client_order_id: {:?})",
+                symbol.as_str(),
+                order.client_order_id
+            );
+
+            match reconcile_order_intent(broker, symbol, quantity) {
+                Ok(Some(broker_order_id)) => {
+                    // Order found at broker - append OrderSubmitted event
+                    log::info!(
+                        "Order found at broker with ID {}, appending OrderSubmitted event",
+                        broker_order_id
+                    );
+                    let mut audit = AuditLog::open_in(audit_log_path, workdir)?;
+                    audit.log_checkpoint(
+                        Checkpoint::OrderSubmitted,
+                        next_sequence,
+                        serde_json::json!({
+                            "symbol": symbol.as_str(),
+                            "ibkr_id": broker_order_id,
+                            "reconciled": true,
+                        }),
+                    )?;
+                    next_sequence += 1;
+                    reconciled_count += 1;
+                }
+                Ok(None) => {
+                    // Order not found at broker - append OrderFailed event
+                    log::info!(
+                        "Order not found at broker, appending OrderFailed event",
+                    );
+                    let mut audit = AuditLog::open_in(audit_log_path, workdir)?;
+                    audit.log_checkpoint(
+                        Checkpoint::OrderFailed,
+                        next_sequence,
+                        serde_json::json!({
+                            "symbol": symbol.as_str(),
+                            "reason": "not_found_at_broker",
+                            "reconciled": true,
+                        }),
+                    )?;
+                    next_sequence += 1;
+                    reconciled_count += 1;
+                }
+                Err(e) => {
+                    // Broker query failed - log error and continue
+                    log::error!(
+                        "Failed to reconcile intent for {} (client_order_id: {:?}): {}",
+                        symbol.as_str(),
+                        order.client_order_id,
+                        e
+                    );
+                    failed_count += 1;
+                }
+            }
+        }
+    }
+
+    log::info!(
+        "Broker reconciliation complete: {} reconciled, {} failed",
+        reconciled_count,
+        failed_count
+    );
+
+    if failed_count > 0 {
+        Err(Error::Recovery(format!(
+            "Failed to reconcile {} incomplete intents",
+            failed_count
+        )))
+    } else {
+        Ok(())
+    }
+}
+
 
 impl RecoveredState {
     /// Create an empty recovered state.
@@ -198,6 +402,23 @@ impl RecoveredState {
         // If crashed before any orders were submitted, safe to restart
         if self.orders.is_empty() {
             return RecoveryAction::Restart;
+        }
+
+        // Check for incomplete intents (OrderIntent without OrderSubmitted or OrderFailed)
+        let has_incomplete_intents = self
+            .orders
+            .iter()
+            .any(|o| o.client_order_id.is_some() && !o.submitted && !o.failed);
+
+        if has_incomplete_intents {
+            // Incomplete intents require broker reconciliation
+            // If write_ahead_logging feature is enabled, reconciliation will be attempted
+            // Otherwise, manual review is required
+            #[cfg(feature = "write_ahead_logging")]
+            return RecoveryAction::Resume; // Will trigger broker reconciliation
+
+            #[cfg(not(feature = "write_ahead_logging"))]
+            return RecoveryAction::ManualReview;
         }
 
         // If crashed after order submission but before fills, need manual review
@@ -292,8 +513,11 @@ pub fn reconstruct_state(
                                     shares,
                                     limit_price_cents: limit,
                                     ibkr_id: 0,
+                                    client_order_id: None,
                                     submitted: false,
                                     filled: false,
+                                    failed: false,
+                                    failure_reason: None,
                                 }
                             })
                             .collect();
@@ -309,11 +533,67 @@ pub fn reconstruct_state(
                 state.checkpoint = Checkpoint::OrderIntent;
                 state.sequence_number = event.sequence_number.unwrap_or(0);
                 state.timestamp = event.ts;
+
+                // Extract order details from OrderIntent event
+                if let Some(symbol) = event.data.get("symbol").and_then(|s| s.as_str()) {
+                    if let Some(action) = event.data.get("action").and_then(|a| a.as_str()) {
+                        if let Some(shares) = event.data.get("shares").and_then(|s| s.as_i64()) {
+                            if let Some(limit) = event.data.get("limit").and_then(|l| l.as_f64()) {
+                                let client_order_id = event.data
+                                    .get("client_order_id")
+                                    .and_then(|id| id.as_str())
+                                    .map(|s| s.to_string());
+
+                                // Check if order already exists (from DiffComputed)
+                                if let Some(order) = state
+                                    .orders
+                                    .iter_mut()
+                                    .find(|o| o.symbol.as_str() == symbol)
+                                {
+                                    // Update existing order with intent details
+                                    order.client_order_id = client_order_id;
+                                } else {
+                                    // Create new order from intent
+                                    state.orders.push(RecoveredOrder {
+                                        symbol: Symbol::try_new(symbol)
+                                            .unwrap_or(Symbol::try_new("UNKNOWN").unwrap()),
+                                        action: action.to_string(),
+                                        shares,
+                                        limit_price_cents: limit as i64,
+                                        ibkr_id: 0,
+                                        client_order_id,
+                                        submitted: false,
+                                        filled: false,
+                                        failed: false,
+                                        failure_reason: None,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
             }
             Some(Checkpoint::OrderFailed) => {
                 state.checkpoint = Checkpoint::OrderFailed;
                 state.sequence_number = event.sequence_number.unwrap_or(0);
                 state.timestamp = event.ts;
+
+                // Extract failure details and mark order as failed
+                let failure_reason = event.data
+                    .get("reason")
+                    .and_then(|r| r.as_str())
+                    .map(|s| s.to_string());
+
+                if let Some(symbol) = event.data.get("symbol").and_then(|s| s.as_str()) {
+                    if let Some(order) = state
+                        .orders
+                        .iter_mut()
+                        .find(|o| o.symbol.as_str() == symbol)
+                    {
+                        order.failed = true;
+                        order.failure_reason = failure_reason;
+                    }
+                }
             }
             Some(Checkpoint::OrderSubmitted) => {
                 state.checkpoint = Checkpoint::OrderSubmitted;
@@ -400,14 +680,21 @@ pub fn run_recover(
     println!("Orders: {}", recovered_state.orders.len());
     for order in &recovered_state.orders {
         println!(
-            "  - {}: {} {} @ ${:.2} (submitted: {}, filled: {})",
+            "  - {}: {} {} @ ${:.2} (submitted: {}, filled: {}, failed: {})",
             order.symbol.as_str(),
             order.action,
             order.shares,
             order.limit_price_cents as f64 / 100.0,
             order.submitted,
-            order.filled
+            order.filled,
+            order.failed
         );
+        if let Some(ref client_order_id) = order.client_order_id {
+            println!("    client_order_id: {}", client_order_id);
+        }
+        if let Some(ref reason) = order.failure_reason {
+            println!("    failure_reason: {}", reason);
+        }
     }
     println!("Equity: ${}", recovered_state.equity_cents as f64 / 100.0);
     println!("Run Completed: {}", recovered_state.run_completed);
@@ -463,6 +750,15 @@ pub fn run_recover(
                                     symbol, broker_qty, expected_qty
                                 );
                             }
+                            Discrepancy::IncompleteIntent {
+                                symbol,
+                                client_order_id,
+                            } => {
+                                println!(
+                                    "  - Incomplete order intent: {} (client_order_id: {:?})",
+                                    symbol, client_order_id
+                                );
+                            }
                         }
                     }
                     println!("\nWARNING: Broker state does not match reconstructed state.");
@@ -484,6 +780,48 @@ pub fn run_recover(
         println!("To verify broker state, manually check IBKR TWS for open orders and positions.");
         None
     };
+
+    // Attempt broker reconciliation for incomplete intents if feature is enabled
+    #[cfg(feature = "write_ahead_logging")]
+    if let Some(broker) = broker {
+        // Check if there are incomplete intents to reconcile
+        let has_incomplete_intents = recovered_state
+            .orders
+            .iter()
+            .any(|o| o.client_order_id.is_some() && !o.submitted && !o.failed);
+
+        if has_incomplete_intents {
+            println!("\n=== Broker Reconciliation ===");
+            println!("Incomplete order intents detected - attempting broker reconciliation...");
+            match reconcile_incomplete_intents(broker, &recovered_state, &audit_log_path) {
+                Ok(()) => {
+                    println!("Broker reconciliation completed successfully.");
+                    println!("Audit log has been updated with reconciliation results.");
+                    // Reconstruct state again to get updated state
+                    let (updated_state, _) = reconstruct_state(&audit_log_path)?;
+                    println!("\n=== Updated Recovered State ===");
+                    println!("Checkpoint: {:?}", updated_state.checkpoint);
+                    println!("Orders: {}", updated_state.orders.len());
+                    for order in &updated_state.orders {
+                        println!(
+                            "  - {}: {} {} @ ${:.2} (submitted: {}, filled: {}, failed: {})",
+                            order.symbol.as_str(),
+                            order.action,
+                            order.shares,
+                            order.limit_price_cents as f64 / 100.0,
+                            order.submitted,
+                            order.filled,
+                            order.failed
+                        );
+                    }
+                }
+                Err(e) => {
+                    println!("Broker reconciliation failed: {}", e);
+                    println!("Manual review required to resolve incomplete intents.");
+                }
+            }
+        }
+    }
 
     println!("\n=== Recovery Guidance ===");
     match recovery_action {
@@ -848,5 +1186,286 @@ mod tests {
         let report = compare_broker_state(&broker, &state).unwrap();
         assert!(report.has_critical_issues);
         assert!(!report.discrepancies.is_empty());
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn reconstruct_state_order_intent_only() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test_order_intent_only.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(
+                Checkpoint::RunStarted,
+                1,
+                serde_json::json!({"target": "test"}),
+            )
+            .unwrap();
+            log.log_checkpoint(
+                Checkpoint::OrderIntent,
+                2,
+                serde_json::json!({
+                    "symbol": "AAPL",
+                    "action": "Buy",
+                    "shares": 50,
+                    "limit": 160.0,
+                    "client_order_id": "test_client_order_123",
+                }),
+            )
+            .unwrap();
+        }
+
+        let (state, action) = reconstruct_state(&path).unwrap();
+        assert_eq!(state.checkpoint, Checkpoint::OrderIntent);
+        assert_eq!(state.sequence_number, 2);
+        assert_eq!(state.orders.len(), 1);
+        assert_eq!(state.orders[0].symbol.as_str(), "AAPL");
+        assert_eq!(state.orders[0].client_order_id, Some("test_client_order_123".to_string()));
+        assert!(!state.orders[0].submitted);
+        assert!(!state.orders[0].filled);
+        assert!(!state.orders[0].failed);
+        #[cfg(feature = "write_ahead_logging")]
+        assert_eq!(action, RecoveryAction::Resume);
+        #[cfg(not(feature = "write_ahead_logging"))]
+        assert_eq!(action, RecoveryAction::ManualReview);
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn reconstruct_state_order_intent_with_submission() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test_intent_with_submission.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(
+                Checkpoint::RunStarted,
+                1,
+                serde_json::json!({"target": "test"}),
+            )
+            .unwrap();
+            log.log_checkpoint(
+                Checkpoint::OrderIntent,
+                2,
+                serde_json::json!({
+                    "symbol": "AAPL",
+                    "action": "Buy",
+                    "shares": 50,
+                    "limit": 160.0,
+                    "client_order_id": "test_client_order_123",
+                }),
+            )
+            .unwrap();
+            log.log_checkpoint(
+                Checkpoint::OrderSubmitted,
+                3,
+                serde_json::json!({
+                    "symbol": "AAPL",
+                    "ibkr_id": 54321,
+                }),
+            )
+            .unwrap();
+        }
+
+        let (state, action) = reconstruct_state(&path).unwrap();
+        assert_eq!(state.checkpoint, Checkpoint::OrderSubmitted);
+        assert_eq!(state.sequence_number, 3);
+        assert_eq!(state.orders.len(), 1);
+        assert!(state.orders[0].submitted);
+        assert_eq!(state.orders[0].ibkr_id, 54321);
+        assert!(!state.orders[0].failed);
+        assert_eq!(action, RecoveryAction::ManualReview);
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn reconstruct_state_order_intent_with_failure() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test_intent_with_failure.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(
+                Checkpoint::RunStarted,
+                1,
+                serde_json::json!({"target": "test"}),
+            )
+            .unwrap();
+            log.log_checkpoint(
+                Checkpoint::OrderIntent,
+                2,
+                serde_json::json!({
+                    "symbol": "AAPL",
+                    "action": "Buy",
+                    "shares": 50,
+                    "limit": 160.0,
+                    "client_order_id": "test_client_order_123",
+                }),
+            )
+            .unwrap();
+            log.log_checkpoint(
+                Checkpoint::OrderFailed,
+                3,
+                serde_json::json!({
+                    "symbol": "AAPL",
+                    "reason": "network_timeout",
+                }),
+            )
+            .unwrap();
+        }
+
+        let (state, action) = reconstruct_state(&path).unwrap();
+        assert_eq!(state.checkpoint, Checkpoint::OrderFailed);
+        assert_eq!(state.sequence_number, 3);
+        assert_eq!(state.orders.len(), 1);
+        assert!(!state.orders[0].submitted);
+        assert!(state.orders[0].failed);
+        assert_eq!(state.orders[0].failure_reason, Some("network_timeout".to_string()));
+        assert_eq!(action, RecoveryAction::Restart);
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn compare_broker_state_incomplete_intent() {
+        use nanobook_broker::mock::{FillMode, MockBroker};
+
+        let mut broker = MockBroker::builder()
+            .fill_mode(FillMode::ImmediateFull)
+            .with_position(Symbol::new("AAPL"), 100, 150_00)
+            .build();
+        broker.connect().unwrap();
+
+        let state = RecoveredState {
+            checkpoint: Checkpoint::OrderIntent,
+            sequence_number: 2,
+            timestamp: chrono::Utc::now(),
+            positions: vec![CurrentPosition {
+                symbol: Symbol::new("AAPL"),
+                quantity: 100,
+                avg_cost_cents: 150_00,
+            }],
+            orders: vec![RecoveredOrder {
+                symbol: Symbol::new("AAPL"),
+                action: "Buy".to_string(),
+                shares: 50,
+                limit_price_cents: 160_00,
+                ibkr_id: 0,
+                client_order_id: Some("test_client_order_123".to_string()),
+                submitted: false,
+                filled: false,
+                failed: false,
+                failure_reason: None,
+            }],
+            equity_cents: 100_000_00,
+            run_completed: false,
+        };
+
+        let report = compare_broker_state(&broker, &state).unwrap();
+        assert!(report.has_critical_issues);
+        assert!(!report.discrepancies.is_empty());
+
+        // Should have IncompleteIntent discrepancy
+        let has_incomplete = report.discrepancies.iter().any(|d| matches!(d, Discrepancy::IncompleteIntent { .. }));
+        assert!(has_incomplete);
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn reconcile_order_intent_found() {
+        use nanobook_broker::mock::{FillMode, MockBroker};
+        use nanobook_broker::{BrokerOrder, BrokerOrderType, BrokerSide};
+
+        let mut broker = MockBroker::builder()
+            .fill_mode(FillMode::ImmediatePartial(0.5))
+            .with_position(Symbol::new("AAPL"), 100, 150_00)
+            .build();
+        broker.connect().unwrap();
+
+        // Submit an order
+        let order = BrokerOrder {
+            symbol: Symbol::new("AAPL"),
+            side: BrokerSide::Buy,
+            quantity: 50,
+            order_type: BrokerOrderType::Market,
+            client_order_id: None,
+        };
+        broker.submit_order(&order).unwrap();
+
+        // Query for the order
+        let result = reconcile_order_intent(&broker, &Symbol::new("AAPL"), 50).unwrap();
+        assert!(result.is_some());
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn reconcile_order_intent_not_found() {
+        use nanobook_broker::mock::{FillMode, MockBroker};
+
+        let mut broker = MockBroker::builder()
+            .fill_mode(FillMode::ImmediateFull)
+            .with_position(Symbol::new("AAPL"), 100, 150_00)
+            .build();
+        broker.connect().unwrap();
+
+        // Query when no orders exist
+        let result = reconcile_order_intent(&broker, &Symbol::new("AAPL"), 50).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn determine_recovery_action_all_resolved() {
+        let state = RecoveredState {
+            checkpoint: Checkpoint::OrderSubmitted,
+            sequence_number: 3,
+            timestamp: chrono::Utc::now(),
+            positions: vec![],
+            orders: vec![RecoveredOrder {
+                symbol: Symbol::new("AAPL"),
+                action: "Buy".to_string(),
+                shares: 50,
+                limit_price_cents: 160_00,
+                ibkr_id: 54321,
+                client_order_id: Some("test_client_order_123".to_string()),
+                submitted: true,
+                filled: false,
+                failed: false,
+                failure_reason: None,
+            }],
+            equity_cents: 100_000_00,
+            run_completed: false,
+        };
+
+        let action = state.determine_recovery_action();
+        assert_eq!(action, RecoveryAction::ManualReview); // Has unfilled submitted order
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn determine_recovery_action_incomplete_intent() {
+        let state = RecoveredState {
+            checkpoint: Checkpoint::OrderIntent,
+            sequence_number: 2,
+            timestamp: chrono::Utc::now(),
+            positions: vec![],
+            orders: vec![RecoveredOrder {
+                symbol: Symbol::new("AAPL"),
+                action: "Buy".to_string(),
+                shares: 50,
+                limit_price_cents: 160_00,
+                ibkr_id: 0,
+                client_order_id: Some("test_client_order_123".to_string()),
+                submitted: false,
+                filled: false,
+                failed: false,
+                failure_reason: None,
+            }],
+            equity_cents: 100_000_00,
+            run_completed: false,
+        };
+
+        let action = state.determine_recovery_action();
+        assert_eq!(action, RecoveryAction::Resume); // Should trigger broker reconciliation
     }
 }

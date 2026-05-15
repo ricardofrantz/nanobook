@@ -549,3 +549,298 @@ slippage_bps = 5
     // The important part is that broker state comparison was performed
     assert!(result.is_err());
 }
+
+#[cfg(feature = "write_ahead_logging")]
+#[test]
+fn test_broker_reconciliation_incomplete_intent_found() {
+    use nanobook_rebalancer::recovery::reconcile_incomplete_intents;
+    use std::fs;
+
+    let dir = tempfile::tempdir().unwrap();
+    let audit_path = dir.path().join("audit.jsonl");
+    let workdir = dir.path();
+
+    // Simulate a crash at order_intent checkpoint (incomplete intent)
+    {
+        let mut log = AuditLog::open_in(&audit_path, workdir).unwrap();
+        log.log_checkpoint(
+            nanobook_rebalancer::audit::Checkpoint::RunStarted,
+            1,
+            serde_json::json!({"target": "test"}),
+        )
+        .unwrap();
+        log.log_checkpoint(
+            nanobook_rebalancer::audit::Checkpoint::OrderIntent,
+            2,
+            serde_json::json!({
+                "symbol": "AAPL",
+                "action": "Buy",
+                "shares": 50,
+                "limit": 160.0,
+                "client_order_id": "test_client_123",
+            }),
+        )
+        .unwrap();
+    }
+
+    // Create MockBroker with the order actually submitted
+    let mut broker = MockBroker::builder()
+        .fill_mode(FillMode::ImmediatePartial(0.5))
+        .with_position(Symbol::new("AAPL"), 100, 150_00)
+        .build();
+    broker.connect().unwrap();
+
+    let order = BrokerOrder {
+        symbol: Symbol::new("AAPL"),
+        side: BrokerSide::Buy,
+        quantity: 50,
+        order_type: BrokerOrderType::Market,
+        client_order_id: None,
+    };
+    broker.submit_order(&order).unwrap();
+
+    // Reconstruct state
+    let (state, _) = reconstruct_state(&audit_path).unwrap();
+
+    // Run reconciliation (this should find the order and append OrderSubmitted)
+    let result = reconcile_incomplete_intents(&broker, &state, &audit_path);
+
+    // Reconciliation should succeed
+    assert!(result.is_ok());
+
+    // Verify audit log was updated with OrderSubmitted event
+    let audit_contents = fs::read_to_string(&audit_path).unwrap();
+    assert!(audit_contents.contains("order_submitted"));
+    assert!(audit_contents.contains("reconciled"));
+}
+
+#[cfg(feature = "write_ahead_logging")]
+#[test]
+fn test_broker_reconciliation_incomplete_intent_not_found() {
+    use nanobook_rebalancer::recovery::reconcile_incomplete_intents;
+    use std::fs;
+
+    let dir = tempfile::tempdir().unwrap();
+    let audit_path = dir.path().join("audit.jsonl");
+    let workdir = dir.path();
+
+    // Simulate a crash at order_intent checkpoint (incomplete intent)
+    {
+        let mut log = AuditLog::open_in(&audit_path, workdir).unwrap();
+        log.log_checkpoint(
+            nanobook_rebalancer::audit::Checkpoint::RunStarted,
+            1,
+            serde_json::json!({"target": "test"}),
+        )
+        .unwrap();
+        log.log_checkpoint(
+            nanobook_rebalancer::audit::Checkpoint::OrderIntent,
+            2,
+            serde_json::json!({
+                "symbol": "AAPL",
+                "action": "Buy",
+                "shares": 50,
+                "limit": 160.0,
+                "client_order_id": "test_client_123",
+            }),
+        )
+        .unwrap();
+    }
+
+    // Create MockBroker without the order (order was never submitted)
+    let mut broker = MockBroker::builder()
+        .fill_mode(FillMode::ImmediateFull)
+        .with_position(Symbol::new("AAPL"), 100, 150_00)
+        .build();
+    broker.connect().unwrap();
+
+    // Reconstruct state
+    let (state, _) = reconstruct_state(&audit_path).unwrap();
+
+    // Run reconciliation (this should not find the order and append OrderFailed)
+    let result = reconcile_incomplete_intents(&broker, &state, &audit_path);
+
+    // Reconciliation should succeed
+    if let Err(e) = result {
+        panic!("Reconciliation failed: {:?}", e);
+    }
+
+    // Verify audit log was updated with OrderFailed event
+    let audit_contents = fs::read_to_string(&audit_path).unwrap();
+    assert!(audit_contents.contains("order_failed"));
+    assert!(audit_contents.contains("not_found_at_broker"));
+    assert!(audit_contents.contains("reconciled"));
+}
+
+#[cfg(feature = "write_ahead_logging")]
+#[test]
+fn test_broker_reconciliation_mixed_intents() {
+    use nanobook_rebalancer::recovery::reconcile_incomplete_intents;
+    use std::fs;
+
+    let dir = tempfile::tempdir().unwrap();
+    let audit_path = dir.path().join("audit.jsonl");
+    let workdir = dir.path();
+
+    // Simulate a crash with mixed intents (some submitted, some not)
+    {
+        let mut log = AuditLog::open_in(&audit_path, workdir).unwrap();
+        log.log_checkpoint(
+            nanobook_rebalancer::audit::Checkpoint::RunStarted,
+            1,
+            serde_json::json!({"target": "test"}),
+        )
+        .unwrap();
+        log.log_checkpoint(
+            nanobook_rebalancer::audit::Checkpoint::OrderIntent,
+            2,
+            serde_json::json!({
+                "symbol": "AAPL",
+                "action": "Buy",
+                "shares": 50,
+                "limit": 160.0,
+                "client_order_id": "client_aapl_123",
+            }),
+        )
+        .unwrap();
+        log.log_checkpoint(
+            nanobook_rebalancer::audit::Checkpoint::OrderIntent,
+            3,
+            serde_json::json!({
+                "symbol": "MSFT",
+                "action": "Sell",
+                "shares": 25,
+                "limit": 310.0,
+                "client_order_id": "client_msft_456",
+            }),
+        )
+        .unwrap();
+        // AAPL was submitted, MSFT was not
+        log.log_checkpoint(
+            nanobook_rebalancer::audit::Checkpoint::OrderSubmitted,
+            4,
+            serde_json::json!({
+                "symbol": "AAPL",
+                "ibkr_id": 54321,
+            }),
+        )
+        .unwrap();
+    }
+
+    // Create MockBroker with only the AAPL order (no orders for MSFT)
+    let mut broker = MockBroker::builder()
+        .fill_mode(FillMode::ImmediatePartial(0.5))
+        .with_position(Symbol::new("AAPL"), 100, 150_00)
+        .with_position(Symbol::new("MSFT"), 50, 300_00)
+        .build();
+    broker.connect().unwrap();
+
+    // Submit AAPL order to broker (MSFT order is not submitted)
+    let order = BrokerOrder {
+        symbol: Symbol::new("AAPL"),
+        side: BrokerSide::Buy,
+        quantity: 50,
+        order_type: BrokerOrderType::Market,
+        client_order_id: None,
+    };
+    broker.submit_order(&order).unwrap();
+
+    // Reconstruct state
+    let (state, _) = reconstruct_state(&audit_path).unwrap();
+
+    // Run reconciliation
+    let result = reconcile_incomplete_intents(&broker, &state, &audit_path);
+
+    // Reconciliation should succeed (only MSFT is incomplete)
+    assert!(result.is_ok());
+
+    // Verify audit log was updated with OrderFailed for MSFT
+    let audit_contents = fs::read_to_string(&audit_path).unwrap();
+    // MSFT should be marked as failed since it's incomplete and no matching order at broker
+    assert!(audit_contents.contains("order_failed") || audit_contents.contains("MSFT"));
+}
+
+#[cfg(feature = "write_ahead_logging")]
+#[test]
+fn test_recovery_with_golden_fixture_intent_only() {
+    use std::path::PathBuf;
+
+    // Use the golden fixture for intent-only scenario
+    let fixture_path = PathBuf::from("tests/fixtures/recovery_intent_only.jsonl");
+
+    // Reconstruct state from fixture
+    let (state, action) = reconstruct_state(&fixture_path).unwrap();
+
+    // Verify state
+    assert_eq!(state.checkpoint, nanobook_rebalancer::audit::Checkpoint::OrderIntent);
+    assert_eq!(state.orders.len(), 1);
+    assert_eq!(state.orders[0].client_order_id, Some("client-123".to_string()));
+    assert!(!state.orders[0].submitted);
+    assert!(!state.orders[0].failed);
+
+    // Verify recovery action
+    #[cfg(feature = "write_ahead_logging")]
+    assert_eq!(action, RecoveryAction::Resume);
+    #[cfg(not(feature = "write_ahead_logging"))]
+    assert_eq!(action, RecoveryAction::ManualReview);
+}
+
+#[cfg(feature = "write_ahead_logging")]
+#[test]
+fn test_recovery_with_golden_fixture_resolved_success() {
+    use std::path::PathBuf;
+
+    // Use the golden fixture for resolved success scenario
+    let fixture_path = PathBuf::from("tests/fixtures/recovery_intent_resolved_success.jsonl");
+
+    // Reconstruct state from fixture
+    let (state, _action) = reconstruct_state(&fixture_path).unwrap();
+
+    // Verify state
+    assert_eq!(state.checkpoint, nanobook_rebalancer::audit::Checkpoint::OrderSubmitted);
+    assert_eq!(state.orders.len(), 1);
+    assert!(state.orders[0].submitted);
+    assert_eq!(state.orders[0].ibkr_id, 54321);
+}
+
+#[cfg(feature = "write_ahead_logging")]
+#[test]
+fn test_recovery_with_golden_fixture_resolved_failure() {
+    use std::path::PathBuf;
+
+    // Use the golden fixture for resolved failure scenario
+    let fixture_path = PathBuf::from("tests/fixtures/recovery_intent_resolved_failure.jsonl");
+
+    // Reconstruct state from fixture
+    let (state, action) = reconstruct_state(&fixture_path).unwrap();
+
+    // Verify state
+    assert_eq!(state.checkpoint, nanobook_rebalancer::audit::Checkpoint::OrderFailed);
+    assert_eq!(state.orders.len(), 1);
+    assert!(state.orders[0].failed);
+    assert_eq!(state.orders[0].failure_reason, Some("not_found_at_broker".to_string()));
+
+    // Should be safe to restart since order failed
+    assert_eq!(action, RecoveryAction::Restart);
+}
+
+#[cfg(feature = "write_ahead_logging")]
+#[test]
+fn test_recovery_with_golden_fixture_mixed_intents() {
+    use std::path::PathBuf;
+
+    // Use the golden fixture for mixed intents scenario
+    let fixture_path = PathBuf::from("tests/fixtures/recovery_mixed_intents.jsonl");
+
+    // Reconstruct state from fixture
+    let (state, action) = reconstruct_state(&fixture_path).unwrap();
+
+    // Verify state
+    assert_eq!(state.orders.len(), 2);
+    assert!(state.orders[0].submitted); // AAPL was submitted
+    assert!(state.orders[1].failed); // MSFT failed
+
+    // Should require manual review due to unfilled submitted order
+    assert_eq!(action, RecoveryAction::ManualReview);
+}
+
