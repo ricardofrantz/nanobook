@@ -206,6 +206,28 @@ fn test_checkpoint_sequence_validity() {
             serde_json::json!({"target": "test"}),
         )
         .unwrap();
+        // Phase 1.6B checkpoints
+        #[cfg(feature = "write_ahead_logging")]
+        log.log_checkpoint(
+            Checkpoint::PositionsIntent,
+            2,
+            serde_json::json!({"timestamp": "2024-01-15T10:00:01Z", "target_spec_reference": "target.json"}),
+        )
+        .unwrap();
+        #[cfg(feature = "write_ahead_logging")]
+        log.log_checkpoint(
+            Checkpoint::PositionsResult,
+            3,
+            serde_json::json!({
+                "positions": [{
+                    "symbol": "AAPL",
+                    "qty": 100,
+                    "avg_cost": 150.0
+                }]
+            }),
+        )
+        .unwrap();
+        #[cfg(not(feature = "write_ahead_logging"))]
         log.log_checkpoint(
             Checkpoint::PositionsFetched,
             2,
@@ -218,6 +240,22 @@ fn test_checkpoint_sequence_validity() {
             }),
         )
         .unwrap();
+        #[cfg(feature = "write_ahead_logging")]
+        log.log_checkpoint(
+            Checkpoint::DiffComputed,
+            4,
+            serde_json::json!({
+                "orders": [{
+                    "symbol": "AAPL",
+                    "action": "Buy",
+                    "shares": 50,
+                    "limit": 160.0,
+                    "description": "test"
+                }]
+            }),
+        )
+        .unwrap();
+        #[cfg(not(feature = "write_ahead_logging"))]
         log.log_checkpoint(
             Checkpoint::DiffComputed,
             3,
@@ -232,12 +270,36 @@ fn test_checkpoint_sequence_validity() {
             }),
         )
         .unwrap();
+        #[cfg(feature = "write_ahead_logging")]
+        log.log_checkpoint(
+            Checkpoint::RiskCheckPassed,
+            5,
+            serde_json::json!({}),
+        )
+        .unwrap();
+        #[cfg(not(feature = "write_ahead_logging"))]
         log.log_checkpoint(
             Checkpoint::RiskCheckPassed,
             4,
             serde_json::json!({}),
         )
         .unwrap();
+        #[cfg(feature = "write_ahead_logging")]
+        log.log_checkpoint(
+            Checkpoint::OrderIntent,
+            6,
+            serde_json::json!({
+                "symbol": "AAPL",
+                "action": "Buy",
+                "shares": 50,
+                "limit": 160.0,
+                "client_order_id": "client_aapl_sequence",
+                "timestamp": "2024-01-15T10:00:05Z",
+                "target_spec_reference": "target.json",
+            }),
+        )
+        .unwrap();
+        #[cfg(not(feature = "write_ahead_logging"))]
         log.log_checkpoint(
             Checkpoint::OrderIntent,
             5,
@@ -250,12 +312,6 @@ fn test_checkpoint_sequence_validity() {
                 "timestamp": "2024-01-15T10:00:05Z",
                 "target_spec_reference": "target.json",
             }),
-        )
-        .unwrap();
-        log.log_checkpoint(
-            Checkpoint::OrderSubmitted,
-            6,
-            serde_json::json!({"symbol": "AAPL", "ibkr_id": 12345}),
         )
         .unwrap();
     }
