@@ -41,6 +41,18 @@ pub struct RecoveredState {
     pub equity_cents: i64,
     /// Whether the run completed successfully
     pub run_completed: bool,
+    /// Whether positions fetch intent was logged (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    pub positions_intent_logged: bool,
+    /// Whether positions fetch result was logged (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    pub positions_result_logged: bool,
+    /// Whether quotes fetch intent was logged (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    pub quotes_intent_logged: bool,
+    /// Whether quotes fetch result was logged (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    pub quotes_result_logged: bool,
 }
 
 /// Order reconstructed from audit log.
@@ -88,6 +100,16 @@ pub enum Discrepancy {
     IncompleteIntent {
         symbol: String,
         client_order_id: Option<String>,
+    },
+    /// Incomplete positions intent (PositionsIntent without PositionsResult)
+    #[cfg(feature = "write_ahead_logging")]
+    IncompletePositionsIntent {
+        target_spec_reference: Option<String>,
+    },
+    /// Incomplete quotes intent (QuotesIntent without QuotesResult)
+    #[cfg(feature = "write_ahead_logging")]
+    IncompleteQuotesIntent {
+        target_spec_reference: Option<String>,
     },
 }
 
@@ -184,6 +206,22 @@ pub fn compare_broker_state(
                 client_order_id: order.client_order_id.clone(),
             });
         }
+    }
+
+    // Check for incomplete positions intent (PositionsIntent without PositionsResult)
+    #[cfg(feature = "write_ahead_logging")]
+    if recovered_state.positions_intent_logged && !recovered_state.positions_result_logged {
+        discrepancies.push(Discrepancy::IncompletePositionsIntent {
+            target_spec_reference: None,
+        });
+    }
+
+    // Check for incomplete quotes intent (QuotesIntent without QuotesResult)
+    #[cfg(feature = "write_ahead_logging")]
+    if recovered_state.quotes_intent_logged && !recovered_state.quotes_result_logged {
+        discrepancies.push(Discrepancy::IncompleteQuotesIntent {
+            target_spec_reference: None,
+        });
     }
 
     let has_critical_issues = !discrepancies.is_empty();
@@ -389,6 +427,14 @@ impl RecoveredState {
             orders: Vec::new(),
             equity_cents: 0,
             run_completed: false,
+            #[cfg(feature = "write_ahead_logging")]
+            positions_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            positions_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            quotes_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            quotes_result_logged: false,
         }
     }
 
@@ -419,6 +465,20 @@ impl RecoveredState {
 
             #[cfg(not(feature = "write_ahead_logging"))]
             return RecoveryAction::ManualReview;
+        }
+
+        // Check for incomplete positions intent (PositionsIntent without PositionsResult)
+        #[cfg(feature = "write_ahead_logging")]
+        if self.positions_intent_logged && !self.positions_result_logged {
+            // Incomplete positions fetch - safe to restart since positions are read-only
+            return RecoveryAction::Restart;
+        }
+
+        // Check for incomplete quotes intent (QuotesIntent without QuotesResult)
+        #[cfg(feature = "write_ahead_logging")]
+        if self.quotes_intent_logged && !self.quotes_result_logged {
+            // Incomplete quotes fetch - safe to restart since quotes are read-only
+            return RecoveryAction::Restart;
         }
 
         // If crashed after order submission but before fills, need manual review
@@ -457,11 +517,55 @@ pub fn reconstruct_state(
                 state.timestamp = event.ts;
                 state.run_completed = false;
             }
+            #[cfg(feature = "write_ahead_logging")]
+            Some(Checkpoint::PositionsIntent) => {
+                state.checkpoint = Checkpoint::PositionsIntent;
+                state.sequence_number = event.sequence_number.unwrap_or(0);
+                state.timestamp = event.ts;
+                state.positions_intent_logged = true;
+            }
             Some(Checkpoint::PositionsFetched) => {
                 state.checkpoint = Checkpoint::PositionsFetched;
                 state.sequence_number = event.sequence_number.unwrap_or(0);
                 state.timestamp = event.ts;
 
+                if let Some(positions_array) = event.data.get("positions") {
+                    if let Some(positions) = positions_array.as_array() {
+                        state.positions = positions
+                            .iter()
+                            .filter_map(|p| {
+                                let symbol = p.get("symbol")?.as_str()?;
+                                let qty = p.get("qty")?.as_i64()?;
+                                let avg_cost_f64 = p.get("avg_cost")?.as_f64()?;
+                                let avg_cost_cents =
+                                    f64_cents_checked(avg_cost_f64, "avg_cost").ok()?;
+                                Symbol::try_new(symbol).map(|sym| CurrentPosition {
+                                    symbol: sym,
+                                    quantity: qty,
+                                    avg_cost_cents,
+                                })
+                            })
+                            .collect();
+                    }
+                }
+
+                if let Some(equity) = event.data.get("equity") {
+                    if let Some(equity_val) = equity.as_f64() {
+                        // Skip equity update if value is out of i64 range; positions remain valid.
+                        if let Ok(cents) = f64_cents_checked(equity_val, "equity") {
+                            state.equity_cents = cents;
+                        }
+                    }
+                }
+            }
+            #[cfg(feature = "write_ahead_logging")]
+            Some(Checkpoint::PositionsResult) => {
+                state.checkpoint = Checkpoint::PositionsResult;
+                state.sequence_number = event.sequence_number.unwrap_or(0);
+                state.timestamp = event.ts;
+                state.positions_result_logged = true;
+
+                // Extract positions from PositionsResult (same format as PositionsFetched)
                 if let Some(positions_array) = event.data.get("positions") {
                     if let Some(positions) = positions_array.as_array() {
                         state.positions = positions
@@ -628,6 +732,22 @@ pub fn reconstruct_state(
                     }
                 }
             }
+            #[cfg(feature = "write_ahead_logging")]
+            Some(Checkpoint::QuotesIntent) => {
+                state.checkpoint = Checkpoint::QuotesIntent;
+                state.sequence_number = event.sequence_number.unwrap_or(0);
+                state.timestamp = event.ts;
+                state.quotes_intent_logged = true;
+            }
+            #[cfg(feature = "write_ahead_logging")]
+            Some(Checkpoint::QuotesResult) => {
+                state.checkpoint = Checkpoint::QuotesResult;
+                state.sequence_number = event.sequence_number.unwrap_or(0);
+                state.timestamp = event.ts;
+                state.quotes_result_logged = true;
+                // Quotes data is not stored in RecoveredState as it's transient
+                // but we mark that the fetch completed successfully
+            }
             Some(Checkpoint::RunCompleted) => {
                 state.checkpoint = Checkpoint::RunCompleted;
                 state.sequence_number = event.sequence_number.unwrap_or(0);
@@ -757,6 +877,24 @@ pub fn run_recover(
                                 println!(
                                     "  - Incomplete order intent: {} (client_order_id: {:?})",
                                     symbol, client_order_id
+                                );
+                            }
+                            #[cfg(feature = "write_ahead_logging")]
+                            Discrepancy::IncompletePositionsIntent {
+                                target_spec_reference,
+                            } => {
+                                println!(
+                                    "  - Incomplete positions intent (target_spec_reference: {:?})",
+                                    target_spec_reference
+                                );
+                            }
+                            #[cfg(feature = "write_ahead_logging")]
+                            Discrepancy::IncompleteQuotesIntent {
+                                target_spec_reference,
+                            } => {
+                                println!(
+                                    "  - Incomplete quotes intent (target_spec_reference: {:?})",
+                                    target_spec_reference
                                 );
                             }
                         }
@@ -1112,6 +1250,14 @@ mod tests {
             orders: vec![],
             equity_cents: 100_000_00,
             run_completed: true,
+            #[cfg(feature = "write_ahead_logging")]
+            positions_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            positions_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            quotes_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            quotes_result_logged: false,
         };
 
         let report = compare_broker_state(&broker, &state).unwrap();
@@ -1152,6 +1298,14 @@ mod tests {
             orders: vec![], // No orders in recovered state
             equity_cents: 100_000_00,
             run_completed: false,
+            #[cfg(feature = "write_ahead_logging")]
+            positions_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            positions_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            quotes_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            quotes_result_logged: false,
         };
 
         let report = compare_broker_state(&broker, &state).unwrap();
@@ -1181,6 +1335,14 @@ mod tests {
             orders: vec![],
             equity_cents: 100_000_00,
             run_completed: true,
+            #[cfg(feature = "write_ahead_logging")]
+            positions_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            positions_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            quotes_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            quotes_result_logged: false,
         };
 
         let report = compare_broker_state(&broker, &state).unwrap();
@@ -1359,6 +1521,14 @@ mod tests {
             }],
             equity_cents: 100_000_00,
             run_completed: false,
+            #[cfg(feature = "write_ahead_logging")]
+            positions_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            positions_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            quotes_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            quotes_result_logged: false,
         };
 
         let report = compare_broker_state(&broker, &state).unwrap();
@@ -1435,6 +1605,14 @@ mod tests {
             }],
             equity_cents: 100_000_00,
             run_completed: false,
+            #[cfg(feature = "write_ahead_logging")]
+            positions_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            positions_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            quotes_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            quotes_result_logged: false,
         };
 
         let action = state.determine_recovery_action();
@@ -1463,6 +1641,14 @@ mod tests {
             }],
             equity_cents: 100_000_00,
             run_completed: false,
+            #[cfg(feature = "write_ahead_logging")]
+            positions_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            positions_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            quotes_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            quotes_result_logged: false,
         };
 
         let action = state.determine_recovery_action();
@@ -1535,6 +1721,10 @@ mod tests {
                 }],
                 equity_cents: 100_000_00,
                 run_completed: false,
+                positions_intent_logged: false,
+                positions_result_logged: false,
+                quotes_intent_logged: false,
+                quotes_result_logged: false,
             };
 
             let action = state.determine_recovery_action();

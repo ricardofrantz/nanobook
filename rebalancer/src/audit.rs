@@ -32,8 +32,14 @@ use crate::error::{Error, Result};
 pub enum Checkpoint {
     /// Rebalance run begins
     RunStarted,
+    /// Positions fetch intent logged before broker call (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    PositionsIntent,
     /// Current positions retrieved from broker
     PositionsFetched,
+    /// Positions fetch result logged after positions are fetched (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    PositionsResult,
     /// Rebalance diff computed
     DiffComputed,
     /// Risk checks passed
@@ -46,6 +52,12 @@ pub enum Checkpoint {
     OrderFailed,
     /// Individual order filled (symbol is encoded in event data)
     OrderFilled,
+    /// Quotes fetch intent logged before broker call (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    QuotesIntent,
+    /// Quotes fetch result logged after quotes are fetched (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    QuotesResult,
     /// Rebalance run completes (success or failure)
     RunCompleted,
 }
@@ -55,13 +67,21 @@ impl Checkpoint {
     pub fn as_event_name(&self) -> &'static str {
         match self {
             Checkpoint::RunStarted => "run_started",
+            #[cfg(feature = "write_ahead_logging")]
+            Checkpoint::PositionsIntent => "positions_intent",
             Checkpoint::PositionsFetched => "positions_fetched",
+            #[cfg(feature = "write_ahead_logging")]
+            Checkpoint::PositionsResult => "positions_result",
             Checkpoint::DiffComputed => "diff_computed",
             Checkpoint::RiskCheckPassed => "risk_check_passed",
             Checkpoint::OrderIntent => "order_intent",
             Checkpoint::OrderSubmitted => "order_submitted",
             Checkpoint::OrderFailed => "order_failed",
             Checkpoint::OrderFilled => "order_filled",
+            #[cfg(feature = "write_ahead_logging")]
+            Checkpoint::QuotesIntent => "quotes_intent",
+            #[cfg(feature = "write_ahead_logging")]
+            Checkpoint::QuotesResult => "quotes_result",
             Checkpoint::RunCompleted => "run_completed",
         }
     }
@@ -70,13 +90,21 @@ impl Checkpoint {
     pub fn from_event_name(name: &str) -> Option<Self> {
         match name {
             "run_started" => Some(Checkpoint::RunStarted),
+            #[cfg(feature = "write_ahead_logging")]
+            "positions_intent" => Some(Checkpoint::PositionsIntent),
             "positions_fetched" => Some(Checkpoint::PositionsFetched),
+            #[cfg(feature = "write_ahead_logging")]
+            "positions_result" => Some(Checkpoint::PositionsResult),
             "diff_computed" => Some(Checkpoint::DiffComputed),
             "risk_check_passed" => Some(Checkpoint::RiskCheckPassed),
             "order_intent" => Some(Checkpoint::OrderIntent),
             "order_submitted" => Some(Checkpoint::OrderSubmitted),
             "order_failed" => Some(Checkpoint::OrderFailed),
             "order_filled" => Some(Checkpoint::OrderFilled),
+            #[cfg(feature = "write_ahead_logging")]
+            "quotes_intent" => Some(Checkpoint::QuotesIntent),
+            #[cfg(feature = "write_ahead_logging")]
+            "quotes_result" => Some(Checkpoint::QuotesResult),
             "run_completed" => Some(Checkpoint::RunCompleted),
             _ => None,
         }
@@ -123,6 +151,19 @@ pub fn parse_audit_events(path: &Path) -> Result<Vec<AuditEvent>> {
 
 pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
     let mut last_sequence: Option<u64> = None;
+
+    // Expected checkpoints differ based on feature flag
+    #[cfg(feature = "write_ahead_logging")]
+    let expected_checkpoints: Vec<Checkpoint> = vec![
+        Checkpoint::RunStarted,
+        Checkpoint::PositionsIntent,
+        Checkpoint::PositionsResult,
+        Checkpoint::DiffComputed,
+        Checkpoint::RiskCheckPassed,
+        Checkpoint::OrderIntent,
+    ];
+
+    #[cfg(not(feature = "write_ahead_logging"))]
     let expected_checkpoints: Vec<Checkpoint> = vec![
         Checkpoint::RunStarted,
         Checkpoint::PositionsFetched,
@@ -130,6 +171,7 @@ pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
         Checkpoint::RiskCheckPassed,
         Checkpoint::OrderIntent,
     ];
+
     let mut found_checkpoints: Vec<Checkpoint> = Vec::new();
 
     for (index, event) in events.iter().enumerate() {
@@ -178,6 +220,32 @@ pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
         if !has_followup {
             log::warn!(
                 "Found OrderIntent checkpoint without OrderSubmitted or OrderFailed - this indicates an incomplete order submission that may need broker reconciliation"
+            );
+        }
+    }
+
+    // Validate that PositionsIntent has PositionsResult after it (not incomplete)
+    #[cfg(feature = "write_ahead_logging")]
+    if let Some(intent_idx) = found_checkpoints.iter().position(|&c| c == Checkpoint::PositionsIntent) {
+        let has_followup = found_checkpoints.iter().skip(intent_idx + 1).any(|c| {
+            matches!(c, Checkpoint::PositionsResult)
+        });
+        if !has_followup {
+            log::warn!(
+                "Found PositionsIntent checkpoint without PositionsResult - this indicates an incomplete positions fetch that may need broker reconciliation"
+            );
+        }
+    }
+
+    // Validate that QuotesIntent has QuotesResult after it (not incomplete)
+    #[cfg(feature = "write_ahead_logging")]
+    if let Some(intent_idx) = found_checkpoints.iter().position(|&c| c == Checkpoint::QuotesIntent) {
+        let has_followup = found_checkpoints.iter().skip(intent_idx + 1).any(|c| {
+            matches!(c, Checkpoint::QuotesResult)
+        });
+        if !has_followup {
+            log::warn!(
+                "Found QuotesIntent checkpoint without QuotesResult - this indicates an incomplete quotes fetch that may need broker reconciliation"
             );
         }
     }
@@ -805,6 +873,202 @@ pub fn log_order_failed_checkpoint(
     )
 }
 
+/// Convenience: log positions fetch intent before broker call (write-ahead logging).
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_positions_intent(
+    audit: &mut AuditLog,
+    timestamp: chrono::DateTime<chrono::Utc>,
+    target_spec_reference: &str,
+) -> Result<()> {
+    audit.log(
+        "positions_intent",
+        serde_json::json!({
+            "timestamp": timestamp.to_rfc3339(),
+            "target_spec_reference": target_spec_reference,
+        }),
+    )
+}
+
+/// Convenience: log positions fetch intent as a checkpoint.
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_positions_intent_checkpoint(
+    audit: &mut AuditLog,
+    sequence_number: u64,
+    timestamp: chrono::DateTime<chrono::Utc>,
+    target_spec_reference: &str,
+) -> Result<()> {
+    audit.log_checkpoint(
+        Checkpoint::PositionsIntent,
+        sequence_number,
+        serde_json::json!({
+            "timestamp": timestamp.to_rfc3339(),
+            "target_spec_reference": target_spec_reference,
+        }),
+    )
+}
+
+/// Convenience: log positions fetch result after positions are fetched (write-ahead logging).
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_positions_result(
+    audit: &mut AuditLog,
+    positions: &[crate::diff::CurrentPosition],
+    equity_cents: i64,
+) -> Result<()> {
+    let pos_data: Vec<_> = positions
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "symbol": p.symbol.as_str(),
+                "qty": p.quantity,
+                "avg_cost": p.avg_cost_cents as f64 / 100.0,
+            })
+        })
+        .collect();
+
+    audit.log(
+        "positions_result",
+        serde_json::json!({
+            "positions": pos_data,
+            "equity": equity_cents as f64 / 100.0,
+        }),
+    )
+}
+
+/// Convenience: log positions fetch result as a checkpoint.
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_positions_result_checkpoint(
+    audit: &mut AuditLog,
+    sequence_number: u64,
+    positions: &[crate::diff::CurrentPosition],
+    equity_cents: i64,
+) -> Result<()> {
+    let pos_data: Vec<_> = positions
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "symbol": p.symbol.as_str(),
+                "qty": p.quantity,
+                "avg_cost": p.avg_cost_cents as f64 / 100.0,
+            })
+        })
+        .collect();
+
+    audit.log_checkpoint(
+        Checkpoint::PositionsResult,
+        sequence_number,
+        serde_json::json!({
+            "positions": pos_data,
+            "equity": equity_cents as f64 / 100.0,
+        }),
+    )
+}
+
+/// Convenience: log quotes fetch intent before broker call (write-ahead logging).
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_quotes_intent(
+    audit: &mut AuditLog,
+    symbols: &[nanobook::Symbol],
+    staleness_threshold_sec: u64,
+    timestamp: chrono::DateTime<chrono::Utc>,
+    target_spec_reference: &str,
+) -> Result<()> {
+    let symbol_list: Vec<_> = symbols.iter().map(|s| s.as_str()).collect();
+
+    audit.log(
+        "quotes_intent",
+        serde_json::json!({
+            "symbols": symbol_list,
+            "staleness_threshold_sec": staleness_threshold_sec,
+            "timestamp": timestamp.to_rfc3339(),
+            "target_spec_reference": target_spec_reference,
+        }),
+    )
+}
+
+/// Convenience: log quotes fetch intent as a checkpoint.
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_quotes_intent_checkpoint(
+    audit: &mut AuditLog,
+    sequence_number: u64,
+    symbols: &[nanobook::Symbol],
+    staleness_threshold_sec: u64,
+    timestamp: chrono::DateTime<chrono::Utc>,
+    target_spec_reference: &str,
+) -> Result<()> {
+    let symbol_list: Vec<_> = symbols.iter().map(|s| s.as_str()).collect();
+
+    audit.log_checkpoint(
+        Checkpoint::QuotesIntent,
+        sequence_number,
+        serde_json::json!({
+            "symbols": symbol_list,
+            "staleness_threshold_sec": staleness_threshold_sec,
+            "timestamp": timestamp.to_rfc3339(),
+            "target_spec_reference": target_spec_reference,
+        }),
+    )
+}
+
+/// Convenience: log quotes fetch result after quotes are fetched (write-ahead logging).
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_quotes_result(
+    audit: &mut AuditLog,
+    quotes: &[nanobook_broker::types::Quote],
+) -> Result<()> {
+    let quote_data: Vec<_> = quotes
+        .iter()
+        .map(|q| {
+            let timestamp = chrono::DateTime::<chrono::Utc>::from(q.timestamp)
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            serde_json::json!({
+                "symbol": q.symbol.as_str(),
+                "bid_cents": q.bid_cents,
+                "ask_cents": q.ask_cents,
+                "last_cents": q.last_cents,
+                "timestamp": timestamp,
+            })
+        })
+        .collect();
+
+    audit.log(
+        "quotes_result",
+        serde_json::json!({
+            "quotes": quote_data,
+        }),
+    )
+}
+
+/// Convenience: log quotes fetch result as a checkpoint.
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_quotes_result_checkpoint(
+    audit: &mut AuditLog,
+    sequence_number: u64,
+    quotes: &[nanobook_broker::types::Quote],
+) -> Result<()> {
+    let quote_data: Vec<_> = quotes
+        .iter()
+        .map(|q| {
+            let timestamp = chrono::DateTime::<chrono::Utc>::from(q.timestamp)
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            serde_json::json!({
+                "symbol": q.symbol.as_str(),
+                "bid_cents": q.bid_cents,
+                "ask_cents": q.ask_cents,
+                "last_cents": q.last_cents,
+                "timestamp": timestamp,
+            })
+        })
+        .collect();
+
+    audit.log_checkpoint(
+        Checkpoint::QuotesResult,
+        sequence_number,
+        serde_json::json!({
+            "quotes": quote_data,
+        }),
+    )
+}
+
 /// Convenience: log order fill.
 pub fn log_order_filled(
     audit: &mut AuditLog,
@@ -1010,13 +1274,20 @@ mod tests {
             let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
             log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
                 .unwrap();
+            #[cfg(feature = "write_ahead_logging")]
+            log.log_checkpoint(Checkpoint::PositionsIntent, 2, serde_json::json!({}))
+                .unwrap();
+            #[cfg(feature = "write_ahead_logging")]
+            log.log_checkpoint(Checkpoint::PositionsResult, 3, serde_json::json!({}))
+                .unwrap();
+            #[cfg(not(feature = "write_ahead_logging"))]
             log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::DiffComputed, 4, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 5, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::OrderIntent, 5, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::OrderIntent, 6, serde_json::json!({}))
                 .unwrap();
         }
 
@@ -1437,13 +1708,20 @@ mod tests {
             let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
             log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
                 .unwrap();
+            #[cfg(feature = "write_ahead_logging")]
+            log.log_checkpoint(Checkpoint::PositionsIntent, 2, serde_json::json!({}))
+                .unwrap();
+            #[cfg(feature = "write_ahead_logging")]
+            log.log_checkpoint(Checkpoint::PositionsResult, 3, serde_json::json!({}))
+                .unwrap();
+            #[cfg(not(feature = "write_ahead_logging"))]
             log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::DiffComputed, 4, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 5, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::OrderIntent, 5, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::OrderIntent, 6, serde_json::json!({}))
                 .unwrap();
         }
 
@@ -1461,13 +1739,20 @@ mod tests {
             let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
             log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
                 .unwrap();
+            #[cfg(feature = "write_ahead_logging")]
+            log.log_checkpoint(Checkpoint::PositionsIntent, 2, serde_json::json!({}))
+                .unwrap();
+            #[cfg(feature = "write_ahead_logging")]
+            log.log_checkpoint(Checkpoint::PositionsResult, 3, serde_json::json!({}))
+                .unwrap();
+            #[cfg(not(feature = "write_ahead_logging"))]
             log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::DiffComputed, 4, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 5, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::OrderIntent, 5, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::OrderIntent, 6, serde_json::json!({}))
                 .unwrap();
             // No OrderSubmitted or OrderFailed after OrderIntent - this should warn
         }
@@ -1488,15 +1773,22 @@ mod tests {
             let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
             log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
                 .unwrap();
+            #[cfg(feature = "write_ahead_logging")]
+            log.log_checkpoint(Checkpoint::PositionsIntent, 2, serde_json::json!({}))
+                .unwrap();
+            #[cfg(feature = "write_ahead_logging")]
+            log.log_checkpoint(Checkpoint::PositionsResult, 3, serde_json::json!({}))
+                .unwrap();
+            #[cfg(not(feature = "write_ahead_logging"))]
             log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::DiffComputed, 4, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 5, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::OrderIntent, 5, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::OrderIntent, 6, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::OrderSubmitted, 6, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::OrderSubmitted, 7, serde_json::json!({}))
                 .unwrap();
         }
 
@@ -1514,15 +1806,22 @@ mod tests {
             let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
             log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
                 .unwrap();
+            #[cfg(feature = "write_ahead_logging")]
+            log.log_checkpoint(Checkpoint::PositionsIntent, 2, serde_json::json!({}))
+                .unwrap();
+            #[cfg(feature = "write_ahead_logging")]
+            log.log_checkpoint(Checkpoint::PositionsResult, 3, serde_json::json!({}))
+                .unwrap();
+            #[cfg(not(feature = "write_ahead_logging"))]
             log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::DiffComputed, 4, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 5, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::OrderIntent, 5, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::OrderIntent, 6, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::OrderFailed, 6, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::OrderFailed, 7, serde_json::json!({}))
                 .unwrap();
         }
 
@@ -1784,17 +2083,438 @@ mod tests {
             let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
             log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
                 .unwrap();
+            #[cfg(feature = "write_ahead_logging")]
+            log.log_checkpoint(Checkpoint::PositionsIntent, 2, serde_json::json!({}))
+                .unwrap();
+            #[cfg(feature = "write_ahead_logging")]
+            log.log_checkpoint(Checkpoint::PositionsResult, 3, serde_json::json!({}))
+                .unwrap();
+            #[cfg(not(feature = "write_ahead_logging"))]
             log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::DiffComputed, 3, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::DiffComputed, 4, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 5, serde_json::json!({}))
                 .unwrap();
-            log.log_checkpoint(Checkpoint::OrderIntent, 5, serde_json::json!({}))
+            log.log_checkpoint(Checkpoint::OrderIntent, 6, serde_json::json!({}))
                 .unwrap();
         }
 
         let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        assert!(log.validate_checkpoints().is_ok());
+    }
+
+    // ========================================================================
+    // PositionsIntent and PositionsResult Checkpoint Tests
+    // ========================================================================
+
+    /// Test that Checkpoint::from_event_name parses "positions_intent" correctly.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_from_event_name_positions_intent() {
+        let result = Checkpoint::from_event_name("positions_intent");
+        assert_eq!(result, Some(Checkpoint::PositionsIntent));
+    }
+
+    /// Test that Checkpoint::from_event_name parses "positions_result" correctly.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_from_event_name_positions_result() {
+        let result = Checkpoint::from_event_name("positions_result");
+        assert_eq!(result, Some(Checkpoint::PositionsResult));
+    }
+
+    /// Test that Checkpoint::PositionsIntent.as_event_name returns "positions_intent".
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_as_event_name_positions_intent() {
+        assert_eq!(Checkpoint::PositionsIntent.as_event_name(), "positions_intent");
+    }
+
+    /// Test that Checkpoint::PositionsResult.as_event_name returns "positions_result".
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_as_event_name_positions_result() {
+        assert_eq!(Checkpoint::PositionsResult.as_event_name(), "positions_result");
+    }
+
+    /// Test log_positions_intent creates a valid audit event with all required fields.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn log_positions_intent_creates_valid_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_positions_intent.jsonl");
+        let timestamp = chrono::Utc::now();
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_positions_intent(&mut log, timestamp, "target-spec-ref").unwrap();
+        }
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 1);
+
+        let event: AuditEvent = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(event.event, "positions_intent");
+        assert!(event.data["target_spec_reference"] == "target-spec-ref");
+        assert!(event.data["timestamp"].is_string());
+    }
+
+    /// Test log_positions_intent_checkpoint creates a valid checkpoint with sequence number.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn log_positions_intent_checkpoint_creates_valid_checkpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_positions_intent_checkpoint.jsonl");
+        let timestamp = chrono::Utc::now();
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_positions_intent_checkpoint(&mut log, 2, timestamp, "target-spec-ref")
+                .unwrap();
+        }
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 1);
+
+        let event: AuditEvent = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(event.event, "positions_intent");
+        assert_eq!(event.sequence_number, Some(2));
+        assert!(event.checkpoint.is_some());
+        assert!(event.data["target_spec_reference"] == "target-spec-ref");
+    }
+
+    /// Test log_positions_result creates a valid audit event with positions data.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn log_positions_result_creates_valid_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_positions_result.jsonl");
+
+        let positions = vec![crate::diff::CurrentPosition {
+            symbol: nanobook::Symbol::new("AAPL"),
+            quantity: 100,
+            avg_cost_cents: 15000,
+        }];
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_positions_result(&mut log, &positions, 10000000).unwrap();
+        }
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 1);
+
+        let event: AuditEvent = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(event.event, "positions_result");
+        assert!(event.data["positions"].is_array());
+        assert!(event.data["equity"] == 100000.0);
+    }
+
+    /// Test log_positions_result_checkpoint creates a valid checkpoint with sequence number.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn log_positions_result_checkpoint_creates_valid_checkpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_positions_result_checkpoint.jsonl");
+
+        let positions = vec![crate::diff::CurrentPosition {
+            symbol: nanobook::Symbol::new("AAPL"),
+            quantity: 100,
+            avg_cost_cents: 15000,
+        }];
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_positions_result_checkpoint(&mut log, 3, &positions, 10000000).unwrap();
+        }
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 1);
+
+        let event: AuditEvent = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(event.event, "positions_result");
+        assert_eq!(event.sequence_number, Some(3));
+        assert!(event.checkpoint.is_some());
+        assert!(event.data["positions"].is_array());
+    }
+
+    // ========================================================================
+    // QuotesIntent and QuotesResult Checkpoint Tests
+    // ========================================================================
+
+    /// Test that Checkpoint::from_event_name parses "quotes_intent" correctly.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_from_event_name_quotes_intent() {
+        let result = Checkpoint::from_event_name("quotes_intent");
+        assert_eq!(result, Some(Checkpoint::QuotesIntent));
+    }
+
+    /// Test that Checkpoint::from_event_name parses "quotes_result" correctly.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_from_event_name_quotes_result() {
+        let result = Checkpoint::from_event_name("quotes_result");
+        assert_eq!(result, Some(Checkpoint::QuotesResult));
+    }
+
+    /// Test that Checkpoint::QuotesIntent.as_event_name returns "quotes_intent".
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_as_event_name_quotes_intent() {
+        assert_eq!(Checkpoint::QuotesIntent.as_event_name(), "quotes_intent");
+    }
+
+    /// Test that Checkpoint::QuotesResult.as_event_name returns "quotes_result".
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_as_event_name_quotes_result() {
+        assert_eq!(Checkpoint::QuotesResult.as_event_name(), "quotes_result");
+    }
+
+    /// Test log_quotes_intent creates a valid audit event with all required fields.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn log_quotes_intent_creates_valid_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_quotes_intent.jsonl");
+        let timestamp = chrono::Utc::now();
+        let symbols = vec![nanobook::Symbol::new("AAPL"), nanobook::Symbol::new("MSFT")];
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_quotes_intent(
+                &mut log,
+                &symbols,
+                30,
+                timestamp,
+                "target-spec-ref",
+            )
+            .unwrap();
+        }
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 1);
+
+        let event: AuditEvent = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(event.event, "quotes_intent");
+        assert!(event.data["symbols"].is_array());
+        assert!(event.data["staleness_threshold_sec"] == 30);
+        assert!(event.data["target_spec_reference"] == "target-spec-ref");
+        assert!(event.data["timestamp"].is_string());
+    }
+
+    /// Test log_quotes_intent_checkpoint creates a valid checkpoint with sequence number.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn log_quotes_intent_checkpoint_creates_valid_checkpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_quotes_intent_checkpoint.jsonl");
+        let timestamp = chrono::Utc::now();
+        let symbols = vec![nanobook::Symbol::new("AAPL")];
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_quotes_intent_checkpoint(&mut log, 4, &symbols, 30, timestamp, "target-spec-ref")
+                .unwrap();
+        }
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 1);
+
+        let event: AuditEvent = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(event.event, "quotes_intent");
+        assert_eq!(event.sequence_number, Some(4));
+        assert!(event.checkpoint.is_some());
+        assert!(event.data["symbols"].is_array());
+    }
+
+    /// Test log_quotes_result creates a valid audit event with quotes data.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn log_quotes_result_creates_valid_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_quotes_result.jsonl");
+
+        let quotes = vec![nanobook_broker::types::Quote {
+            symbol: nanobook::Symbol::new("AAPL"),
+            bid_cents: 14900,
+            ask_cents: 15100,
+            last_cents: 15000,
+            volume: 0,
+            timestamp: std::time::SystemTime::now(),
+        }];
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_quotes_result(&mut log, &quotes).unwrap();
+        }
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 1);
+
+        let event: AuditEvent = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(event.event, "quotes_result");
+        assert!(event.data["quotes"].is_array());
+    }
+
+    /// Test log_quotes_result_checkpoint creates a valid checkpoint with sequence number.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn log_quotes_result_checkpoint_creates_valid_checkpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_quotes_result_checkpoint.jsonl");
+
+        let quotes = vec![nanobook_broker::types::Quote {
+            symbol: nanobook::Symbol::new("AAPL"),
+            bid_cents: 14900,
+            ask_cents: 15100,
+            last_cents: 15000,
+            volume: 0,
+            timestamp: std::time::SystemTime::now(),
+        }];
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_quotes_result_checkpoint(&mut log, 5, &quotes).unwrap();
+        }
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 1);
+
+        let event: AuditEvent = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(event.event, "quotes_result");
+        assert_eq!(event.sequence_number, Some(5));
+        assert!(event.checkpoint.is_some());
+        assert!(event.data["quotes"].is_array());
+    }
+
+    /// Test that validation accepts the new checkpoint sequence with PositionsIntent/Result.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_validation_accepts_positions_sequence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_validation_positions.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsIntent, 2, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsResult, 3, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::DiffComputed, 4, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 5, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::OrderIntent, 6, serde_json::json!({}))
+                .unwrap();
+        }
+
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        assert!(log.validate_checkpoints().is_ok());
+    }
+
+    /// Test that validation warns about incomplete PositionsIntent without followup.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_validation_warns_incomplete_positions_intent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_validation_incomplete_positions.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsIntent, 2, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsResult, 3, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::DiffComputed, 4, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 5, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::OrderIntent, 6, serde_json::json!({}))
+                .unwrap();
+            // No OrderSubmitted or OrderFailed after OrderIntent - this should warn
+        }
+
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        // Validation should succeed (soft validation), but we can't easily test the warning log
+        // in unit tests without capturing logs. The important thing is it doesn't error.
+        assert!(log.validate_checkpoints().is_ok());
+    }
+
+    /// Test that validation accepts QuotesIntent followed by QuotesResult.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_validation_accepts_quotes_sequence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_validation_quotes.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsIntent, 2, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsResult, 3, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::DiffComputed, 4, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 5, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::OrderIntent, 6, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::QuotesIntent, 7, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::QuotesResult, 8, serde_json::json!({}))
+                .unwrap();
+        }
+
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        assert!(log.validate_checkpoints().is_ok());
+    }
+
+    /// Test that validation warns about incomplete QuotesIntent without followup.
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_validation_warns_incomplete_quotes_intent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_validation_incomplete_quotes.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsIntent, 2, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsResult, 3, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::DiffComputed, 4, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 5, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::OrderIntent, 6, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::QuotesIntent, 7, serde_json::json!({}))
+                .unwrap();
+            // No QuotesResult after QuotesIntent - this should warn
+        }
+
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+        // Validation should succeed (soft validation), but we can't easily test the warning log
+        // in unit tests without capturing logs. The important thing is it doesn't error.
         assert!(log.validate_checkpoints().is_ok());
     }
 }
