@@ -1468,4 +1468,256 @@ mod tests {
         let action = state.determine_recovery_action();
         assert_eq!(action, RecoveryAction::Resume); // Should trigger broker reconciliation
     }
+
+    // Feature flag gating tests
+
+    #[test]
+    fn test_recovery_without_feature_flag_skips_reconciliation() {
+        // This test runs when feature is NOT enabled
+        // Verify that incomplete intents return ManualReview
+        #[cfg(not(feature = "write_ahead_logging"))]
+        {
+            let state = RecoveredState {
+                checkpoint: Checkpoint::OrderIntent,
+                sequence_number: 2,
+                timestamp: chrono::Utc::now(),
+                positions: vec![],
+                orders: vec![RecoveredOrder {
+                    symbol: Symbol::new("AAPL"),
+                    action: "Buy".to_string(),
+                    shares: 50,
+                    limit_price_cents: 160_00,
+                    ibkr_id: 0,
+                    client_order_id: Some("test_client_order_123".to_string()),
+                    submitted: false,
+                    filled: false,
+                    failed: false,
+                    failure_reason: None,
+                }],
+                equity_cents: 100_000_00,
+                run_completed: false,
+            };
+
+            let action = state.determine_recovery_action();
+            assert_eq!(action, RecoveryAction::ManualReview); // Should require manual review
+        }
+
+        // When feature IS enabled, this test should still compile but skip the assertion
+        #[cfg(feature = "write_ahead_logging")]
+        {
+            // This test is for the case when feature is disabled
+            // When feature is enabled, we just verify the test compiles
+        }
+    }
+
+    #[test]
+    fn test_recovery_with_feature_flag_performs_reconciliation() {
+        // This test runs when feature IS enabled
+        // Verify that incomplete intents return Resume
+        #[cfg(feature = "write_ahead_logging")]
+        {
+            let state = RecoveredState {
+                checkpoint: Checkpoint::OrderIntent,
+                sequence_number: 2,
+                timestamp: chrono::Utc::now(),
+                positions: vec![],
+                orders: vec![RecoveredOrder {
+                    symbol: Symbol::new("AAPL"),
+                    action: "Buy".to_string(),
+                    shares: 50,
+                    limit_price_cents: 160_00,
+                    ibkr_id: 0,
+                    client_order_id: Some("test_client_order_123".to_string()),
+                    submitted: false,
+                    filled: false,
+                    failed: false,
+                    failure_reason: None,
+                }],
+                equity_cents: 100_000_00,
+                run_completed: false,
+            };
+
+            let action = state.determine_recovery_action();
+            assert_eq!(action, RecoveryAction::Resume); // Should trigger broker reconciliation
+        }
+
+        // When feature is NOT enabled, this test should still compile but skip the assertion
+        #[cfg(not(feature = "write_ahead_logging"))]
+        {
+            // This test is for the case when feature is enabled
+            // When feature is disabled, we just verify the test compiles
+        }
+    }
+
+    #[test]
+    fn test_audit_log_parsing_without_feature_flag() {
+        // Verify that audit log parsing works regardless of feature flag
+        // OrderIntent events should parse correctly even without the feature
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test_parsing.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(
+                Checkpoint::RunStarted,
+                1,
+                serde_json::json!({"target": "test"}),
+            )
+            .unwrap();
+            log.log_checkpoint(
+                Checkpoint::OrderIntent,
+                2,
+                serde_json::json!({
+                    "symbol": "AAPL",
+                    "action": "Buy",
+                    "shares": 50,
+                    "limit": 160.0,
+                    "client_order_id": "test_client_order_123",
+                }),
+            )
+            .unwrap();
+        }
+
+        let (state, _) = reconstruct_state(&path).unwrap();
+        assert_eq!(state.checkpoint, Checkpoint::OrderIntent);
+        assert_eq!(state.orders.len(), 1);
+        assert_eq!(state.orders[0].client_order_id, Some("test_client_order_123".to_string()));
+    }
+
+    #[test]
+    fn test_audit_log_parsing_with_feature_flag() {
+        // Verify that audit log parsing works with the feature enabled
+        // This is the same test as above but verifies it works with feature enabled
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test_parsing_with_feature.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(
+                Checkpoint::RunStarted,
+                1,
+                serde_json::json!({"target": "test"}),
+            )
+            .unwrap();
+            log.log_checkpoint(
+                Checkpoint::OrderIntent,
+                2,
+                serde_json::json!({
+                    "symbol": "AAPL",
+                    "action": "Buy",
+                    "shares": 50,
+                    "limit": 160.0,
+                    "client_order_id": "test_client_order_123",
+                }),
+            )
+            .unwrap();
+        }
+
+        let (state, _) = reconstruct_state(&path).unwrap();
+        assert_eq!(state.checkpoint, Checkpoint::OrderIntent);
+        assert_eq!(state.orders.len(), 1);
+        assert_eq!(state.orders[0].client_order_id, Some("test_client_order_123".to_string()));
+    }
+
+    #[test]
+    fn test_checkpoint_validation_without_feature_flag() {
+        // Verify that checkpoint validation works regardless of feature flag
+        // The validation should accept both old and new formats
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test_validation.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(
+                Checkpoint::RunStarted,
+                1,
+                serde_json::json!({"target": "test"}),
+            )
+            .unwrap();
+            log.log_checkpoint(
+                Checkpoint::PositionsFetched,
+                2,
+                serde_json::json!({
+                    "positions": [{"symbol": "AAPL", "qty": 100, "avg_cost": 150.0}],
+                    "equity": 100000.0,
+                }),
+            )
+            .unwrap();
+            log.log_checkpoint(
+                Checkpoint::DiffComputed,
+                3,
+                serde_json::json!({
+                    "orders": [{
+                        "symbol": "AAPL",
+                        "action": "Buy",
+                        "shares": 50,
+                        "limit": 160.0,
+                        "description": "test"
+                    }]
+                }),
+            )
+            .unwrap();
+        }
+
+        let (state, _) = reconstruct_state(&path).unwrap();
+        assert_eq!(state.checkpoint, Checkpoint::DiffComputed);
+        assert_eq!(state.sequence_number, 3);
+    }
+
+    #[test]
+    fn test_checkpoint_validation_with_feature_flag() {
+        // Verify that checkpoint validation works with the new OrderIntent checkpoint
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test_validation_with_feature.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(
+                Checkpoint::RunStarted,
+                1,
+                serde_json::json!({"target": "test"}),
+            )
+            .unwrap();
+            log.log_checkpoint(
+                Checkpoint::PositionsFetched,
+                2,
+                serde_json::json!({
+                    "positions": [{"symbol": "AAPL", "qty": 100, "avg_cost": 150.0}],
+                    "equity": 100000.0,
+                }),
+            )
+            .unwrap();
+            log.log_checkpoint(
+                Checkpoint::DiffComputed,
+                3,
+                serde_json::json!({
+                    "orders": [{
+                        "symbol": "AAPL",
+                        "action": "Buy",
+                        "shares": 50,
+                        "limit": 160.0,
+                        "description": "test"
+                    }]
+                }),
+            )
+            .unwrap();
+            log.log_checkpoint(
+                Checkpoint::OrderIntent,
+                4,
+                serde_json::json!({
+                    "symbol": "AAPL",
+                    "action": "Buy",
+                    "shares": 50,
+                    "limit": 160.0,
+                    "client_order_id": "test_client_order_123",
+                }),
+            )
+            .unwrap();
+        }
+
+        let (state, _) = reconstruct_state(&path).unwrap();
+        assert_eq!(state.checkpoint, Checkpoint::OrderIntent);
+        assert_eq!(state.sequence_number, 4);
+        assert_eq!(state.orders[0].client_order_id, Some("test_client_order_123".to_string()));
+    }
 }

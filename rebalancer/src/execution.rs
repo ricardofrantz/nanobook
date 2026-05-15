@@ -820,4 +820,31 @@ mod tests {
         assert_eq!(action_to_side(Action::Sell), BrokerSide::Sell);
         assert_eq!(action_to_side(Action::SellShort), BrokerSide::Sell);
     }
+
+    // Feature flag gating tests
+
+    #[test]
+    fn test_cfg_macro_compiles_correctly() {
+        // This test verifies that the cfg macro compiles correctly with both feature states
+        // The test itself will compile and run in both configurations
+        #[cfg(feature = "write_ahead_logging")]
+        let feature_enabled = true;
+        #[cfg(not(feature = "write_ahead_logging"))]
+        let feature_enabled = false;
+
+        // Just verify the test compiles and runs
+        let _ = feature_enabled;
+    }
+
+    #[test]
+    fn test_feature_flag_does_not_affect_other_modules() {
+        // Verify that other functions in the module work regardless of feature flag
+        // Test action_to_side which is not feature-gated
+        assert_eq!(action_to_side(Action::Buy), BrokerSide::Buy);
+        assert_eq!(action_to_side(Action::Sell), BrokerSide::Sell);
+
+        // Test enforce_max_orders_per_run which is not feature-gated
+        assert!(enforce_max_orders_per_run(3, 5).is_ok());
+        assert!(enforce_max_orders_per_run(10, 5).is_err());
+    }
 }

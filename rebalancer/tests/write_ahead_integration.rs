@@ -1,5 +1,7 @@
 //! Integration tests for write-ahead logging wrapper function.
 
+#![cfg(feature = "write_ahead_logging")]
+
 use nanobook::Symbol;
 use nanobook_broker::error::BrokerError;
 use nanobook_broker::ibkr::orders::{OrderOutcome, OrderResult};
