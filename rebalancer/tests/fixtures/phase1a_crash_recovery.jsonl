@@ -1,0 +1,5 @@
+{"event":"run_started","ts":"2024-05-15T12:00:00Z","sequence_number":1,"checkpoint":"RunStarted","target_file":"target.json","account":"U1234567"}
+{"event":"positions_fetched","ts":"2024-05-15T12:00:01Z","sequence_number":2,"checkpoint":"PositionsFetched","positions":[{"symbol":"AAPL","qty":50,"avg_cost":150.0}],"equity":10000.0}
+{"event":"diff_computed","ts":"2024-05-15T12:00:02Z","sequence_number":3,"checkpoint":"DiffComputed","orders":[{"symbol":"AAPL","action":"Buy","shares":50,"limit":150.0,"description":"rebalance"}]}
+{"event":"risk_check_passed","ts":"2024-05-15T12:00:03Z","sequence_number":4,"checkpoint":"RiskCheckPassed","checks":[{"name":"max_position","status":"Passed","detail":"OK"}]}
+{"event":"order_intent","ts":"2024-05-15T12:00:04Z","sequence_number":5,"checkpoint":"OrderIntent","symbol":"AAPL","action":"Buy","shares":50,"limit":150.0,"client_order_id":"scope-AAPL-buy-50","timestamp":"2024-05-15T12:00:04Z","target_spec_reference":"test_target","execution_context":"live_run:1"}
