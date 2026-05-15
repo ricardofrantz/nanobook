@@ -6,19 +6,23 @@ use std::time::Duration;
 
 use log::{error, info, warn};
 use nanobook::Symbol;
+use nanobook_broker::error::BrokerError;
 use nanobook_broker::ibkr::orders::{self, OrderOutcome};
 use nanobook_broker::types::Position;
 use nanobook_broker::{BrokerSide, ClientOrderId};
 use rustc_hash::FxHashMap;
 
 use crate::audit::{self, AuditLog};
-use crate::broker::{as_connection_error, connect_ibkr};
+use crate::broker::{as_connection_error, connect_ibkr, BrokerGateway};
 use crate::config::Config;
 use crate::diff::{self, Action, CurrentPosition, RebalanceOrder};
 use crate::error::{Error, Result};
 use crate::reconcile;
 use crate::risk;
 use crate::target::TargetSpec;
+
+#[cfg(feature = "write_ahead_logging")]
+use chrono::Utc;
 
 /// Options for a rebalance run.
 pub struct RunOptions {
@@ -283,6 +287,19 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     let mut filled = 0;
     let mut failed = 0;
 
+    // Determine sequence number for checkpoint logging
+    // Use cron_mode sequence_number if available, otherwise use timestamp
+    let sequence_number = if let Some(ref cron) = cron_mode {
+        cron.sequence_number
+    } else {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| Error::Config(format!("clock error: {e}")))?
+            .as_secs()
+    };
+
+    let target_spec_ref = target.idempotency_scope();
+
     for (i, order) in orders.iter().enumerate() {
         print!(
             "[{}/{}] {} {} {} @ ${:.2} ... ",
@@ -296,21 +313,18 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
 
         submitted += 1;
 
-        let side = action_to_side(order.action);
-        let shares = u64::try_from(order.shares)
-            .map_err(|_| Error::Order(format!("invalid share quantity for order {order:?}")))?;
         let client_order_id = derive_client_order_id(target, order)?;
 
-        match client.execute_limit_order(
-            order.symbol,
-            side,
-            shares,
-            order.limit_price_cents,
-            Some(&client_order_id),
+        match execute_order_with_write_ahead(
+            client.as_ref(),
+            &mut audit,
+            order,
+            &client_order_id,
             timeout,
+            sequence_number,
+            &target_spec_ref,
         ) {
             Ok(result) => {
-                audit::log_order_submitted(&mut audit, order, result.order_id)?;
                 audit::log_order_filled(&mut audit, &result)?;
 
                 match result.status {
@@ -554,4 +568,256 @@ pub fn apply_constraint_overrides(
         }
     }
     config
+}
+
+/// Determine if a broker error is transient (retryable) or permanent.
+///
+/// Transient errors: network timeouts, connection resets, rate limits
+/// Permanent errors: invalid symbol, insufficient margin, authentication failures
+fn is_transient_error(error: &BrokerError) -> bool {
+    match error {
+        BrokerError::Connection(_) => true,
+        BrokerError::NotConnected => true,
+        BrokerError::RateLimit => true,
+        BrokerError::ConnectionLost { .. } => true,
+        BrokerError::ReconnectFailed { .. } => true,
+        // Permanent errors
+        BrokerError::InvalidSymbol(_) => false,
+        BrokerError::Auth(_) => false,
+        BrokerError::Order(_) => false, // Most order errors are permanent
+        BrokerError::DuplicateOrder { .. } => false,
+        BrokerError::CancelReject { .. } => false,
+        BrokerError::NonFiniteValue { .. } => false,
+        BrokerError::ValueOutOfRange { .. } => false,
+        BrokerError::NoQuoteForMarketOrder { .. } => false,
+        BrokerError::MarketOrderRejected => false,
+        BrokerError::Other(_) => false, // Conservative: treat as permanent
+    }
+}
+
+/// Execute an order with write-ahead logging and retry logic.
+///
+/// This function encapsulates the order submission with write-ahead logging:
+/// 1. Log OrderIntent checkpoint BEFORE calling the broker
+/// 2. Execute the order via the broker
+/// 3. Log success (OrderSubmitted) or failure (OrderFailed)
+/// 4. Implement retry logic with exponential backoff for transient errors
+///
+/// # Arguments
+///
+/// * `broker` - The broker gateway to execute the order
+/// * `audit` - The audit log for write-ahead logging
+/// * `order` - The rebalance order to execute
+/// * `client_order_id` - The client-side idempotency key for the order
+/// * `timeout` - Timeout for the order execution
+/// * `sequence_number` - Sequence number for checkpoint logging
+/// * `target_spec` - Target spec reference for audit context
+///
+/// # Returns
+///
+/// * `Ok(OrderResult)` - The order execution result
+/// * `Err(Error)` - The error if all retries are exhausted or a permanent error occurs
+#[cfg(feature = "write_ahead_logging")]
+pub fn execute_order_with_write_ahead(
+    broker: &dyn BrokerGateway,
+    audit: &mut AuditLog,
+    order: &RebalanceOrder,
+    client_order_id: &ClientOrderId,
+    timeout: Duration,
+    sequence_number: u64,
+    target_spec: &str,
+) -> Result<orders::OrderResult> {
+    let side = action_to_side(order.action);
+    let shares = u64::try_from(order.shares)
+        .map_err(|_| Error::Order(format!("invalid share quantity for order {order:?}")))?;
+    let client_order_id_str = client_order_id.as_str();
+    let timestamp = Utc::now();
+    let execution_context = format!("rebalance_run:{sequence_number}");
+
+    // Log OrderIntent checkpoint BEFORE calling the broker (write-ahead logging)
+    audit::log_order_intent_checkpoint(
+        audit,
+        sequence_number,
+        order,
+        &client_order_id_str,
+        timestamp,
+        target_spec,
+        &execution_context,
+    )?;
+
+    // Retry loop with exponential backoff
+    let mut attempt = 0;
+    let max_retries = 5;
+
+    loop {
+        attempt += 1;
+
+        match broker.execute_limit_order(
+            order.symbol,
+            side,
+            shares,
+            order.limit_price_cents,
+            Some(client_order_id),
+            timeout,
+        ) {
+            Ok(result) => {
+                // Log OrderSubmitted checkpoint on success
+                audit::log_order_submitted_checkpoint(
+                    audit,
+                    sequence_number,
+                    order,
+                    result.order_id,
+                )?;
+                return Ok(result);
+            }
+            Err(broker_error) => {
+                // Check if error is transient (retryable)
+                if is_transient_error(&broker_error) {
+                    if attempt < max_retries {
+                        // Calculate exponential backoff: 1s, 2s, 4s, 8s, 16s
+                        let backoff_secs = 2u64.pow(attempt - 1);
+                        warn!(
+                            "Transient error on attempt {}/{} (will retry in {}s): {}",
+                            attempt, max_retries, backoff_secs, broker_error
+                        );
+                        std::thread::sleep(Duration::from_secs(backoff_secs));
+                        continue;
+                    } else {
+                        // Max retries exceeded - log failure and return error
+                        error!(
+                            "Max retries ({}) exceeded for order {}: {}",
+                            max_retries, order.symbol, broker_error
+                        );
+                        audit::log_order_failed_checkpoint(
+                            audit,
+                            sequence_number,
+                            "max_retries_exceeded",
+                            &format!("{} (attempts: {})", broker_error, attempt),
+                            &format!("symbol:{}, client_order_id:{}", order.symbol, client_order_id_str),
+                        )?;
+                        return Err(Error::Order(format!(
+                            "order failed after {} retries: {}",
+                            max_retries, broker_error
+                        )));
+                    }
+                } else {
+                    // Permanent error - log failure and return immediately
+                    error!(
+                        "Permanent error for order {}: {}",
+                        order.symbol, broker_error
+                    );
+                    audit::log_order_failed_checkpoint(
+                        audit,
+                        sequence_number,
+                        "permanent_error",
+                        &broker_error.to_string(),
+                        &format!("symbol:{}, client_order_id:{}", order.symbol, client_order_id_str),
+                    )?;
+                    return Err(Error::Order(format!("order failed: {}", broker_error)));
+                }
+            }
+        }
+    }
+}
+
+/// Fallback function for when write_ahead_logging feature is disabled.
+///
+/// This function provides backward compatibility by directly calling the broker
+/// without write-ahead logging or retry logic.
+#[cfg(not(feature = "write_ahead_logging"))]
+pub fn execute_order_with_write_ahead(
+    broker: &dyn BrokerGateway,
+    _audit: &mut AuditLog,
+    order: &RebalanceOrder,
+    client_order_id: &ClientOrderId,
+    timeout: Duration,
+    _sequence_number: u64,
+    _target_spec: &str,
+) -> Result<orders::OrderResult> {
+    let side = action_to_side(order.action);
+    let shares = u64::try_from(order.shares)
+        .map_err(|_| Error::Order(format!("invalid share quantity for order {order:?}")))?;
+
+    broker
+        .execute_limit_order(
+            order.symbol,
+            side,
+            shares,
+            order.limit_price_cents,
+            Some(client_order_id),
+            timeout,
+        )
+        .map_err(|e| Error::Order(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nanobook_broker::error::BrokerError;
+
+    #[test]
+    fn test_is_transient_error_connection() {
+        assert!(is_transient_error(&BrokerError::Connection("timeout".to_string())));
+        assert!(is_transient_error(&BrokerError::NotConnected));
+    }
+
+    #[test]
+    fn test_is_transient_error_rate_limit() {
+        assert!(is_transient_error(&BrokerError::RateLimit));
+    }
+
+    #[test]
+    fn test_is_transient_error_connection_lost() {
+        assert!(is_transient_error(&BrokerError::ConnectionLost {
+            order_id: 123,
+            filled_quantity: 100
+        }));
+    }
+
+    #[test]
+    fn test_is_transient_error_reconnect_failed() {
+        assert!(is_transient_error(&BrokerError::ReconnectFailed {
+            attempts: 3,
+            reason: "timeout".to_string()
+        }));
+    }
+
+    #[test]
+    fn test_is_not_transient_error_invalid_symbol() {
+        assert!(!is_transient_error(&BrokerError::InvalidSymbol("BAD".to_string())));
+    }
+
+    #[test]
+    fn test_is_not_transient_error_auth() {
+        assert!(!is_transient_error(&BrokerError::Auth("unauthorized".to_string())));
+    }
+
+    #[test]
+    fn test_is_not_transient_error_order() {
+        assert!(!is_transient_error(&BrokerError::Order("insufficient margin".to_string())));
+    }
+
+    #[test]
+    fn test_is_not_transient_error_duplicate_order() {
+        assert!(!is_transient_error(&BrokerError::DuplicateOrder {
+            client_order_id: "test-123".to_string()
+        }));
+    }
+
+    #[test]
+    fn test_is_not_transient_error_other() {
+        assert!(!is_transient_error(&BrokerError::Other("unknown error".to_string())));
+    }
+
+    #[test]
+    fn test_action_to_side_buy() {
+        assert_eq!(action_to_side(Action::Buy), BrokerSide::Buy);
+        assert_eq!(action_to_side(Action::BuyCover), BrokerSide::Buy);
+    }
+
+    #[test]
+    fn test_action_to_side_sell() {
+        assert_eq!(action_to_side(Action::Sell), BrokerSide::Sell);
+        assert_eq!(action_to_side(Action::SellShort), BrokerSide::Sell);
+    }
 }
