@@ -48,6 +48,10 @@ pub fn validate_static(config: &Config) -> Vec<ValidationIssue> {
 }
 
 /// Fail if any static validation issue is present.
+pub fn should_run_startup_validation(skip_validation: bool) -> bool {
+    !skip_validation
+}
+
 pub fn validate_static_or_error(config: &Config) -> Result<()> {
     let issues = validate_static(config);
     if issues.is_empty() {
@@ -250,8 +254,9 @@ fn _path_exists(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ValidationIssue, format_validation_issues, validate_available_log_space,
-        validate_file_permissions, validate_network_timeout, validate_risk_limits, validate_static,
+        ValidationIssue, format_validation_issues, should_run_startup_validation,
+        validate_available_log_space, validate_file_permissions, validate_network_timeout,
+        validate_risk_limits, validate_static,
     };
     use crate::config::{
         AccountConfig, AccountType, Config, ConnectionConfig, CostConfig, ExecutionConfig,
@@ -348,6 +353,12 @@ mod tests {
         assert!(validate_file_permissions(&config).is_empty());
         assert!(nested.exists());
         Ok(())
+    }
+
+    #[test]
+    fn skip_validation_flag_controls_startup_validation() {
+        assert!(should_run_startup_validation(false));
+        assert!(!should_run_startup_validation(true));
     }
 
     #[test]

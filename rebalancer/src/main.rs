@@ -12,6 +12,7 @@ use nanobook_rebalancer::error::Error;
 use nanobook_rebalancer::execution::{self, RunOptions};
 use nanobook_rebalancer::recovery;
 use nanobook_rebalancer::target::TargetSpec;
+use nanobook_rebalancer::validator;
 
 #[derive(Parser)]
 #[command(name = "rebalancer")]
@@ -21,6 +22,10 @@ struct Cli {
     /// Path to config.toml
     #[arg(long, default_value = "config.toml")]
     config: PathBuf,
+
+    /// Skip startup validation checks. Intended for tests and emergency diagnostics, not production.
+    #[arg(long)]
+    skip_validation: bool,
 
     #[command(subcommand)]
     command: Command,
@@ -92,6 +97,13 @@ fn main() {
             process::exit(1);
         }
     };
+
+    if validator::should_run_startup_validation(cli.skip_validation) {
+        if let Err(e) = validator::validate_static_or_error(&config) {
+            eprintln!("{e}");
+            process::exit(1);
+        }
+    }
 
     let result = match cli.command {
         Command::Run {
