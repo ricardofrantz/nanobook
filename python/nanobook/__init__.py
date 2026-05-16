@@ -35,6 +35,30 @@ def decompose_backtest(weight_schedule, return_schedule):
     return py_decompose_backtest(weight_schedule, return_schedule)
 
 
+def sma(close, period):
+    return py_sma(close, period)
+
+
+def ema(close, period):
+    return py_ema(close, period)
+
+
+def rsi(close, period=14):
+    return py_rsi(close, period)
+
+
+def macd(close, fast_period=12, slow_period=26, signal_period=9):
+    return py_macd(close, fast_period, slow_period, signal_period)
+
+
+def bollinger(close, period=20, num_std_up=2.0, num_std_dn=2.0):
+    return py_bollinger(close, period, num_std_up, num_std_dn)
+
+
+def wilder_atr(high, low, close, period=14):
+    return py_wilder_atr(high, low, close, period)
+
+
 def garch_ewma_forecast(returns, p=1, q=1, mean="zero"):
     return py_garch_ewma_forecast(returns, p, q, mean)
 

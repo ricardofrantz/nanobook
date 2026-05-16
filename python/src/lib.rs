@@ -88,10 +88,14 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(itch::parse_itch, m)?)?;
 
     // v0.8 — Technical indicators (ta-lib replacements)
+    m.add_function(wrap_pyfunction!(indicators::py_sma, m)?)?;
+    m.add_function(wrap_pyfunction!(indicators::py_ema, m)?)?;
     m.add_function(wrap_pyfunction!(indicators::py_rsi, m)?)?;
     m.add_function(wrap_pyfunction!(indicators::py_macd, m)?)?;
     m.add_function(wrap_pyfunction!(indicators::py_bbands, m)?)?;
+    m.add_function(wrap_pyfunction!(indicators::py_bollinger, m)?)?;
     m.add_function(wrap_pyfunction!(indicators::py_atr, m)?)?;
+    m.add_function(wrap_pyfunction!(indicators::py_wilder_atr, m)?)?;
 
     // v0.8 — Statistics (scipy replacements)
     m.add_function(wrap_pyfunction!(stats::py_spearman, m)?)?;

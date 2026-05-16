@@ -24,7 +24,7 @@
 /// Standard exponential moving average (alpha = 2/(period+1)).
 ///
 /// Used by MACD (fast EMA, slow EMA, signal line).
-fn ema(values: &[f64], period: usize) -> Vec<f64> {
+pub fn ema(values: &[f64], period: usize) -> Vec<f64> {
     let n = values.len();
     let mut out = vec![f64::NAN; n];
     if n < period || period == 0 {
@@ -43,7 +43,7 @@ fn ema(values: &[f64], period: usize) -> Vec<f64> {
 }
 
 /// Simple moving average.
-fn sma(values: &[f64], period: usize) -> Vec<f64> {
+pub fn sma(values: &[f64], period: usize) -> Vec<f64> {
     let n = values.len();
     let mut out = vec![f64::NAN; n];
     if n < period || period == 0 {
@@ -299,6 +299,16 @@ pub fn bbands(
     (upper, middle, lower)
 }
 
+/// Explicit Bollinger Bands alias with the canonical public name.
+pub fn bollinger(
+    close: &[f64],
+    period: usize,
+    num_std_up: f64,
+    num_std_dn: f64,
+) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    bbands(close, period, num_std_up, num_std_dn)
+}
+
 /// Average True Range (Wilder's smoothing of True Range).
 ///
 /// Matches TA-Lib `ta_ATR.c` behavior:
@@ -312,7 +322,7 @@ pub fn bbands(
 /// * `low` — Low prices.
 /// * `close` — Closing prices.
 /// * `period` — Lookback period (typically 14).
-pub fn atr(high: &[f64], low: &[f64], close: &[f64], period: usize) -> Vec<f64> {
+pub fn wilder_atr(high: &[f64], low: &[f64], close: &[f64], period: usize) -> Vec<f64> {
     let n = high.len();
     if n != low.len() || n != close.len() {
         return vec![f64::NAN; n];
@@ -347,6 +357,11 @@ pub fn atr(high: &[f64], low: &[f64], close: &[f64], period: usize) -> Vec<f64> 
     out
 }
 
+/// Backward-compatible alias for Wilder ATR.
+pub fn atr(high: &[f64], low: &[f64], close: &[f64], period: usize) -> Vec<f64> {
+    wilder_atr(high, low, close, period)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -354,6 +369,48 @@ pub fn atr(high: &[f64], low: &[f64], close: &[f64], period: usize) -> Vec<f64> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sma_basic() {
+        let result = sma(&[1.0, 2.0, 3.0, 4.0], 2);
+        assert!(result[0].is_nan());
+        assert_eq!(result[1], 1.5);
+        assert_eq!(result[2], 2.5);
+        assert_eq!(result[3], 3.5);
+    }
+
+    #[test]
+    fn ema_basic() {
+        let result = ema(&[1.0, 2.0, 3.0, 4.0], 2);
+        assert!(result[0].is_nan());
+        assert_eq!(result[1], 1.5);
+        assert!((result[2] - 2.5).abs() < 1e-12);
+        assert!((result[3] - 3.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn bollinger_alias_matches_bbands() {
+        let close = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let bb = bbands(&close, 3, 2.0, 2.0);
+        let alias = bollinger(&close, 3, 2.0, 2.0);
+        for (left, right) in [(&bb.0, &alias.0), (&bb.1, &alias.1), (&bb.2, &alias.2)] {
+            for (a, b) in left.iter().zip(right.iter()) {
+                assert!(a == b || (a.is_nan() && b.is_nan()));
+            }
+        }
+    }
+
+    #[test]
+    fn wilder_atr_alias_matches_atr() {
+        let high = [11.0, 12.0, 13.0, 14.0];
+        let low = [9.0, 10.0, 11.0, 12.0];
+        let close = [10.0, 11.0, 12.0, 13.0];
+        let wilder = wilder_atr(&high, &low, &close, 2);
+        let alias = atr(&high, &low, &close, 2);
+        for (a, b) in wilder.iter().zip(alias.iter()) {
+            assert!(a == b || (a.is_nan() && b.is_nan()));
+        }
+    }
 
     #[test]
     fn rsi_monotonic_up() {

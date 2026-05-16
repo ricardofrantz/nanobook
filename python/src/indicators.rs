@@ -1,6 +1,20 @@
 use nanobook::indicators;
 use pyo3::prelude::*;
 
+/// Compute simple moving average.
+#[pyfunction]
+#[pyo3(signature = (close, period))]
+pub fn py_sma(close: Vec<f64>, period: usize) -> Vec<f64> {
+    indicators::sma(&close, period)
+}
+
+/// Compute exponential moving average.
+#[pyfunction]
+#[pyo3(signature = (close, period))]
+pub fn py_ema(close: Vec<f64>, period: usize) -> Vec<f64> {
+    indicators::ema(&close, period)
+}
+
 /// Compute RSI (Relative Strength Index) using Wilder's smoothing.
 ///
 /// Drop-in replacement for ``talib.RSI(close, timeperiod)``.
@@ -78,6 +92,18 @@ pub fn py_bbands(
     indicators::bbands(&close, period, num_std_up, num_std_dn)
 }
 
+/// Explicit Bollinger Bands alias.
+#[pyfunction]
+#[pyo3(signature = (close, period=20, num_std_up=2.0, num_std_dn=2.0))]
+pub fn py_bollinger(
+    close: Vec<f64>,
+    period: usize,
+    num_std_up: f64,
+    num_std_dn: f64,
+) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    indicators::bollinger(&close, period, num_std_up, num_std_dn)
+}
+
 /// Compute ATR (Average True Range) using Wilder's smoothing.
 ///
 /// Drop-in replacement for ``talib.ATR(high, low, close, timeperiod)``.
@@ -98,5 +124,12 @@ pub fn py_bbands(
 #[pyfunction]
 #[pyo3(signature = (high, low, close, period=14))]
 pub fn py_atr(high: Vec<f64>, low: Vec<f64>, close: Vec<f64>, period: usize) -> Vec<f64> {
-    indicators::atr(&high, &low, &close, period)
+    indicators::wilder_atr(&high, &low, &close, period)
+}
+
+/// Explicit Wilder ATR alias for callers distinguishing ATR variants.
+#[pyfunction]
+#[pyo3(signature = (high, low, close, period=14))]
+pub fn py_wilder_atr(high: Vec<f64>, low: Vec<f64>, close: Vec<f64>, period: usize) -> Vec<f64> {
+    indicators::wilder_atr(&high, &low, &close, period)
 }
