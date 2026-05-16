@@ -20,6 +20,8 @@ pub struct ValidationIssue {
     pub field: String,
     pub message: String,
     pub suggestion: String,
+    pub location: Option<String>,
+    pub current_value: Option<String>,
 }
 
 impl ValidationIssue {
@@ -32,7 +34,19 @@ impl ValidationIssue {
             field: field.into(),
             message: message.into(),
             suggestion: suggestion.into(),
+            location: None,
+            current_value: None,
         }
+    }
+
+    fn with_source_context(mut self, config_path: &Path, contents: &str) -> Self {
+        if let Some((line, value)) = find_toml_field(contents, &self.field) {
+            self.location = Some(format!("{}:{line}", config_path.display()));
+            self.current_value = Some(value.to_string());
+        } else {
+            self.location = Some(config_path.display().to_string());
+        }
+        self
     }
 }
 
@@ -45,6 +59,18 @@ pub fn validate_static(config: &Config) -> Vec<ValidationIssue> {
     issues.extend(validate_file_permissions(config));
     issues.extend(validate_disk_space(config));
     issues
+}
+
+/// Validate static checks and annotate issues with config file/line context.
+pub fn validate_static_with_source(
+    config: &Config,
+    config_path: &Path,
+    contents: &str,
+) -> Vec<ValidationIssue> {
+    validate_static(config)
+        .into_iter()
+        .map(|issue| issue.with_source_context(config_path, contents))
+        .collect()
 }
 
 /// Fail if any static validation issue is present.
@@ -65,13 +91,36 @@ pub fn validate_static_or_error(config: &Config) -> Result<()> {
 pub fn format_validation_issues(issues: &[ValidationIssue]) -> String {
     let mut out = String::from("startup validation failed:");
     for issue in issues {
-        let _ = write!(
-            out,
-            "\n  - {}: {}\n    fix: {}",
-            issue.field, issue.message, issue.suggestion
-        );
+        let _ = write!(out, "\n  - {}: {}", issue.field, issue.message);
+        if let Some(location) = &issue.location {
+            let _ = write!(out, "\n    location: {location}");
+        }
+        if let Some(current_value) = &issue.current_value {
+            let _ = write!(out, "\n    current value: {current_value}");
+        }
+        let _ = write!(out, "\n    fix: {}", issue.suggestion);
     }
     out
+}
+
+fn find_toml_field<'a>(contents: &'a str, dotted_field: &str) -> Option<(usize, &'a str)> {
+    let mut section = "";
+    let (wanted_section, wanted_key) = dotted_field.rsplit_once('.')?;
+
+    for (index, raw_line) in contents.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line.trim_matches(&['[', ']'][..]);
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if section == wanted_section && key.trim() == wanted_key {
+            return Some((index + 1, value.trim()));
+        }
+    }
+    None
 }
 
 pub fn validate_required_fields(config: &Config) -> Vec<ValidationIssue> {
@@ -256,7 +305,7 @@ mod tests {
     use super::{
         ValidationIssue, format_validation_issues, should_run_startup_validation,
         validate_available_log_space, validate_file_permissions, validate_network_timeout,
-        validate_risk_limits, validate_static,
+        validate_risk_limits, validate_static, validate_static_with_source,
     };
     use crate::config::{
         AccountConfig, AccountType, Config, ConnectionConfig, CostConfig, ExecutionConfig,
@@ -359,6 +408,34 @@ mod tests {
     fn skip_validation_flag_controls_startup_validation() {
         assert!(should_run_startup_validation(false));
         assert!(!should_run_startup_validation(true));
+    }
+
+    #[test]
+    fn validation_source_context_includes_file_line_and_current_value() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let mut config = valid_config(dir.path());
+        config.risk.max_leverage = 20.0;
+        let config_path = dir.path().join("config.toml");
+        let contents = "[risk]\nmax_position_pct = 0.25\nmax_leverage = 20.0\n";
+
+        let issues = validate_static_with_source(&config, &config_path, contents);
+        let Some(leverage) = issues
+            .iter()
+            .find(|issue| issue.field == "risk.max_leverage")
+        else {
+            return Err(std::io::Error::other("risk.max_leverage issue present"));
+        };
+        let expected_location = format!("{}:3", config_path.display());
+
+        assert_eq!(
+            leverage.location.as_deref(),
+            Some(expected_location.as_str())
+        );
+        assert_eq!(leverage.current_value.as_deref(), Some("20.0"));
+        let text = format_validation_issues(std::slice::from_ref(leverage));
+        assert!(text.contains("location:"));
+        assert!(text.contains("current value: 20.0"));
+        Ok(())
     }
 
     #[test]

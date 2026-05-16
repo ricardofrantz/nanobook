@@ -99,7 +99,18 @@ fn main() {
     };
 
     if validator::should_run_startup_validation(cli.skip_validation) {
-        if let Err(e) = validator::validate_static_or_error(&config) {
+        let validation_result = std::fs::read_to_string(&cli.config)
+            .map(|contents| {
+                let issues =
+                    validator::validate_static_with_source(&config, &cli.config, &contents);
+                if issues.is_empty() {
+                    Ok(())
+                } else {
+                    Err(Error::Config(validator::format_validation_issues(&issues)))
+                }
+            })
+            .unwrap_or_else(|_| validator::validate_static_or_error(&config));
+        if let Err(e) = validation_result {
             eprintln!("{e}");
             process::exit(1);
         }
