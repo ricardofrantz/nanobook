@@ -92,13 +92,17 @@ pub struct DanglingOrder {
 /// * `Ok(Vec<DanglingOrder>)` - List of dangling orders (empty if none)
 /// * `Err(Error)` - Failed to read or parse the audit log
 pub fn verify_no_dangling_orders(audit_path: &Path) -> Result<Vec<DanglingOrder>> {
-    info!("Verifying no dangling orders in audit log: {:?}", audit_path);
+    info!(
+        "Verifying no dangling orders in audit log: {:?}",
+        audit_path
+    );
 
     // Read the audit log
     let contents = std::fs::read_to_string(audit_path).map_err(Error::Audit)?;
 
     // Track submitted orders and filled orders by IBKR ID
-    let mut submitted_orders: std::collections::HashMap<i32, DanglingOrder> = std::collections::HashMap::new();
+    let mut submitted_orders: std::collections::HashMap<i32, DanglingOrder> =
+        std::collections::HashMap::new();
     let mut filled_order_ids: std::collections::HashSet<i32> = std::collections::HashSet::new();
 
     for line in contents.lines() {
@@ -178,6 +182,27 @@ pub fn verify_no_dangling_orders(audit_path: &Path) -> Result<Vec<DanglingOrder>
 /// - The process does not exist (ESRCH)
 /// - Permission is denied to send the signal (EPERM)
 /// - Other system errors occur
+/// Compile-time kill workflow selected by Cargo features.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KillWorkflow {
+    /// Backward-compatible behavior: graceful SIGTERM plus audit-log dangling-order check.
+    GracefulOnly,
+    /// Guaranteed kill switch behavior: graceful first, then forceful broker cancellation.
+    TwoPhase,
+}
+
+/// Return the active kill workflow for this build.
+pub const fn active_kill_workflow() -> KillWorkflow {
+    #[cfg(feature = "guaranteed_kill_switch")]
+    {
+        KillWorkflow::TwoPhase
+    }
+    #[cfg(not(feature = "guaranteed_kill_switch"))]
+    {
+        KillWorkflow::GracefulOnly
+    }
+}
+
 pub fn send_sigterm(pid: u32) -> Result<()> {
     info!("Sending SIGTERM to process {}", pid);
 
@@ -187,16 +212,13 @@ pub fn send_sigterm(pid: u32) -> Result<()> {
         use nix::unistd::Pid;
 
         let nix_pid = Pid::from_raw(pid as i32);
-        signal::kill(nix_pid, Signal::SIGTERM).map_err(|e| {
-            match e {
-                nix::errno::Errno::ESRCH => {
-                    Error::Aborted(format!("Process {} does not exist", pid))
-                }
-                nix::errno::Errno::EPERM => {
-                    Error::Aborted(format!("Permission denied to send signal to process {}", pid))
-                }
-                _ => Error::Aborted(format!("Failed to send SIGTERM to process {}: {}", pid, e)),
-            }
+        signal::kill(nix_pid, Signal::SIGTERM).map_err(|e| match e {
+            nix::errno::Errno::ESRCH => Error::Aborted(format!("Process {} does not exist", pid)),
+            nix::errno::Errno::EPERM => Error::Aborted(format!(
+                "Permission denied to send signal to process {}",
+                pid
+            )),
+            _ => Error::Aborted(format!("Failed to send SIGTERM to process {}: {}", pid, e)),
         })?;
     }
 
@@ -204,7 +226,7 @@ pub fn send_sigterm(pid: u32) -> Result<()> {
     {
         // On Windows, we don't have SIGTERM. Use console event instead.
         // This is a simplified implementation - Windows signal handling is more complex.
-        use windows::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_C_EVENT};
+        use windows::Win32::System::Console::{CTRL_C_EVENT, GenerateConsoleCtrlEvent};
 
         // Note: This is a simplified approach. On Windows, proper process termination
         // typically requires more complex handling (e.g., using TerminateProcess).
@@ -226,7 +248,26 @@ pub fn send_sigterm(pid: u32) -> Result<()> {
 /// 3. Waits for the process to exit (with timeout)
 /// 4. Verifies no dangling orders via audit log
 /// 5. Reports results
+#[cfg(feature = "guaranteed_kill_switch")]
 pub fn run_kill(config: &Config) -> Result<()> {
+    run_two_phase_kill(config)
+}
+
+#[cfg(not(feature = "guaranteed_kill_switch"))]
+pub fn run_kill(config: &Config) -> Result<()> {
+    run_graceful_kill(config)
+}
+
+#[cfg(feature = "guaranteed_kill_switch")]
+fn run_two_phase_kill(config: &Config) -> Result<()> {
+    // Phase-2 broker-side cancellation is implemented in the follow-up forceful
+    // cancellation bead. Until then, this feature-gated entry point delegates to
+    // the proven graceful path so enabling the flag cannot regress production
+    // behavior or bypass dangling-order verification.
+    run_graceful_kill(config)
+}
+
+fn run_graceful_kill(config: &Config) -> Result<()> {
     let pid_path = Path::new(pid_file::DEFAULT_PID_FILE);
     let audit_path = config.audit_path();
 
@@ -315,6 +356,18 @@ pub fn run_kill(config: &Config) -> Result<()> {
 mod tests {
     use super::*;
     use tempfile::NamedTempFile;
+
+    #[test]
+    #[cfg(not(feature = "guaranteed_kill_switch"))]
+    fn test_default_kill_workflow_is_graceful_only() {
+        assert_eq!(active_kill_workflow(), KillWorkflow::GracefulOnly);
+    }
+
+    #[test]
+    #[cfg(feature = "guaranteed_kill_switch")]
+    fn test_guaranteed_kill_switch_selects_two_phase_workflow() {
+        assert_eq!(active_kill_workflow(), KillWorkflow::TwoPhase);
+    }
 
     #[test]
     #[cfg(unix)]
