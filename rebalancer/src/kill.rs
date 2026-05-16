@@ -56,6 +56,8 @@ use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::pid_file::{self, pid_file_exists, read_pid_file};
 use nanobook_broker::Broker;
+#[cfg(feature = "guaranteed_kill_switch")]
+use nanobook_broker::ibkr::IbkrBroker;
 use nanobook_broker::types::{BrokerOrderStatus, OrderState};
 use serde_json::Value;
 use std::path::Path;
@@ -317,6 +319,59 @@ pub fn forceful_cancel_open_orders(broker: &dyn Broker) -> ForcefulCancelReport 
     })
 }
 
+pub fn kill_timeout_from_sources(config: &Config, cli_timeout_secs: Option<u64>) -> Duration {
+    let timeout_secs = cli_timeout_secs
+        .filter(|seconds| *seconds > 0)
+        .or_else(|| {
+            std::env::var("NANOBOOK_KILL_TIMEOUT_SECS")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .filter(|seconds| *seconds > 0)
+        })
+        .unwrap_or(config.kill.timeout_secs);
+    Duration::from_secs(timeout_secs)
+}
+
+#[cfg(feature = "guaranteed_kill_switch")]
+fn log_kill_phase(audit: &mut AuditLog, event: &'static str, pid: u32) -> Result<()> {
+    audit.log(event, serde_json::json!({ "pid": pid }))
+}
+
+fn wait_for_process_exit(pid: u32, timeout: Duration) -> Result<bool> {
+    #[cfg(unix)]
+    {
+        use nix::sys::signal;
+        use nix::unistd::Pid;
+
+        let nix_pid = Pid::from_raw(pid as i32);
+        let start = std::time::Instant::now();
+
+        loop {
+            match signal::kill(nix_pid, None) {
+                Ok(_) => {
+                    if start.elapsed() > timeout {
+                        return Ok(false);
+                    }
+                    thread::sleep(Duration::from_millis(500));
+                }
+                Err(nix::errno::Errno::ESRCH) => return Ok(true),
+                Err(e) => {
+                    return Err(Error::Aborted(format!(
+                        "Error checking process {}: {}",
+                        pid, e
+                    )));
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        thread::sleep(Duration::from_secs(5));
+        Ok(true)
+    }
+}
+
 pub fn send_sigterm(pid: u32) -> Result<()> {
     info!("Sending SIGTERM to process {}", pid);
 
@@ -362,26 +417,98 @@ pub fn send_sigterm(pid: u32) -> Result<()> {
 /// 3. Waits for the process to exit (with timeout)
 /// 4. Verifies no dangling orders via audit log
 /// 5. Reports results
-#[cfg(feature = "guaranteed_kill_switch")]
 pub fn run_kill(config: &Config) -> Result<()> {
-    run_two_phase_kill(config)
+    run_kill_with_timeout(config, None)
+}
+
+#[cfg(feature = "guaranteed_kill_switch")]
+pub fn run_kill_with_timeout(config: &Config, cli_timeout_secs: Option<u64>) -> Result<()> {
+    run_two_phase_kill(config, kill_timeout_from_sources(config, cli_timeout_secs))
 }
 
 #[cfg(not(feature = "guaranteed_kill_switch"))]
-pub fn run_kill(config: &Config) -> Result<()> {
-    run_graceful_kill(config)
+pub fn run_kill_with_timeout(config: &Config, cli_timeout_secs: Option<u64>) -> Result<()> {
+    run_graceful_kill(config, kill_timeout_from_sources(config, cli_timeout_secs))
 }
 
 #[cfg(feature = "guaranteed_kill_switch")]
-fn run_two_phase_kill(config: &Config) -> Result<()> {
-    // Phase-2 broker-side cancellation is implemented in the follow-up forceful
-    // cancellation bead. Until then, this feature-gated entry point delegates to
-    // the proven graceful path so enabling the flag cannot regress production
-    // behavior or bypass dangling-order verification.
-    run_graceful_kill(config)
+fn run_two_phase_kill(config: &Config, timeout: Duration) -> Result<()> {
+    let pid_path = Path::new(pid_file::DEFAULT_PID_FILE);
+    let audit_path = config.audit_path();
+    let started = std::time::Instant::now();
+    let mut audit = AuditLog::open(&audit_path)?;
+    log_kill_requested(&mut audit, "two_phase", "command")?;
+
+    if !pid_file_exists(pid_path) {
+        return Err(Error::Aborted(format!(
+            "PID file not found at {}. Is a rebalancer running?",
+            pid_path.display()
+        )));
+    }
+
+    let pid = read_pid_file(pid_path)?;
+    log_kill_phase(&mut audit, "kill_phase1_started", pid)?;
+    send_sigterm(pid)?;
+
+    if wait_for_process_exit(pid, timeout)? {
+        log_kill_phase(&mut audit, "kill_phase1_completed", pid)?;
+        let dangling = verify_no_dangling_orders(&audit_path)?;
+        log_kill_completed_with_summary(
+            &mut audit,
+            "graceful",
+            0,
+            dangling.len(),
+            started.elapsed().as_secs_f64(),
+            &[],
+        )?;
+        if dangling.is_empty() {
+            return Ok(());
+        }
+    }
+
+    log_kill_phase(&mut audit, "kill_phase2_started", pid)?;
+    let mut broker = IbkrBroker::new(
+        &config.connection.host,
+        config.connection.port,
+        config.connection.client_id,
+    );
+    broker
+        .connect()
+        .map_err(|error| Error::Connection(error.to_string()))?;
+    let report = forceful_cancel_open_orders(&broker);
+    audit.log(
+        "kill_phase2_completed",
+        serde_json::json!({
+            "pid": pid,
+            "attempts": report.attempts,
+            "orders_cancelled_count": report.cancelled_order_ids.len(),
+            "orders_remaining_count": report.remaining_order_ids.len(),
+            "cancelled_order_ids": &report.cancelled_order_ids,
+            "remaining_order_ids": &report.remaining_order_ids,
+            "error_messages": &report.errors,
+        }),
+    )?;
+    log_kill_completed_with_summary(
+        &mut audit,
+        "forced",
+        report.cancelled_order_ids.len(),
+        report.remaining_order_ids.len(),
+        started.elapsed().as_secs_f64(),
+        &report.errors,
+    )?;
+
+    if report.succeeded() {
+        Ok(())
+    } else {
+        Err(Error::Aborted(format!(
+            "Forceful cancellation incomplete: {} orders remain",
+            report.remaining_order_ids.len()
+        )))
+    }
 }
 
-fn run_graceful_kill(config: &Config) -> Result<()> {
+#[cfg(not(feature = "guaranteed_kill_switch"))]
+fn run_graceful_kill(config: &Config, timeout: Duration) -> Result<()> {
     let pid_path = Path::new(pid_file::DEFAULT_PID_FILE);
     let audit_path = config.audit_path();
 
@@ -407,52 +534,14 @@ fn run_graceful_kill(config: &Config) -> Result<()> {
 
     // Step 4: Wait for process to exit (with timeout)
     info!("Waiting for process {} to exit...", pid);
-    let timeout = Duration::from_secs(30);
-    let start = std::time::Instant::now();
-
-    #[cfg(unix)]
-    {
-        use nix::sys::signal;
-        use nix::unistd::Pid;
-
-        let nix_pid = Pid::from_raw(pid as i32);
-
-        loop {
-            // Check if process still exists by sending signal 0 (no signal)
-            match signal::kill(nix_pid, None) {
-                Ok(_) => {
-                    // Process still exists
-                    if start.elapsed() > timeout {
-                        return Err(Error::Aborted(format!(
-                            "Process {} did not exit within {} seconds timeout",
-                            pid,
-                            timeout.as_secs()
-                        )));
-                    }
-                    thread::sleep(Duration::from_millis(500));
-                }
-                Err(nix::errno::Errno::ESRCH) => {
-                    // Process does not exist - it has exited
-                    info!("Process {} has exited", pid);
-                    break;
-                }
-                Err(e) => {
-                    return Err(Error::Aborted(format!(
-                        "Error checking process {}: {}",
-                        pid, e
-                    )));
-                }
-            }
-        }
+    if !wait_for_process_exit(pid, timeout)? {
+        return Err(Error::Aborted(format!(
+            "Process {} did not exit within {} seconds timeout",
+            pid,
+            timeout.as_secs()
+        )));
     }
-
-    #[cfg(windows)]
-    {
-        // On Windows, we can't easily wait for process exit without more complex handling
-        // For now, just wait a fixed time and assume the process exits
-        thread::sleep(Duration::from_secs(5));
-        info!("Assumed process {} has exited (Windows)", pid);
-    }
+    info!("Process {} has exited", pid);
 
     // Step 5: Verify no dangling orders
     info!("Verifying no dangling orders in audit log...");
@@ -495,6 +584,7 @@ mod tests {
         Account, BrokerOrder, BrokerOrderStatus, OrderId, OrderState, Position, Quote,
     };
     use std::cell::{Cell, RefCell};
+    use std::sync::{Mutex, OnceLock};
     use std::time::SystemTime;
     use tempfile::NamedTempFile;
 
@@ -599,6 +689,109 @@ mod tests {
     #[cfg(feature = "guaranteed_kill_switch")]
     fn test_guaranteed_kill_switch_selects_two_phase_workflow() {
         assert_eq!(active_kill_workflow(), KillWorkflow::TwoPhase);
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn test_config_with_kill_timeout(timeout_secs: u64) -> Config {
+        let toml = format!(
+            r#"
+[connection]
+host = "127.0.0.1"
+port = 4002
+client_id = 100
+
+[account]
+id = "DU123456"
+type = "margin"
+
+[execution]
+order_interval_ms = 100
+limit_offset_bps = 5
+order_timeout_secs = 300
+max_orders_per_run = 50
+quote_staleness_threshold_sec = 30
+
+[risk]
+max_position_pct = 0.25
+max_leverage = 1.5
+min_trade_usd = 100.0
+max_trade_usd = 100000.0
+allow_short = true
+max_short_pct = 0.30
+
+[cost]
+commission_per_share = 0.0035
+commission_min = 0.35
+slippage_bps = 5
+
+[logging]
+dir = "./logs"
+audit_file = "audit.jsonl"
+clock_skew_threshold_sec = 30
+max_jump_rate_sec_per_sec = 2.0
+
+[kill]
+timeout_secs = {timeout_secs}
+"#
+        );
+        toml::from_str(&toml).expect("test config should parse")
+    }
+
+    #[test]
+    fn timeout_defaults_to_config() {
+        let _guard = match env_lock().lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        unsafe {
+            std::env::remove_var("NANOBOOK_KILL_TIMEOUT_SECS");
+        }
+        let config = test_config_with_kill_timeout(17);
+
+        assert_eq!(
+            kill_timeout_from_sources(&config, None),
+            Duration::from_secs(17)
+        );
+    }
+
+    #[test]
+    fn timeout_uses_environment_override() {
+        let _guard = match env_lock().lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let config = test_config_with_kill_timeout(17);
+        unsafe {
+            std::env::set_var("NANOBOOK_KILL_TIMEOUT_SECS", "19");
+        }
+        let timeout = kill_timeout_from_sources(&config, None);
+        unsafe {
+            std::env::remove_var("NANOBOOK_KILL_TIMEOUT_SECS");
+        }
+
+        assert_eq!(timeout, Duration::from_secs(19));
+    }
+
+    #[test]
+    fn timeout_uses_cli_override_before_environment() {
+        let _guard = match env_lock().lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let config = test_config_with_kill_timeout(17);
+        unsafe {
+            std::env::set_var("NANOBOOK_KILL_TIMEOUT_SECS", "19");
+        }
+        let timeout = kill_timeout_from_sources(&config, Some(23));
+        unsafe {
+            std::env::remove_var("NANOBOOK_KILL_TIMEOUT_SECS");
+        }
+
+        assert_eq!(timeout, Duration::from_secs(23));
     }
 
     #[test]

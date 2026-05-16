@@ -69,7 +69,11 @@ enum Command {
     },
 
     /// Send SIGTERM to running runner and verify no dangling orders
-    Kill,
+    Kill {
+        /// Override kill phase-1 timeout in seconds
+        #[arg(long)]
+        timeout_secs: Option<u64>,
+    },
 
     /// Recover from a crash using audit log
     Recover {
@@ -150,7 +154,9 @@ fn main() {
             };
             execution::run_reconcile(&config, &spec)
         }
-        Command::Kill => nanobook_rebalancer::kill::run_kill(&config),
+        Command::Kill { timeout_secs } => {
+            nanobook_rebalancer::kill::run_kill_with_timeout(&config, timeout_secs)
+        }
         Command::Recover { target, dry_run } => {
             let spec = match TargetSpec::load(&target) {
                 Ok(s) => s,

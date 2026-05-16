@@ -345,6 +345,7 @@ mod tests {
                 clock_skew_threshold_sec: 300,
                 max_jump_rate_sec_per_sec: 2.0,
             },
+            kill: crate::config::KillConfig::default(),
         }
     }
 

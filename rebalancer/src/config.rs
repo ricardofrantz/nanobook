@@ -16,6 +16,8 @@ pub struct Config {
     pub risk: RiskConfig,
     pub cost: CostConfig,
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub kill: KillConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -183,6 +185,25 @@ fn default_max_jump_rate() -> f64 {
     2.0
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KillConfig {
+    #[serde(default = "default_kill_timeout")]
+    pub timeout_secs: u64,
+}
+
+impl Default for KillConfig {
+    fn default() -> Self {
+        Self {
+            timeout_secs: default_kill_timeout(),
+        }
+    }
+}
+
+fn default_kill_timeout() -> u64 {
+    30
+}
+
 impl Config {
     /// Load config from a TOML file.
     pub fn load(path: &Path) -> Result<Self> {
@@ -224,13 +245,20 @@ impl Config {
             return Err(Error::Config("max_orders_per_run must be > 0".into()));
         }
         if self.execution.quote_staleness_threshold_sec == 0 {
-            return Err(Error::Config("quote_staleness_threshold_sec must be > 0".into()));
+            return Err(Error::Config(
+                "quote_staleness_threshold_sec must be > 0".into(),
+            ));
         }
         if self.logging.clock_skew_threshold_sec <= 0 {
             return Err(Error::Config("clock_skew_threshold_sec must be > 0".into()));
         }
         if self.logging.max_jump_rate_sec_per_sec <= 0.0 {
-            return Err(Error::Config("max_jump_rate_sec_per_sec must be > 0".into()));
+            return Err(Error::Config(
+                "max_jump_rate_sec_per_sec must be > 0".into(),
+            ));
+        }
+        if self.kill.timeout_secs == 0 {
+            return Err(Error::Config("kill.timeout_secs must be > 0".into()));
         }
         Ok(())
     }
@@ -298,6 +326,22 @@ max_jump_rate_sec_per_sec = 2.0
         assert_eq!(config.execution.order_interval_ms, 100);
         assert_eq!(config.risk.max_position_pct, 0.25);
         assert_eq!(config.cost.commission_per_share, 0.0035);
+        assert_eq!(config.kill.timeout_secs, 30);
+    }
+
+    #[test]
+    fn parse_kill_timeout_config() {
+        let mut toml = example_toml().to_string();
+        toml.push_str("\n[kill]\ntimeout_secs = 10\n");
+        let config: Config = toml::from_str(&toml).unwrap();
+        assert_eq!(config.kill.timeout_secs, 10);
+    }
+
+    #[test]
+    fn validate_catches_zero_kill_timeout() {
+        let mut config: Config = toml::from_str(example_toml()).unwrap();
+        config.kill.timeout_secs = 0;
+        assert!(config.validate().is_err());
     }
 
     #[test]
