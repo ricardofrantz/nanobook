@@ -55,6 +55,8 @@ use crate::audit::{AuditLog, log_kill_completed_with_summary, log_kill_requested
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::pid_file::{self, pid_file_exists, read_pid_file};
+use nanobook_broker::Broker;
+use nanobook_broker::types::{BrokerOrderStatus, OrderState};
 use serde_json::Value;
 use std::path::Path;
 use std::thread;
@@ -202,6 +204,117 @@ pub const fn active_kill_workflow() -> KillWorkflow {
     {
         KillWorkflow::GracefulOnly
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForcefulCancelReport {
+    pub attempts: usize,
+    pub cancelled_order_ids: Vec<u64>,
+    pub remaining_order_ids: Vec<u64>,
+    pub errors: Vec<String>,
+}
+
+impl ForcefulCancelReport {
+    pub fn succeeded(&self) -> bool {
+        self.remaining_order_ids.is_empty()
+    }
+}
+
+fn cancellable_open_orders(orders: Vec<BrokerOrderStatus>) -> Vec<BrokerOrderStatus> {
+    orders
+        .into_iter()
+        .filter(|order| {
+            matches!(
+                order.status,
+                OrderState::Pending | OrderState::Submitted | OrderState::PartiallyFilled
+            ) && order.remaining_quantity > 0
+        })
+        .collect()
+}
+
+pub fn forceful_cancel_open_orders_with_retry<F>(
+    broker: &dyn Broker,
+    max_retries: usize,
+    mut sleep_before_retry: F,
+) -> ForcefulCancelReport
+where
+    F: FnMut(usize),
+{
+    let mut cancelled_order_ids = Vec::new();
+    let mut errors = Vec::new();
+    let mut remaining_order_ids = Vec::new();
+
+    for attempt in 0..=max_retries {
+        let open_orders = match broker.open_orders() {
+            Ok(orders) => cancellable_open_orders(orders),
+            Err(error) => {
+                errors.push(format!(
+                    "open_orders attempt {} failed: {error}",
+                    attempt + 1
+                ));
+                if attempt < max_retries {
+                    sleep_before_retry(attempt);
+                    continue;
+                }
+                return ForcefulCancelReport {
+                    attempts: attempt + 1,
+                    cancelled_order_ids,
+                    remaining_order_ids,
+                    errors,
+                };
+            }
+        };
+
+        if open_orders.is_empty() {
+            return ForcefulCancelReport {
+                attempts: attempt + 1,
+                cancelled_order_ids,
+                remaining_order_ids: Vec::new(),
+                errors,
+            };
+        }
+
+        remaining_order_ids = open_orders.iter().map(|order| order.id.0).collect();
+        for order in open_orders {
+            match broker.cancel_order(order.id) {
+                Ok(()) => {
+                    if !cancelled_order_ids.contains(&order.id.0) {
+                        cancelled_order_ids.push(order.id.0);
+                    }
+                }
+                Err(error) => errors.push(format!("cancel order {} failed: {error}", order.id.0)),
+            }
+        }
+
+        if attempt < max_retries {
+            sleep_before_retry(attempt);
+        }
+    }
+
+    let remaining_order_ids = match broker.open_orders() {
+        Ok(orders) => cancellable_open_orders(orders)
+            .into_iter()
+            .map(|order| order.id.0)
+            .collect(),
+        Err(error) => {
+            errors.push(format!("final open_orders verification failed: {error}"));
+            remaining_order_ids
+        }
+    };
+
+    ForcefulCancelReport {
+        attempts: max_retries + 1,
+        cancelled_order_ids,
+        remaining_order_ids,
+        errors,
+    }
+}
+
+pub fn forceful_cancel_open_orders(broker: &dyn Broker) -> ForcefulCancelReport {
+    forceful_cancel_open_orders_with_retry(broker, 5, |attempt| {
+        let backoff_secs = 1_u64 << attempt.min(4);
+        thread::sleep(Duration::from_secs(backoff_secs));
+    })
 }
 
 pub fn send_sigterm(pid: u32) -> Result<()> {
@@ -376,7 +489,105 @@ fn run_graceful_kill(config: &Config) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nanobook::Symbol;
+    use nanobook_broker::error::BrokerError;
+    use nanobook_broker::types::{
+        Account, BrokerOrder, BrokerOrderStatus, OrderId, OrderState, Position, Quote,
+    };
+    use std::cell::{Cell, RefCell};
+    use std::time::SystemTime;
     use tempfile::NamedTempFile;
+
+    struct TestBroker {
+        orders: RefCell<Vec<BrokerOrderStatus>>,
+        fail_open_attempts: Cell<usize>,
+        fail_cancel: Cell<bool>,
+    }
+
+    impl TestBroker {
+        fn with_orders(ids: &[u64]) -> Self {
+            Self {
+                orders: RefCell::new(
+                    ids.iter()
+                        .map(|id| BrokerOrderStatus {
+                            id: OrderId(*id),
+                            status: OrderState::Submitted,
+                            filled_quantity: 0,
+                            remaining_quantity: 1,
+                            avg_fill_price_cents: 0,
+                        })
+                        .collect(),
+                ),
+                fail_open_attempts: Cell::new(0),
+                fail_cancel: Cell::new(false),
+            }
+        }
+    }
+
+    impl Broker for TestBroker {
+        fn connect(&mut self) -> std::result::Result<(), BrokerError> {
+            Ok(())
+        }
+
+        fn disconnect(&mut self) -> std::result::Result<(), BrokerError> {
+            Ok(())
+        }
+
+        fn positions(&self) -> std::result::Result<Vec<Position>, BrokerError> {
+            Ok(Vec::new())
+        }
+
+        fn account(&self) -> std::result::Result<Account, BrokerError> {
+            Ok(Account {
+                equity_cents: 0,
+                buying_power_cents: 0,
+                cash_cents: 0,
+                gross_position_value_cents: 0,
+            })
+        }
+
+        fn submit_order(&self, _order: &BrokerOrder) -> std::result::Result<OrderId, BrokerError> {
+            Ok(OrderId(1))
+        }
+
+        fn order_status(&self, id: OrderId) -> std::result::Result<BrokerOrderStatus, BrokerError> {
+            Ok(BrokerOrderStatus {
+                id,
+                status: OrderState::Submitted,
+                filled_quantity: 0,
+                remaining_quantity: 1,
+                avg_fill_price_cents: 0,
+            })
+        }
+
+        fn open_orders(&self) -> std::result::Result<Vec<BrokerOrderStatus>, BrokerError> {
+            let remaining_failures = self.fail_open_attempts.get();
+            if remaining_failures > 0 {
+                self.fail_open_attempts.set(remaining_failures - 1);
+                return Err(BrokerError::Connection("open orders unavailable".into()));
+            }
+            Ok(self.orders.borrow().clone())
+        }
+
+        fn cancel_order(&self, id: OrderId) -> std::result::Result<(), BrokerError> {
+            if self.fail_cancel.get() {
+                return Err(BrokerError::Order("cancel failed".into()));
+            }
+            self.orders.borrow_mut().retain(|order| order.id != id);
+            Ok(())
+        }
+
+        fn quote(&self, symbol: &Symbol) -> std::result::Result<Quote, BrokerError> {
+            Ok(Quote {
+                symbol: *symbol,
+                bid_cents: 0,
+                ask_cents: 0,
+                last_cents: 0,
+                volume: 0,
+                timestamp: SystemTime::now(),
+            })
+        }
+    }
 
     #[test]
     #[cfg(not(feature = "guaranteed_kill_switch"))]
@@ -388,6 +599,52 @@ mod tests {
     #[cfg(feature = "guaranteed_kill_switch")]
     fn test_guaranteed_kill_switch_selects_two_phase_workflow() {
         assert_eq!(active_kill_workflow(), KillWorkflow::TwoPhase);
+    }
+
+    #[test]
+    fn forceful_cancel_cancels_all_open_orders() {
+        let broker = TestBroker::with_orders(&[10, 11]);
+        let report = forceful_cancel_open_orders_with_retry(&broker, 1, |_| {});
+
+        assert!(report.succeeded());
+        assert_eq!(report.cancelled_order_ids, vec![10, 11]);
+        assert!(broker.open_orders().unwrap_or_default().is_empty());
+    }
+
+    #[test]
+    fn forceful_cancel_retries_open_order_query_failure() {
+        let broker = TestBroker::with_orders(&[42]);
+        broker.fail_open_attempts.set(1);
+        let mut sleeps = Vec::new();
+        let report = forceful_cancel_open_orders_with_retry(&broker, 2, |attempt| {
+            sleeps.push(attempt);
+        });
+
+        assert!(report.succeeded());
+        assert_eq!(report.attempts, 3);
+        assert_eq!(sleeps, vec![0, 1]);
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|error| error.contains("open_orders"))
+        );
+    }
+
+    #[test]
+    fn forceful_cancel_reports_remaining_orders_after_cancel_failure() {
+        let broker = TestBroker::with_orders(&[99]);
+        broker.fail_cancel.set(true);
+        let report = forceful_cancel_open_orders_with_retry(&broker, 1, |_| {});
+
+        assert!(!report.succeeded());
+        assert_eq!(report.remaining_order_ids, vec![99]);
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|error| error.contains("cancel order 99"))
+        );
     }
 
     #[test]
