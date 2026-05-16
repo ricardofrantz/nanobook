@@ -3,8 +3,8 @@
 //! This is the main workflow that ties together all components.
 
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use std::time::{Duration, Instant};
 
@@ -17,10 +17,11 @@ use nanobook_broker::{BrokerSide, ClientOrderId};
 use rustc_hash::FxHashMap;
 
 use crate::audit::{self, AuditLog};
-use crate::broker::{as_connection_error, connect_ibkr, BrokerGateway};
+use crate::broker::{BrokerGateway, as_connection_error, connect_ibkr};
 use crate::config::Config;
 use crate::diff::{self, Action, CurrentPosition, RebalanceOrder};
 use crate::error::{Error, Result};
+use crate::observability::generate_correlation_id;
 use crate::reconcile;
 use crate::risk;
 use crate::target::TargetSpec;
@@ -164,6 +165,17 @@ pub fn derive_client_order_id(
 
 /// Execute a full rebalance run.
 pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()> {
+    let correlation_id = generate_correlation_id();
+    let run_span = tracing::info_span!(
+        "rebalance_run",
+        correlation_id = %correlation_id,
+        target_file = %opts.target_file,
+        account = %config.account.id,
+        cron_mode = opts.cron_mode,
+        dry_run = opts.dry_run,
+    );
+    let _run_guard = run_span.enter();
+
     let shutdown = ShutdownFlag::new();
     shutdown.install_sigterm_handler()?;
 
@@ -188,7 +200,16 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     }
 
     // 1. Connect to IBKR
-    let client = connect_ibkr(config)?;
+    let client = {
+        let _span = tracing::info_span!(
+            "connect_to_broker",
+            host = %config.connection.host,
+            port = config.connection.port,
+            client_id = config.connection.client_id,
+        )
+        .entered();
+        connect_ibkr(config)?
+    };
 
     // 2. Open audit log
     let audit_path = config.audit_path();
@@ -222,12 +243,16 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     };
 
     // 3. Fetch account summary
-    let summary = fetch_account_summary_with_write_ahead(
-        client.as_ref(),
-        &mut audit,
-        &mut checkpoint_sequence,
-        &target_spec_ref,
-    )?;
+    let summary = {
+        let _span =
+            tracing::info_span!("fetch_account_summary", account = %config.account.id).entered();
+        fetch_account_summary_with_write_ahead(
+            client.as_ref(),
+            &mut audit,
+            &mut checkpoint_sequence,
+            &target_spec_ref,
+        )?
+    };
     println!(
         "Account {} ({}): ${:.2} equity, ${:.2} cash",
         config.account.id,
@@ -237,13 +262,17 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     );
 
     // 4. Fetch current positions (convert from broker types to rebalancer types)
-    let broker_positions = fetch_positions_with_write_ahead(
-        client.as_ref(),
-        &mut audit,
-        &mut checkpoint_sequence,
-        &target_spec_ref,
-        summary.equity_cents,
-    )?;
+    let broker_positions = {
+        let _span =
+            tracing::info_span!("fetch_positions", equity_cents = summary.equity_cents).entered();
+        fetch_positions_with_write_ahead(
+            client.as_ref(),
+            &mut audit,
+            &mut checkpoint_sequence,
+            &target_spec_ref,
+            summary.equity_cents,
+        )?
+    };
     let positions = to_current_positions(&broker_positions);
 
     #[cfg(not(feature = "write_ahead_logging"))]
@@ -261,14 +290,17 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     let all_symbols = collect_all_symbols(&positions, target);
 
     // Fetch quotes and check staleness
-    let quotes = fetch_quotes_with_write_ahead(
-        client.as_ref(),
-        &mut audit,
-        &mut checkpoint_sequence,
-        &target_spec_ref,
-        &all_symbols,
-        config.execution.quote_staleness_threshold_sec,
-    )?;
+    let quotes = {
+        let _span = tracing::info_span!("fetch_quotes", symbol_count = all_symbols.len()).entered();
+        fetch_quotes_with_write_ahead(
+            client.as_ref(),
+            &mut audit,
+            &mut checkpoint_sequence,
+            &target_spec_ref,
+            &all_symbols,
+            config.execution.quote_staleness_threshold_sec,
+        )?
+    };
     for quote in &quotes {
         if quote.is_stale(config.execution.quote_staleness_threshold_sec) {
             let age_sec = quote.timestamp.elapsed().unwrap_or_default().as_secs();
@@ -298,14 +330,24 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     let targets = target.as_target_pairs();
     let min_trade_cents = (config.risk.min_trade_usd * 100.0) as i64;
 
-    let orders = diff::compute_diff(
-        summary.equity_cents,
-        &positions,
-        &targets,
-        &prices,
-        config.execution.limit_offset_bps,
-        min_trade_cents,
-    );
+    let orders = {
+        let _span = tracing::info_span!(
+            "compute_diff",
+            position_count = positions.len(),
+            target_count = targets.len(),
+            quote_count = prices.len(),
+            equity_cents = summary.equity_cents,
+        )
+        .entered();
+        diff::compute_diff(
+            summary.equity_cents,
+            &positions,
+            &targets,
+            &prices,
+            config.execution.limit_offset_bps,
+            min_trade_cents,
+        )
+    };
 
     enforce_max_orders_per_run(orders.len(), config.execution.max_orders_per_run)?;
 
@@ -343,14 +385,17 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
         positions.iter().map(|p| (p.symbol, p.quantity)).collect();
 
     let risk_config = apply_constraint_overrides(&config.risk, target);
-    let risk_report = risk::check_risk(
-        &orders,
-        summary.equity_cents,
-        &targets,
-        &prices,
-        &current_qty,
-        &risk_config,
-    );
+    let risk_report = {
+        let _span = tracing::info_span!("risk_check", order_count = orders.len()).entered();
+        risk::check_risk(
+            &orders,
+            summary.equity_cents,
+            &targets,
+            &prices,
+            &current_qty,
+            &risk_config,
+        )
+    };
 
     print!("{risk_report}");
     audit::log_risk_check(&mut audit, &risk_report)?;
@@ -393,6 +438,8 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
 
     // 11. Execute orders
     let timeout = Duration::from_secs(config.execution.order_timeout_secs);
+    let execute_span = tracing::info_span!("execute_orders", total_orders = orders.len());
+    let _execute_guard = execute_span.enter();
     let mut submitted = 0;
     let mut filled = 0;
     let mut failed = 0;
@@ -414,6 +461,17 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
             )?;
             return Ok(());
         }
+
+        let _order_span = tracing::info_span!(
+            "submit_order",
+            order_index = i + 1,
+            total_orders = orders.len(),
+            symbol = %order.symbol,
+            action = %order.action,
+            shares = order.shares,
+            limit_price_cents = order.limit_price_cents,
+        )
+        .entered();
 
         print!(
             "[{}/{}] {} {} {} @ ${:.2} ... ",
@@ -522,7 +580,10 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
         }
     }
 
+    drop(_execute_guard);
+
     // 12. Reconcile
+    let _reconcile_span = tracing::info_span!("reconcile", submitted, filled, failed).entered();
     info!("Running post-execution reconciliation...");
     let final_broker_positions = fetch_positions_with_write_ahead(
         client.as_ref(),
