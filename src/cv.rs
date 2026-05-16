@@ -39,6 +39,9 @@
 /// assert_eq!(splits[0].0, vec![0, 1, 2, 3]);
 /// assert_eq!(splits[0].1, vec![4, 5]);
 /// ```
+#[cfg(feature = "portfolio")]
+use crate::portfolio::metrics::{Metrics, compute_metrics};
+
 pub fn time_series_split(n_samples: usize, n_splits: usize) -> Vec<(Vec<usize>, Vec<usize>)> {
     if n_splits < 2 || n_samples < 2 {
         return vec![];
@@ -65,6 +68,76 @@ pub fn time_series_split(n_samples: usize, n_splits: usize) -> Vec<(Vec<usize>, 
     splits
 }
 
+/// One walk-forward train/test window with in-sample and out-of-sample metrics.
+#[cfg(feature = "portfolio")]
+#[derive(Debug, Clone)]
+pub struct WalkForwardWindow {
+    pub train_start: usize,
+    pub train_end: usize,
+    pub test_start: usize,
+    pub test_end: usize,
+    pub train_metrics: Option<Metrics>,
+    pub test_metrics: Option<Metrics>,
+}
+
+/// Window-based rolling walk-forward analysis over a return series.
+///
+/// Splits `returns` into `n_windows` contiguous windows. Each window is split
+/// into in-sample and out-of-sample segments by `train_pct`; metrics are computed
+/// independently for each side, so OOS metrics never include train observations.
+#[cfg(feature = "portfolio")]
+pub fn walkforward(
+    returns: &[f64],
+    n_windows: usize,
+    train_pct: f64,
+    periods_per_year: f64,
+    risk_free: f64,
+) -> Vec<WalkForwardWindow> {
+    if returns.is_empty()
+        || n_windows == 0
+        || !(0.0..1.0).contains(&train_pct)
+        || !train_pct.is_finite()
+    {
+        return Vec::new();
+    }
+
+    let window_size = returns.len() / n_windows;
+    if window_size < 2 {
+        return Vec::new();
+    }
+
+    let mut windows = Vec::with_capacity(n_windows);
+    for window_index in 0..n_windows {
+        let start = window_index * window_size;
+        let end = if window_index + 1 == n_windows {
+            returns.len()
+        } else {
+            start + window_size
+        };
+        if end <= start + 1 {
+            continue;
+        }
+
+        let len = end - start;
+        let train_len = ((len as f64) * train_pct).floor() as usize;
+        if train_len == 0 || train_len >= len {
+            continue;
+        }
+
+        let train_end = start + train_len;
+        windows.push(WalkForwardWindow {
+            train_start: start,
+            train_end,
+            test_start: train_end,
+            test_end: end,
+            train_metrics: compute_metrics(&returns[start..train_end], periods_per_year, risk_free),
+            test_metrics: compute_metrics(&returns[train_end..end], periods_per_year, risk_free),
+        });
+    }
+
+    windows
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -72,6 +145,32 @@ pub fn time_series_split(n_samples: usize, n_splits: usize) -> Vec<(Vec<usize>, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "portfolio")]
+    #[test]
+    fn walkforward_splits_train_and_oos_without_leakage() {
+        let returns = vec![0.01; 12];
+        let windows = walkforward(&returns, 3, 0.5, 252.0, 0.0);
+        assert_eq!(windows.len(), 3);
+        assert_eq!((windows[0].train_start, windows[0].train_end), (0, 2));
+        assert_eq!((windows[0].test_start, windows[0].test_end), (2, 4));
+        assert_eq!((windows[1].train_start, windows[1].train_end), (4, 6));
+        assert_eq!((windows[1].test_start, windows[1].test_end), (6, 8));
+        assert!(windows.iter().all(|w| w.train_end == w.test_start));
+        assert!(
+            windows
+                .iter()
+                .all(|w| w.train_metrics.is_some() && w.test_metrics.is_some())
+        );
+    }
+
+    #[cfg(feature = "portfolio")]
+    #[test]
+    fn walkforward_rejects_invalid_edges() {
+        assert!(walkforward(&[0.01, 0.02], 1, 0.0, 252.0, 0.0).is_empty());
+        assert!(walkforward(&[0.01, 0.02], 1, 1.0, 252.0, 0.0).is_empty());
+        assert!(walkforward(&[0.01], 4, 0.5, 252.0, 0.0).is_empty());
+    }
 
     #[test]
     fn basic_split() {

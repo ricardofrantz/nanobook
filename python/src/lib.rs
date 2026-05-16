@@ -104,6 +104,7 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // v0.8 — Cross-validation (sklearn replacement)
     m.add_function(wrap_pyfunction!(cv::py_time_series_split, m)?)?;
+    m.add_function(wrap_pyfunction!(cv::py_walkforward, m)?)?;
 
     // v0.8 — Rolling metrics (quantstats replacements)
     m.add_function(wrap_pyfunction!(metrics::py_rolling_sharpe, m)?)?;
