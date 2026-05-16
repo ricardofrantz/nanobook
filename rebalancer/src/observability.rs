@@ -51,6 +51,44 @@ pub fn init_tracing(log_dir: impl AsRef<Path>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::fmt::MakeWriter;
+
+    #[derive(Clone, Default)]
+    struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
+
+    struct CapturedWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl io::Write for CapturedWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for CapturedLogs {
+        type Writer = CapturedWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            CapturedWriter(Arc::clone(&self.0))
+        }
+    }
+
+    impl CapturedLogs {
+        fn lines(&self) -> Vec<serde_json::Value> {
+            let bytes = self.0.lock().unwrap().clone();
+            let text = String::from_utf8(bytes).unwrap();
+            text.lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect()
+        }
+    }
 
     #[test]
     fn correlation_id_generation_is_unique_and_prefixed() {
@@ -58,5 +96,54 @@ mod tests {
         let second = generate_correlation_id();
         assert!(first.starts_with("rebalance-"));
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn json_log_output_is_parseable() {
+        let captured = CapturedLogs::default();
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .with_writer(captured.clone())
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(answer = 42, "structured test event");
+        });
+
+        let lines = captured.lines();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["level"], "INFO");
+        assert_eq!(lines[0]["fields"]["message"], "structured test event");
+        assert_eq!(lines[0]["fields"]["answer"], 42);
+    }
+
+    #[test]
+    fn json_log_output_includes_span_context_and_correlation_id() {
+        let captured = CapturedLogs::default();
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .with_current_span(true)
+            .with_span_list(true)
+            .with_writer(captured.clone())
+            .finish();
+        let correlation_id = "rebalance-test-correlation";
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!(
+                "rebalance_run",
+                correlation_id,
+                target_file = "target.json",
+                account = "DU123",
+            );
+            let _guard = span.enter();
+            tracing::info!(phase = "risk_check", "inside run span");
+        });
+
+        let lines = captured.lines();
+        assert_eq!(lines.len(), 1);
+        let spans = lines[0]["spans"].as_array().unwrap();
+        assert_eq!(spans[0]["name"], "rebalance_run");
+        assert_eq!(spans[0]["correlation_id"], correlation_id);
+        assert_eq!(lines[0]["fields"]["phase"], "risk_check");
     }
 }
