@@ -19,6 +19,7 @@ mod stats;
 mod strategy;
 mod sweep;
 mod types;
+mod volatility;
 
 use pyo3::prelude::*;
 
@@ -111,6 +112,7 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // v0.8 — Rolling metrics (quantstats replacements)
     m.add_function(wrap_pyfunction!(metrics::py_rolling_sharpe, m)?)?;
     m.add_function(wrap_pyfunction!(metrics::py_rolling_volatility, m)?)?;
+    m.add_function(wrap_pyfunction!(volatility::py_realized_vol, m)?)?;
 
     // v0.9 — capability probing and new compute APIs
     m.add_function(wrap_pyfunction!(capabilities, m)?)?;

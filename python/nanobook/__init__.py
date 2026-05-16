@@ -59,6 +59,10 @@ def wilder_atr(high, low, close, period=14):
     return py_wilder_atr(high, low, close, period)
 
 
+def realized_vol(open, high, low, close, method="close_to_close"):
+    return py_realized_vol(open, high, low, close, method)
+
+
 def drawdown_series(equity):
     return py_drawdown_series(equity)
 

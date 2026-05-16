@@ -177,6 +177,7 @@ pub mod stop;
 mod tif;
 mod trade;
 mod types;
+pub mod volatility;
 
 // Re-export public API
 pub use book::OrderBook;
