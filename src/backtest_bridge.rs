@@ -64,6 +64,23 @@ pub struct BacktestStopEvent {
     pub reason: &'static str,
 }
 
+/// Trade lifecycle detected from target-weight transitions.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttributionTrade {
+    pub symbol: Symbol,
+    pub entry_index: usize,
+    pub exit_index: Option<usize>,
+    pub entry_weight: f64,
+    pub exit_weight: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttributionResult {
+    pub contributions: Vec<Vec<(Symbol, f64)>>,
+    pub cumulative_contributions: Vec<Vec<(Symbol, f64)>>,
+    pub trades: Vec<AttributionTrade>,
+}
+
 /// Result of a backtest simulation.
 #[derive(Clone, Debug)]
 pub struct BacktestBridgeResult {
@@ -215,6 +232,116 @@ pub fn backtest_weights_with_options(
         holdings,
         symbol_returns,
         stop_events,
+    }
+}
+
+/// Decompose a weight/return schedule into per-symbol contributions and trades.
+///
+/// Each period contribution is `weight * period_return` for that symbol. Cumulative
+/// contribution is a simple running sum per symbol. Trade events are derived from
+/// target-weight transitions: zero→non-zero opens a trade, non-zero→zero closes it.
+pub fn decompose_backtest(
+    weight_schedule: &[Vec<(Symbol, f64)>],
+    return_schedule: &[Vec<(Symbol, f64)>],
+) -> AttributionResult {
+    if weight_schedule.len() != return_schedule.len() {
+        return AttributionResult {
+            contributions: Vec::new(),
+            cumulative_contributions: Vec::new(),
+            trades: Vec::new(),
+        };
+    }
+
+    let mut cumulative: HashMap<Symbol, f64> = HashMap::new();
+    let mut previous_weights: HashMap<Symbol, f64> = HashMap::new();
+    let mut open_trades: HashMap<Symbol, (usize, f64)> = HashMap::new();
+    let mut contributions = Vec::with_capacity(weight_schedule.len());
+    let mut cumulative_contributions = Vec::with_capacity(weight_schedule.len());
+    let mut trades = Vec::new();
+
+    for (period_index, (weights, returns)) in
+        weight_schedule.iter().zip(return_schedule).enumerate()
+    {
+        let weight_map: HashMap<Symbol, f64> = weights.iter().copied().collect();
+        let return_map: HashMap<Symbol, f64> = returns.iter().copied().collect();
+        let mut symbols: Vec<Symbol> = weight_map
+            .keys()
+            .chain(return_map.keys())
+            .chain(previous_weights.keys())
+            .copied()
+            .collect();
+        symbols.sort_unstable();
+        symbols.dedup();
+
+        let mut period_contrib = Vec::new();
+        let mut period_cumulative = Vec::new();
+
+        for symbol in symbols {
+            let weight = weight_map
+                .get(&symbol)
+                .copied()
+                .filter(|value| value.is_finite())
+                .unwrap_or(0.0);
+            let previous = previous_weights
+                .get(&symbol)
+                .copied()
+                .filter(|value| value.is_finite())
+                .unwrap_or(0.0);
+
+            if previous == 0.0 && weight != 0.0 {
+                open_trades.insert(symbol, (period_index, weight));
+            } else if previous != 0.0 && weight == 0.0 {
+                if let Some((entry_index, entry_weight)) = open_trades.remove(&symbol) {
+                    trades.push(AttributionTrade {
+                        symbol,
+                        entry_index,
+                        exit_index: Some(period_index),
+                        entry_weight,
+                        exit_weight: previous,
+                    });
+                }
+            }
+
+            let period_return = return_map
+                .get(&symbol)
+                .copied()
+                .filter(|value| value.is_finite())
+                .unwrap_or(0.0);
+            let contribution = weight * period_return;
+            if contribution != 0.0 || weight != 0.0 || previous != 0.0 {
+                let running = cumulative.entry(symbol).or_insert(0.0);
+                *running += contribution;
+                period_contrib.push((symbol, contribution));
+                period_cumulative.push((symbol, *running));
+            }
+        }
+
+        period_contrib.sort_by_key(|(symbol, _)| *symbol);
+        period_cumulative.sort_by_key(|(symbol, _)| *symbol);
+        contributions.push(period_contrib);
+        cumulative_contributions.push(period_cumulative);
+        previous_weights = weight_map;
+    }
+
+    for (symbol, (entry_index, entry_weight)) in open_trades {
+        let exit_weight = previous_weights
+            .get(&symbol)
+            .copied()
+            .unwrap_or(entry_weight);
+        trades.push(AttributionTrade {
+            symbol,
+            entry_index,
+            exit_index: None,
+            entry_weight,
+            exit_weight,
+        });
+    }
+    trades.sort_by_key(|trade| (trade.entry_index, trade.symbol));
+
+    AttributionResult {
+        contributions,
+        cumulative_contributions,
+        trades,
     }
 }
 
@@ -446,6 +573,99 @@ mod tests {
     }
     fn msft() -> Symbol {
         Symbol::new("MSFT")
+    }
+
+    #[test]
+    fn decompose_backtest_computes_contribution_and_cumulative_sum() {
+        let weights = vec![
+            vec![(aapl(), 0.6), (msft(), 0.4)],
+            vec![(aapl(), 0.5), (msft(), 0.5)],
+        ];
+        let returns = vec![
+            vec![(aapl(), 0.10), (msft(), -0.05)],
+            vec![(aapl(), 0.02), (msft(), 0.04)],
+        ];
+
+        let result = decompose_backtest(&weights, &returns);
+
+        assert_eq!(
+            result.contributions[0],
+            vec![(aapl(), 0.06), (msft(), -0.020000000000000004)]
+        );
+        assert_eq!(
+            result.contributions[1],
+            vec![(aapl(), 0.01), (msft(), 0.02)]
+        );
+        assert!((result.cumulative_contributions[1][0].1 - 0.07).abs() < 1e-12);
+        assert!((result.cumulative_contributions[1][1].1 - 0.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn decompose_backtest_detects_entries_exits_and_open_trades() {
+        let weights = vec![
+            vec![(aapl(), 1.0)],
+            vec![(aapl(), 0.5), (msft(), 0.5)],
+            vec![(msft(), 1.0)],
+        ];
+        let returns = vec![
+            vec![(aapl(), 0.01)],
+            vec![(aapl(), 0.01), (msft(), 0.02)],
+            vec![(msft(), 0.03)],
+        ];
+
+        let result = decompose_backtest(&weights, &returns);
+
+        assert!(result.trades.iter().any(|trade| {
+            trade.symbol == aapl()
+                && trade.entry_index == 0
+                && trade.exit_index == Some(2)
+                && trade.entry_weight == 1.0
+                && trade.exit_weight == 0.5
+        }));
+        assert!(result.trades.iter().any(|trade| {
+            trade.symbol == msft() && trade.entry_index == 1 && trade.exit_index.is_none()
+        }));
+    }
+
+    #[test]
+    fn decompose_backtest_rejects_mismatched_lengths_with_empty_result() {
+        let result = decompose_backtest(&[vec![(aapl(), 1.0)]], &[]);
+        assert!(result.contributions.is_empty());
+        assert!(result.cumulative_contributions.is_empty());
+        assert!(result.trades.is_empty());
+    }
+
+    #[test]
+    fn decompose_backtest_integrates_with_backtest_weights_outputs() {
+        let weights = vec![
+            vec![(aapl(), 1.0)],
+            vec![(aapl(), 1.0)],
+            vec![(aapl(), 1.0)],
+        ];
+        let prices = vec![
+            vec![(aapl(), 100_00)],
+            vec![(aapl(), 110_00)],
+            vec![(aapl(), 99_00)],
+        ];
+        let backtest = backtest_weights(&weights, &prices, 1_000_000_00, 0, 252.0, 0.0);
+
+        let attribution = decompose_backtest(&backtest.holdings, &backtest.symbol_returns);
+
+        for (period, contributions) in attribution.contributions.iter().enumerate() {
+            let summed: f64 = contributions.iter().map(|(_, value)| value).sum();
+            assert!((summed - backtest.returns[period]).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn decompose_backtest_treats_non_finite_returns_as_zero() {
+        let weights = vec![vec![(aapl(), 1.0)]];
+        let returns = vec![vec![(aapl(), f64::NAN)]];
+
+        let result = decompose_backtest(&weights, &returns);
+
+        assert_eq!(result.contributions, vec![vec![(aapl(), 0.0)]]);
+        assert_eq!(result.cumulative_contributions, vec![vec![(aapl(), 0.0)]]);
     }
 
     #[test]
@@ -726,8 +946,8 @@ mod tests {
     #[test]
     fn position_flip_resets_stop_tracker() {
         let weights = vec![
-            vec![(aapl(), 1.0)],   // long
-            vec![(aapl(), -1.0)],  // flip to short
+            vec![(aapl(), 1.0)],  // long
+            vec![(aapl(), -1.0)], // flip to short
             vec![(aapl(), -1.0)],
         ];
         let prices = vec![

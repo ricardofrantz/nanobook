@@ -124,6 +124,74 @@ pub fn backtest_weights(
     Ok(dict.into_any().unbind())
 }
 
+/// Decompose a weight/return schedule into per-symbol contribution curves and trades.
+#[pyfunction]
+pub fn py_decompose_backtest(
+    py: Python<'_>,
+    weight_schedule: Vec<Vec<(String, f64)>>,
+    return_schedule: Vec<Vec<(String, f64)>>,
+) -> PyResult<Py<PyAny>> {
+    let rust_weights: Vec<Vec<(nanobook::Symbol, f64)>> = weight_schedule
+        .iter()
+        .map(|period| {
+            period
+                .iter()
+                .map(|(s, w)| Ok((parse_symbol(s)?, *w)))
+                .collect::<PyResult<Vec<_>>>()
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+    let rust_returns: Vec<Vec<(nanobook::Symbol, f64)>> = return_schedule
+        .iter()
+        .map(|period| {
+            period
+                .iter()
+                .map(|(s, r)| Ok((parse_symbol(s)?, *r)))
+                .collect::<PyResult<Vec<_>>>()
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+
+    let result = py.detach(|| backtest_bridge::decompose_backtest(&rust_weights, &rust_returns));
+    let dict = PyDict::new(py);
+
+    let contributions: Vec<Vec<(String, f64)>> = result
+        .contributions
+        .into_iter()
+        .map(|period| {
+            period
+                .into_iter()
+                .map(|(s, v)| (s.to_string(), v))
+                .collect()
+        })
+        .collect();
+    dict.set_item("contributions", contributions)?;
+
+    let cumulative_contributions: Vec<Vec<(String, f64)>> = result
+        .cumulative_contributions
+        .into_iter()
+        .map(|period| {
+            period
+                .into_iter()
+                .map(|(s, v)| (s.to_string(), v))
+                .collect()
+        })
+        .collect();
+    dict.set_item("cumulative_contributions", cumulative_contributions)?;
+
+    let trades = PyList::empty(py);
+    for trade in result.trades {
+        let item = PyDict::new(py);
+        item.set_item("symbol", trade.symbol.to_string())?;
+        item.set_item("entry_index", trade.entry_index)?;
+        item.set_item("exit_index", trade.exit_index)?;
+        item.set_item("entry_weight", trade.entry_weight)?;
+        item.set_item("exit_weight", trade.exit_weight)?;
+        trades.append(item)?;
+    }
+    dict.set_item("trades", trades)?;
+
+    Ok(dict.into_any().unbind())
+}
+
 /// Backward-compatible alias for older callers using ``py_backtest_weights``.
 #[pyfunction]
 #[pyo3(signature = (weight_schedule, price_schedule, initial_cash, cost_bps, periods_per_year=252.0, risk_free=0.0, stop_cfg=None))]

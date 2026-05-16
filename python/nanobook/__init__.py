@@ -31,6 +31,10 @@ def backtest_weights(
     )
 
 
+def decompose_backtest(weight_schedule, return_schedule):
+    return py_decompose_backtest(weight_schedule, return_schedule)
+
+
 def garch_ewma_forecast(returns, p=1, q=1, mean="zero"):
     return py_garch_ewma_forecast(returns, p, q, mean)
 
