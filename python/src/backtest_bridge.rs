@@ -192,6 +192,91 @@ pub fn py_decompose_backtest(
     Ok(dict.into_any().unbind())
 }
 
+/// Build a reporting payload from ``backtest_weights`` output.
+#[pyfunction]
+#[pyo3(signature = (backtest_result, rolling_window=63, periods_per_year=252))]
+pub fn py_tear_sheet(
+    py: Python<'_>,
+    backtest_result: Bound<'_, PyDict>,
+    rolling_window: usize,
+    periods_per_year: usize,
+) -> PyResult<Py<PyAny>> {
+    let returns: Vec<f64> = backtest_result
+        .get_item("returns")?
+        .ok_or_else(|| PyValueError::new_err("backtest_result missing returns"))?
+        .extract()?;
+    let equity_curve: Vec<i64> = backtest_result
+        .get_item("equity_curve")?
+        .ok_or_else(|| PyValueError::new_err("backtest_result missing equity_curve"))?
+        .extract()?;
+    let holdings_raw: Vec<Vec<(String, f64)>> = backtest_result
+        .get_item("holdings")?
+        .ok_or_else(|| PyValueError::new_err("backtest_result missing holdings"))?
+        .extract()?;
+    let symbol_returns_raw: Vec<Vec<(String, f64)>> = backtest_result
+        .get_item("symbol_returns")?
+        .ok_or_else(|| PyValueError::new_err("backtest_result missing symbol_returns"))?
+        .extract()?;
+
+    let holdings = holdings_raw
+        .iter()
+        .map(|period| {
+            period
+                .iter()
+                .map(|(s, w)| Ok((parse_symbol(s)?, *w)))
+                .collect::<PyResult<Vec<_>>>()
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+    let symbol_returns = symbol_returns_raw
+        .iter()
+        .map(|period| {
+            period
+                .iter()
+                .map(|(s, r)| Ok((parse_symbol(s)?, *r)))
+                .collect::<PyResult<Vec<_>>>()
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+
+    let result = backtest_bridge::BacktestBridgeResult {
+        returns,
+        equity_curve,
+        final_cash: backtest_result
+            .get_item("final_cash")?
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(0),
+        metrics: None,
+        holdings,
+        symbol_returns,
+        stop_events: Vec::new(),
+    };
+    let sheet =
+        py.detach(|| backtest_bridge::tear_sheet(&result, rolling_window, periods_per_year));
+
+    let dict = PyDict::new(py);
+    dict.set_item("monthly_returns", sheet.monthly_returns)?;
+    dict.set_item("rolling_sharpe", sheet.rolling_sharpe)?;
+    let trade_analytics = PyDict::new(py);
+    trade_analytics.set_item("trade_count", sheet.trade_analytics.trade_count)?;
+    trade_analytics.set_item("open_trade_count", sheet.trade_analytics.open_trade_count)?;
+    trade_analytics.set_item(
+        "closed_trade_count",
+        sheet.trade_analytics.closed_trade_count,
+    )?;
+    dict.set_item("trade_analytics", trade_analytics)?;
+    let drawdowns = PyList::empty(py);
+    for event in sheet.drawdown_events {
+        let item = PyDict::new(py);
+        item.set_item("drawdown_pct", event.drawdown_pct)?;
+        item.set_item("underwater_periods", event.underwater_periods)?;
+        item.set_item("peak_index", event.peak_index)?;
+        item.set_item("trough_index", event.trough_index)?;
+        item.set_item("recovery_index", event.recovery_index)?;
+        drawdowns.append(item)?;
+    }
+    dict.set_item("drawdown_events", drawdowns)?;
+    Ok(dict.into_any().unbind())
+}
+
 /// Backward-compatible alias for older callers using ``py_backtest_weights``.
 #[pyfunction]
 #[pyo3(signature = (weight_schedule, price_schedule, initial_cash, cost_bps, periods_per_year=252.0, risk_free=0.0, stop_cfg=None))]

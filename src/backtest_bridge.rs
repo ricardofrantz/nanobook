@@ -5,7 +5,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::portfolio::metrics::{Metrics, compute_metrics};
+use crate::portfolio::metrics::{
+    DrawdownEvent, Metrics, compute_metrics, drawdown_series, rolling_sharpe,
+};
 use crate::portfolio::{CostModel, Portfolio};
 use crate::types::Symbol;
 
@@ -81,8 +83,22 @@ pub struct AttributionResult {
     pub trades: Vec<AttributionTrade>,
 }
 
-/// Result of a backtest simulation.
-#[derive(Clone, Debug)]
+/// Aggregate trade lifecycle counts for reporting.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TradeAnalytics {
+    pub trade_count: usize,
+    pub open_trade_count: usize,
+    pub closed_trade_count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct TearSheet {
+    pub monthly_returns: Vec<Vec<f64>>,
+    pub rolling_sharpe: Vec<f64>,
+    pub drawdown_events: Vec<DrawdownEvent>,
+    pub trade_analytics: TradeAnalytics,
+}
+
 pub struct BacktestBridgeResult {
     /// Per-period returns.
     pub returns: Vec<f64>,
@@ -240,6 +256,50 @@ pub fn backtest_weights_with_options(
 /// Each period contribution is `weight * period_return` for that symbol. Cumulative
 /// contribution is a simple running sum per symbol. Trade events are derived from
 /// target-weight transitions: zero→non-zero opens a trade, non-zero→zero closes it.
+pub fn tear_sheet(
+    result: &BacktestBridgeResult,
+    rolling_window: usize,
+    periods_per_year: usize,
+) -> TearSheet {
+    let attribution = decompose_backtest(&result.holdings, &result.symbol_returns);
+    let equity: Vec<f64> = result
+        .equity_curve
+        .iter()
+        .map(|value| *value as f64)
+        .collect();
+    TearSheet {
+        monthly_returns: monthly_return_matrix(&result.returns, 21),
+        rolling_sharpe: rolling_sharpe(&result.returns, rolling_window, periods_per_year),
+        drawdown_events: drawdown_series(&equity),
+        trade_analytics: TradeAnalytics {
+            trade_count: attribution.trades.len(),
+            open_trade_count: attribution
+                .trades
+                .iter()
+                .filter(|trade| trade.exit_index.is_none())
+                .count(),
+            closed_trade_count: attribution
+                .trades
+                .iter()
+                .filter(|trade| trade.exit_index.is_some())
+                .count(),
+        },
+    }
+}
+
+fn monthly_return_matrix(returns: &[f64], periods_per_month: usize) -> Vec<Vec<f64>> {
+    if periods_per_month == 0 {
+        return Vec::new();
+    }
+    returns
+        .chunks(periods_per_month)
+        .map(|chunk| chunk.iter().fold(1.0, |acc, value| acc * (1.0 + value)) - 1.0)
+        .collect::<Vec<_>>()
+        .chunks(12)
+        .map(|year| year.to_vec())
+        .collect()
+}
+
 pub fn decompose_backtest(
     weight_schedule: &[Vec<(Symbol, f64)>],
     return_schedule: &[Vec<(Symbol, f64)>],
@@ -573,6 +633,30 @@ mod tests {
     }
     fn msft() -> Symbol {
         Symbol::new("MSFT")
+    }
+
+    #[test]
+    fn tear_sheet_contains_reporting_payload() {
+        let weights = vec![vec![(aapl(), 1.0)]; 24];
+        let prices: Vec<Vec<(Symbol, i64)>> = (0..24)
+            .map(|i| vec![(aapl(), 100_00 + i as i64 * 100)])
+            .collect();
+        let result = backtest_weights(&weights, &prices, 1_000_000_00, 0, 252.0, 0.0);
+
+        let sheet = tear_sheet(&result, 5, 252);
+
+        assert_eq!(sheet.monthly_returns.len(), 1);
+        assert_eq!(sheet.monthly_returns[0].len(), 2);
+        assert_eq!(sheet.rolling_sharpe.len(), result.returns.len());
+        assert!(sheet.trade_analytics.trade_count >= 1);
+    }
+
+    #[test]
+    fn monthly_return_matrix_compounds_chunks() {
+        let matrix = monthly_return_matrix(&[0.1, 0.1, -0.1], 2);
+        assert_eq!(matrix.len(), 1);
+        assert!((matrix[0][0] - 0.21).abs() < 1e-12);
+        assert!((matrix[0][1] + 0.1).abs() < 1e-12);
     }
 
     #[test]

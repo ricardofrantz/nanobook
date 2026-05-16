@@ -87,6 +87,7 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(backtest_bridge::backtest_weights, m)?)?;
     m.add_function(wrap_pyfunction!(backtest_bridge::py_backtest_weights, m)?)?;
     m.add_function(wrap_pyfunction!(backtest_bridge::py_decompose_backtest, m)?)?;
+    m.add_function(wrap_pyfunction!(backtest_bridge::py_tear_sheet, m)?)?;
     #[cfg(feature = "itch")]
     m.add_function(wrap_pyfunction!(itch::parse_itch, m)?)?;
 

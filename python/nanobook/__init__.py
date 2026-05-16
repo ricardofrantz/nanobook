@@ -35,6 +35,10 @@ def decompose_backtest(weight_schedule, return_schedule):
     return py_decompose_backtest(weight_schedule, return_schedule)
 
 
+def tear_sheet(backtest_result, rolling_window=63, periods_per_year=252):
+    return py_tear_sheet(backtest_result, rolling_window, periods_per_year)
+
+
 def sma(close, period):
     return py_sma(close, period)
 
