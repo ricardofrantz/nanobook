@@ -304,8 +304,9 @@ fn _path_exists(path: &Path) -> bool {
 mod tests {
     use super::{
         ValidationIssue, format_validation_issues, should_run_startup_validation,
-        validate_available_log_space, validate_file_permissions, validate_network_timeout,
-        validate_risk_limits, validate_static, validate_static_with_source,
+        validate_available_log_space, validate_broker_connectivity, validate_file_permissions,
+        validate_network_timeout, validate_required_fields, validate_risk_limits, validate_static,
+        validate_static_or_error, validate_static_with_source,
     };
     use crate::config::{
         AccountConfig, AccountType, Config, ConnectionConfig, CostConfig, ExecutionConfig,
@@ -356,6 +357,22 @@ mod tests {
     }
 
     #[test]
+    fn required_fields_reject_missing_values() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let mut config = valid_config(dir.path());
+        config.connection.host.clear();
+        config.account.id.clear();
+        config.logging.dir.clear();
+
+        let issues = validate_required_fields(&config);
+
+        assert!(issues.iter().any(|i| i.field == "connection.host"));
+        assert!(issues.iter().any(|i| i.field == "account.id"));
+        assert!(issues.iter().any(|i| i.field == "logging.dir"));
+        Ok(())
+    }
+
+    #[test]
     fn risk_limits_reject_out_of_range_values() -> std::io::Result<()> {
         let dir = tempfile::tempdir()?;
         let mut config = valid_config(dir.path());
@@ -364,6 +381,23 @@ mod tests {
         let issues = validate_risk_limits(&config);
         assert!(issues.iter().any(|i| i.field == "risk.max_position_pct"));
         assert!(issues.iter().any(|i| i.field == "risk.max_leverage"));
+        Ok(())
+    }
+
+    #[test]
+    fn static_validation_collects_multiple_errors() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let mut config = valid_config(dir.path());
+        config.connection.host.clear();
+        config.risk.max_position_pct = 0.0;
+        config.connection.timeout_secs = 120;
+
+        let issues = validate_static(&config);
+
+        assert!(issues.iter().any(|i| i.field == "connection.host"));
+        assert!(issues.iter().any(|i| i.field == "risk.max_position_pct"));
+        assert!(issues.iter().any(|i| i.field == "connection.timeout_secs"));
+        assert!(validate_static_or_error(&config).is_err());
         Ok(())
     }
 
@@ -391,6 +425,44 @@ mod tests {
         let issues = validate_available_log_space(512, &config);
         assert_eq!(issues[0].field, "logging.dir");
         assert!(issues[0].suggestion.contains("1GB"));
+        Ok(())
+    }
+
+    #[test]
+    fn broker_connectivity_reports_resolution_failure() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let mut config = valid_config(dir.path());
+        config.connection.host = "invalid.invalid".into();
+
+        let issues = validate_broker_connectivity(&config);
+
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.field.starts_with("connection"))
+        );
+        assert!(
+            issues[0].suggestion.contains("connection") || issues[0].suggestion.contains("IBKR")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn broker_connectivity_accepts_open_tcp_port() -> std::io::Result<()> {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        let port = listener.local_addr()?.port();
+        let accept_thread = std::thread::spawn(move || {
+            let _ = listener.accept();
+        });
+        let dir = tempfile::tempdir()?;
+        let mut config = valid_config(dir.path());
+        config.connection.port = port;
+        config.connection.timeout_secs = 5;
+
+        let issues = validate_broker_connectivity(&config);
+        let _ = accept_thread.join();
+
+        assert!(issues.is_empty());
         Ok(())
     }
 
