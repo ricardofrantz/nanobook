@@ -8,13 +8,13 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use log::{error, info, warn};
 use nanobook::Symbol;
 use nanobook_broker::error::BrokerError;
 use nanobook_broker::ibkr::orders::{self, OrderOutcome};
 use nanobook_broker::types::{Account, Position, Quote};
 use nanobook_broker::{BrokerSide, ClientOrderId};
 use rustc_hash::FxHashMap;
+use tracing::{error, info, warn};
 
 use crate::audit::{self, AuditLog};
 use crate::broker::{BrokerGateway, as_connection_error, connect_ibkr};

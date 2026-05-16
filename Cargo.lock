@@ -1186,7 +1186,6 @@ dependencies = [
  "chrono",
  "clap",
  "dialoguer",
- "log",
  "nanobook",
  "nanobook-broker",
  "nanobook-risk",

@@ -6,8 +6,8 @@ use crate::diff::CurrentPosition;
 use crate::error::{Error, Result};
 use crate::target::TargetSpec;
 use nanobook::Symbol;
-use nanobook_broker::types::f64_cents_checked;
 use nanobook_broker::Broker;
+use nanobook_broker::types::f64_cents_checked;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "write_ahead_logging")]
 use std::time::Duration;
@@ -350,7 +350,7 @@ pub fn reconcile_order_intent(
                 // Retry on network failures
                 if attempt < MAX_RETRIES - 1 {
                     let delay_ms = BASE_DELAY_MS * 2_u64.pow(attempt as u32);
-                    log::warn!(
+                    tracing::warn!(
                         "Broker query failed (attempt {}/{}), retrying in {}ms: {}",
                         attempt + 1,
                         MAX_RETRIES,
@@ -413,7 +413,7 @@ pub fn reconcile_incomplete_intents(
             let symbol = &order.symbol;
             let quantity = order.shares;
 
-            log::info!(
+            tracing::info!(
                 "Reconciling incomplete intent for {} (client_order_id: {:?})",
                 symbol.as_str(),
                 order.client_order_id
@@ -422,7 +422,7 @@ pub fn reconcile_incomplete_intents(
             match reconcile_order_intent(broker, symbol, quantity) {
                 Ok(Some(broker_order_id)) => {
                     // Order found at broker - append OrderSubmitted event
-                    log::info!(
+                    tracing::info!(
                         "Order found at broker with ID {}, appending OrderSubmitted event",
                         broker_order_id
                     );
@@ -441,7 +441,7 @@ pub fn reconcile_incomplete_intents(
                 }
                 Ok(None) => {
                     // Order not found at broker - append OrderFailed event
-                    log::info!("Order not found at broker, appending OrderFailed event",);
+                    tracing::info!("Order not found at broker, appending OrderFailed event",);
                     let mut audit = AuditLog::open_in(audit_log_path, workdir)?;
                     audit.log_checkpoint(
                         Checkpoint::OrderFailed,
@@ -457,7 +457,7 @@ pub fn reconcile_incomplete_intents(
                 }
                 Err(e) => {
                     // Broker query failed - log error and continue
-                    log::error!(
+                    tracing::error!(
                         "Failed to reconcile intent for {} (client_order_id: {:?}): {}",
                         symbol.as_str(),
                         order.client_order_id,
@@ -469,7 +469,7 @@ pub fn reconcile_incomplete_intents(
         }
     }
 
-    log::info!(
+    tracing::info!(
         "Broker reconciliation complete: {} reconciled, {} failed",
         reconciled_count,
         failed_count

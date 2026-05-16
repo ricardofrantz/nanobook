@@ -55,11 +55,11 @@ use crate::audit::{AuditLog, log_kill_completed_with_summary, log_kill_requested
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::pid_file::{self, pid_file_exists, read_pid_file};
-use log::info;
 use serde_json::Value;
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
+use tracing::info;
 
 /// Represents a potentially dangling order.
 #[derive(Debug, Clone)]

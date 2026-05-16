@@ -17,8 +17,8 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use log::warn;
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use crate::clock_skew::{ClockSkewDetector, SkewResult};
 use crate::error::{Error, Result};
@@ -354,7 +354,7 @@ pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
             matches!(c, Checkpoint::OrderSubmitted) || matches!(c, Checkpoint::OrderFailed)
         });
         if !has_followup {
-            log::warn!(
+            tracing::warn!(
                 "Found OrderIntent checkpoint without OrderSubmitted or OrderFailed - this indicates an incomplete order submission that may need broker reconciliation"
             );
         }
@@ -371,7 +371,7 @@ pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
             .skip(intent_idx + 1)
             .any(|c| matches!(c, Checkpoint::PositionsResult));
         if !has_followup {
-            log::warn!(
+            tracing::warn!(
                 "Found PositionsIntent checkpoint without PositionsResult - this indicates an incomplete positions fetch that may need broker reconciliation"
             );
         }
@@ -388,7 +388,7 @@ pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
             .skip(intent_idx + 1)
             .any(|c| matches!(c, Checkpoint::QuotesResult));
         if !has_followup {
-            log::warn!(
+            tracing::warn!(
                 "Found QuotesIntent checkpoint without QuotesResult - this indicates an incomplete quotes fetch that may need broker reconciliation"
             );
         }
@@ -405,7 +405,7 @@ pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
             .skip(intent_idx + 1)
             .any(|c| matches!(c, Checkpoint::AccountSummaryResult));
         if !has_followup {
-            log::warn!(
+            tracing::warn!(
                 "Found AccountSummaryIntent checkpoint without AccountSummaryResult - this indicates an incomplete account summary fetch that may need broker reconciliation"
             );
         }
@@ -422,7 +422,7 @@ pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
             .skip(intent_idx + 1)
             .any(|c| matches!(c, Checkpoint::CancelResult));
         if !has_followup {
-            log::warn!(
+            tracing::warn!(
                 "Found CancelIntent checkpoint without CancelResult - this indicates an incomplete order cancellation that may need broker reconciliation"
             );
         }
