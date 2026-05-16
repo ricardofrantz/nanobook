@@ -1429,6 +1429,23 @@ pub fn log_order_filled_checkpoint(
     )
 }
 
+/// Convenience: log graceful kill completion.
+pub fn log_kill_completed(
+    audit: &mut AuditLog,
+    method: &str,
+    orders_cancelled_count: usize,
+    duration_seconds: f64,
+) -> Result<()> {
+    audit.log(
+        "kill_completed",
+        serde_json::json!({
+            "method": method,
+            "orders_cancelled_count": orders_cancelled_count,
+            "duration_seconds": duration_seconds,
+        }),
+    )
+}
+
 /// Convenience: log run completion.
 pub fn log_run_completed(
     audit: &mut AuditLog,

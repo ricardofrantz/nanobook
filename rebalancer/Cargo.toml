@@ -33,6 +33,7 @@ rustc-hash = "2.1"
 anyhow = "1.0"
 dialoguer = "0.11"
 nix = { version = "0.29", features = ["signal"] }
+signal-hook = "0.3"
 
 [features]
 default = []

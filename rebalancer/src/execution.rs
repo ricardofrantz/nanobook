@@ -2,7 +2,11 @@
 //!
 //! This is the main workflow that ties together all components.
 
-use std::time::Duration;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::time::{Duration, Instant};
 
 use log::{error, info, warn};
 use nanobook::Symbol;
@@ -99,6 +103,47 @@ fn next_checkpoint_sequence(sequence_number: &mut u64) -> u64 {
     *sequence_number
 }
 
+/// Process-wide graceful shutdown flag set by SIGTERM.
+#[derive(Debug, Clone)]
+pub struct ShutdownFlag {
+    requested: Arc<AtomicBool>,
+}
+
+impl ShutdownFlag {
+    pub fn new() -> Self {
+        Self {
+            requested: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub fn install_sigterm_handler(&self) -> Result<()> {
+        #[cfg(unix)]
+        {
+            signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&self.requested))
+                .map_err(|e| Error::Config(format!("failed to install SIGTERM handler: {e}")))?;
+        }
+        Ok(())
+    }
+
+    pub fn request_shutdown(&self) {
+        self.requested.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_requested(&self) -> bool {
+        self.requested.load(Ordering::SeqCst)
+    }
+}
+
+impl Default for ShutdownFlag {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub fn remaining_orders_after(current_index: usize, total_orders: usize) -> usize {
+    total_orders.saturating_sub(current_index.saturating_add(1))
+}
+
 /// Derive the stable broker-side idempotency key for a computed rebalance order.
 pub fn derive_client_order_id(
     target: &TargetSpec,
@@ -119,6 +164,9 @@ pub fn derive_client_order_id(
 
 /// Execute a full rebalance run.
 pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()> {
+    let shutdown = ShutdownFlag::new();
+    shutdown.install_sigterm_handler()?;
+
     // In cron mode, check idempotency before connecting
     if opts.cron_mode {
         let window_id = target.window_id();
@@ -348,8 +396,25 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     let mut submitted = 0;
     let mut filled = 0;
     let mut failed = 0;
+    let shutdown_started_at = Instant::now();
 
     for (i, order) in orders.iter().enumerate() {
+        if shutdown.is_requested() {
+            let cancelled = orders.len().saturating_sub(i);
+            warn!(
+                "Graceful shutdown requested before order {}; skipping {} queued orders",
+                i + 1,
+                cancelled
+            );
+            audit::log_kill_completed(
+                &mut audit,
+                "graceful",
+                cancelled,
+                shutdown_started_at.elapsed().as_secs_f64(),
+            )?;
+            return Ok(());
+        }
+
         print!(
             "[{}/{}] {} {} {} @ ${:.2} ... ",
             i + 1,
@@ -375,6 +440,7 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
             &target_spec_ref,
         );
         checkpoint_sequence = checkpoint_sequence.max(order_sequence.saturating_add(1));
+        let mut current_order_to_cancel = None;
 
         match execution_result {
             Ok(result) => {
@@ -404,6 +470,7 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
                             "Partial fill for {}: {}/{}",
                             order.symbol, result.filled_shares, order.shares
                         );
+                        current_order_to_cancel = Some(result.order_id);
                         filled += 1; // count as filled (partially)
                     }
                     OrderOutcome::Cancelled => {
@@ -421,6 +488,32 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
                 error!("Order execution failed for {}: {e}", order.symbol);
                 failed += 1;
             }
+        }
+
+        if shutdown.is_requested() {
+            let mut cancelled = remaining_orders_after(i, orders.len());
+            if let Some(order_id) = current_order_to_cancel {
+                cancel_order_with_write_ahead(
+                    client.as_ref(),
+                    &mut audit,
+                    &mut checkpoint_sequence,
+                    u64::try_from(order_id).unwrap_or_default(),
+                    "graceful_shutdown_partial_fill",
+                )?;
+                cancelled += 1;
+            }
+            warn!(
+                "Graceful shutdown requested after order {}; cancelling/skipping {} remaining orders",
+                i + 1,
+                cancelled
+            );
+            audit::log_kill_completed(
+                &mut audit,
+                "graceful",
+                cancelled,
+                shutdown_started_at.elapsed().as_secs_f64(),
+            )?;
+            return Ok(());
         }
 
         // Rate limiting between orders
@@ -1094,6 +1187,30 @@ mod tests {
         assert!(!is_transient_error(&BrokerError::Other(
             "unknown error".to_string()
         )));
+    }
+
+    #[test]
+    fn test_shutdown_flag_sets_and_reads() {
+        let shutdown = ShutdownFlag::new();
+        assert!(!shutdown.is_requested());
+        shutdown.request_shutdown();
+        assert!(shutdown.is_requested());
+    }
+
+    #[test]
+    fn test_multiple_shutdown_requests_are_idempotent() {
+        let shutdown = ShutdownFlag::new();
+        shutdown.request_shutdown();
+        shutdown.request_shutdown();
+        assert!(shutdown.is_requested());
+    }
+
+    #[test]
+    fn test_remaining_orders_after_current_order() {
+        assert_eq!(remaining_orders_after(0, 3), 2);
+        assert_eq!(remaining_orders_after(1, 3), 1);
+        assert_eq!(remaining_orders_after(2, 3), 0);
+        assert_eq!(remaining_orders_after(3, 3), 0);
     }
 
     #[test]

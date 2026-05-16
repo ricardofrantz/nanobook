@@ -2,6 +2,8 @@
 
 use std::fs;
 
+use nanobook_rebalancer::audit::{log_kill_completed, parse_audit_events, AuditLog};
+
 #[test]
 fn test_verify_no_dangling_orders_integration() {
     // Test order verification with a realistic audit log
@@ -41,4 +43,21 @@ fn test_verify_dangling_orders_integration() {
     assert_eq!(dangling.len(), 1);
     assert_eq!(dangling[0].symbol, "MSFT");
     assert_eq!(dangling[0].ibkr_id, 2);
+}
+
+#[test]
+fn test_kill_completed_audit_event_includes_graceful_shutdown_fields() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let audit_path = temp_dir.path().join("audit.jsonl");
+    let mut audit = AuditLog::open_in(&audit_path, temp_dir.path()).unwrap();
+
+    log_kill_completed(&mut audit, "graceful", 3, 1.25).unwrap();
+    drop(audit);
+
+    let events = parse_audit_events(&audit_path).unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event, "kill_completed");
+    assert_eq!(events[0].data["method"], "graceful");
+    assert_eq!(events[0].data["orders_cancelled_count"], 3);
+    assert_eq!(events[0].data["duration_seconds"], 1.25);
 }
