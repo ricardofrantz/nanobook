@@ -36,6 +36,7 @@ anyhow = "1.0"
 dialoguer = "0.11"
 nix = { version = "0.29", features = ["signal"] }
 signal-hook = "0.3"
+fs2 = "0.4"
 
 [features]
 default = []
