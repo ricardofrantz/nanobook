@@ -211,6 +211,101 @@ pub fn compute_metrics(returns: &[f64], periods_per_year: f64, risk_free: f64) -
     })
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DrawdownEvent {
+    pub drawdown_pct: f64,
+    pub underwater_periods: usize,
+    pub peak_index: usize,
+    pub trough_index: usize,
+    pub recovery_index: Option<usize>,
+}
+
+/// Detect drawdown events from an equity curve.
+pub fn drawdown_series(equity: &[f64]) -> Vec<DrawdownEvent> {
+    if equity.is_empty() {
+        return Vec::new();
+    }
+
+    let mut peak_index = 0usize;
+    let mut peak_value = equity[0];
+    let mut active_start: Option<usize> = None;
+    let mut trough_index = 0usize;
+    let mut max_dd = 0.0;
+    let mut events = Vec::new();
+
+    for (i, &value) in equity.iter().enumerate().skip(1) {
+        if value >= peak_value {
+            if let Some(start) = active_start.take() {
+                events.push(DrawdownEvent {
+                    drawdown_pct: max_dd,
+                    underwater_periods: i.saturating_sub(start),
+                    peak_index,
+                    trough_index,
+                    recovery_index: Some(i),
+                });
+            }
+            peak_index = i;
+            peak_value = value;
+            trough_index = i;
+            max_dd = 0.0;
+            continue;
+        }
+
+        if peak_value <= 0.0 {
+            continue;
+        }
+        let dd = (peak_value - value) / peak_value;
+        if active_start.is_none() {
+            active_start = Some(i);
+            trough_index = i;
+            max_dd = dd;
+        } else if dd > max_dd {
+            trough_index = i;
+            max_dd = dd;
+        }
+    }
+
+    if let Some(start) = active_start {
+        events.push(DrawdownEvent {
+            drawdown_pct: max_dd,
+            underwater_periods: equity.len().saturating_sub(start),
+            peak_index,
+            trough_index,
+            recovery_index: None,
+        });
+    }
+
+    events
+}
+
+/// Rolling maximum drawdown over an equity curve window.
+pub fn rolling_max_drawdown(equity: &[f64], window: usize) -> Vec<f64> {
+    let mut out = vec![f64::NAN; equity.len()];
+    if window == 0 || equity.len() < window {
+        return out;
+    }
+
+    for i in (window - 1)..equity.len() {
+        let slice = &equity[i + 1 - window..=i];
+        let peak = slice[0];
+        let mut running_peak = peak;
+        let mut max_dd = 0.0;
+        for &value in slice.iter().skip(1) {
+            if value > running_peak {
+                running_peak = value;
+            }
+            if running_peak > 0.0 {
+                let dd = (running_peak - value) / running_peak;
+                if dd > max_dd {
+                    max_dd = dd;
+                }
+            }
+        }
+        out[i] = max_dd;
+    }
+    out
+}
+
 /// Compute maximum drawdown from a return series.
 fn compute_max_drawdown(returns: &[f64]) -> f64 {
     let mut peak = 1.0_f64;
@@ -562,6 +657,33 @@ mod tests {
         // All winning
         assert_eq!(m.winning_periods, 12);
         assert_eq!(m.losing_periods, 0);
+    }
+
+    #[test]
+    fn drawdown_series_detects_recovered_and_open_events() {
+        let events = drawdown_series(&[100.0, 120.0, 90.0, 110.0, 130.0, 100.0]);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].peak_index, 1);
+        assert_eq!(events[0].trough_index, 2);
+        assert_eq!(events[0].recovery_index, Some(4));
+        assert!((events[0].drawdown_pct - 0.25).abs() < 1e-12);
+        assert_eq!(events[1].peak_index, 4);
+        assert_eq!(events[1].trough_index, 5);
+        assert_eq!(events[1].recovery_index, None);
+    }
+
+    #[test]
+    fn drawdown_series_empty_when_always_at_peak() {
+        assert!(drawdown_series(&[100.0, 101.0, 101.0, 102.0]).is_empty());
+    }
+
+    #[test]
+    fn rolling_max_drawdown_basic() {
+        let result = rolling_max_drawdown(&[100.0, 120.0, 90.0, 110.0], 3);
+        assert!(result[0].is_nan());
+        assert!(result[1].is_nan());
+        assert!((result[2] - 0.25).abs() < 1e-12);
+        assert!((result[3] - 0.25).abs() < 1e-12);
     }
 
     #[test]

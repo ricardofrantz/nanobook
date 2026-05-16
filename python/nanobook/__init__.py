@@ -59,6 +59,14 @@ def wilder_atr(high, low, close, period=14):
     return py_wilder_atr(high, low, close, period)
 
 
+def drawdown_series(equity):
+    return py_drawdown_series(equity)
+
+
+def rolling_max_drawdown(equity, window):
+    return py_rolling_max_drawdown(equity, window)
+
+
 def walkforward(returns, params=None, n_windows=5, train_pct=0.7, periods_per_year=252.0, risk_free=0.0):
     return py_walkforward(returns, params, n_windows, train_pct, periods_per_year, risk_free)
 

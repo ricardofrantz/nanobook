@@ -79,6 +79,8 @@ fn nanobook(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // v0.7 functions
     m.add_function(wrap_pyfunction!(metrics::py_compute_metrics, m)?)?;
+    m.add_function(wrap_pyfunction!(metrics::py_drawdown_series, m)?)?;
+    m.add_function(wrap_pyfunction!(metrics::py_rolling_max_drawdown, m)?)?;
     m.add_function(wrap_pyfunction!(sweep::py_sweep_equal_weight, m)?)?;
     m.add_function(wrap_pyfunction!(strategy::py_run_backtest, m)?)?;
     m.add_function(wrap_pyfunction!(backtest_bridge::backtest_weights, m)?)?;

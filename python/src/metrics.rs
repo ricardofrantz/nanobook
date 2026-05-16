@@ -1,5 +1,9 @@
-use nanobook::portfolio::metrics::{Metrics, compute_metrics, rolling_sharpe, rolling_volatility};
+use nanobook::portfolio::metrics::{
+    Metrics, compute_metrics, drawdown_series, rolling_max_drawdown, rolling_sharpe,
+    rolling_volatility,
+};
 use pyo3::prelude::*;
+use pyo3::types::{PyDict, PyList};
 
 /// Performance metrics for a return series.
 #[pyclass(name = "Metrics")]
@@ -97,6 +101,33 @@ pub fn py_compute_metrics(
     risk_free: f64,
 ) -> Option<PyMetrics> {
     compute_metrics(&returns, periods_per_year, risk_free).map(PyMetrics::from)
+}
+
+/// Detect drawdown events from an equity curve.
+#[pyfunction]
+pub fn py_drawdown_series(py: Python<'_>, equity: Vec<f64>) -> PyResult<Py<PyAny>> {
+    let events = drawdown_series(&equity);
+    let out = PyList::empty(py);
+    for event in events {
+        let item = PyDict::new(py);
+        item.set_item("drawdown_pct", event.drawdown_pct)?;
+        item.set_item("underwater_periods", event.underwater_periods)?;
+        item.set_item("underwater_days", event.underwater_periods)?;
+        item.set_item("peak_index", event.peak_index)?;
+        item.set_item("peak_date", event.peak_index)?;
+        item.set_item("trough_index", event.trough_index)?;
+        item.set_item("trough_date", event.trough_index)?;
+        item.set_item("recovery_index", event.recovery_index)?;
+        item.set_item("recovery_date", event.recovery_index)?;
+        out.append(item)?;
+    }
+    Ok(out.into_any().unbind())
+}
+
+/// Rolling maximum drawdown over an equity curve window.
+#[pyfunction]
+pub fn py_rolling_max_drawdown(equity: Vec<f64>, window: usize) -> Vec<f64> {
+    rolling_max_drawdown(&equity, window)
 }
 
 /// Compute rolling Sharpe ratio over a sliding window.
