@@ -2,7 +2,10 @@
 
 use std::fs;
 
-use nanobook_rebalancer::audit::{log_kill_completed, parse_audit_events, AuditLog};
+use nanobook_rebalancer::audit::{
+    AuditLog, log_kill_completed, log_kill_completed_with_summary, log_kill_requested,
+    parse_audit_events,
+};
 
 #[test]
 fn test_verify_no_dangling_orders_integration() {
@@ -60,4 +63,45 @@ fn test_kill_completed_audit_event_includes_graceful_shutdown_fields() {
     assert_eq!(events[0].data["method"], "graceful");
     assert_eq!(events[0].data["orders_cancelled_count"], 3);
     assert_eq!(events[0].data["duration_seconds"], 1.25);
+    assert_eq!(events[0].data["orders_remaining_count"], 0);
+    assert_eq!(
+        events[0].data["error_messages"].as_array().unwrap().len(),
+        0
+    );
+}
+
+#[test]
+fn test_kill_requested_audit_event_includes_method_and_source() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let audit_path = temp_dir.path().join("audit.jsonl");
+    let mut audit = AuditLog::open_in(&audit_path, temp_dir.path()).unwrap();
+
+    log_kill_requested(&mut audit, "forceful", "command").unwrap();
+    drop(audit);
+
+    let events = parse_audit_events(&audit_path).unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event, "kill_requested");
+    assert_eq!(events[0].data["method"], "forceful");
+    assert_eq!(events[0].data["trigger_source"], "command");
+}
+
+#[test]
+fn test_kill_completed_audit_event_includes_remaining_orders_and_errors() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let audit_path = temp_dir.path().join("audit.jsonl");
+    let mut audit = AuditLog::open_in(&audit_path, temp_dir.path()).unwrap();
+    let errors = vec!["order 42 still open".to_string()];
+
+    log_kill_completed_with_summary(&mut audit, "forced", 2, 1, 3.5, &errors).unwrap();
+    drop(audit);
+
+    let events = parse_audit_events(&audit_path).unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event, "kill_completed");
+    assert_eq!(events[0].data["method"], "forced");
+    assert_eq!(events[0].data["orders_cancelled_count"], 2);
+    assert_eq!(events[0].data["orders_remaining_count"], 1);
+    assert_eq!(events[0].data["duration_seconds"], 3.5);
+    assert_eq!(events[0].data["error_messages"][0], "order 42 still open");
 }

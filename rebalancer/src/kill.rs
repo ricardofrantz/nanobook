@@ -51,6 +51,7 @@
 //! - **Timeout**: The process did not exit within the 30-second timeout. This may indicate
 //!   the process is hung or not responding to SIGTERM. Consider using SIGKILL as a last resort.
 
+use crate::audit::{AuditLog, log_kill_completed_with_summary, log_kill_requested};
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::pid_file::{self, pid_file_exists, read_pid_file};
@@ -272,6 +273,9 @@ fn run_graceful_kill(config: &Config) -> Result<()> {
     let audit_path = config.audit_path();
 
     info!("Starting kill switch procedure");
+    let started = std::time::Instant::now();
+    let mut audit = AuditLog::open(&audit_path)?;
+    log_kill_requested(&mut audit, "graceful", "command")?;
 
     // Step 1: Check if PID file exists
     if !pid_file_exists(pid_path) {
@@ -342,12 +346,29 @@ fn run_graceful_kill(config: &Config) -> Result<()> {
     let dangling = verify_no_dangling_orders(&audit_path)?;
 
     if !dangling.is_empty() {
-        return Err(Error::Aborted(format!(
+        let message = format!(
             "Found {} potentially dangling orders. Manual intervention required.",
             dangling.len()
-        )));
+        );
+        log_kill_completed_with_summary(
+            &mut audit,
+            "graceful",
+            0,
+            dangling.len(),
+            started.elapsed().as_secs_f64(),
+            std::slice::from_ref(&message),
+        )?;
+        return Err(Error::Aborted(message));
     }
 
+    log_kill_completed_with_summary(
+        &mut audit,
+        "graceful",
+        0,
+        0,
+        started.elapsed().as_secs_f64(),
+        &[],
+    )?;
     info!("Kill switch completed successfully: process terminated, no dangling orders");
     Ok(())
 }

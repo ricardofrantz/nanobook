@@ -1429,6 +1429,38 @@ pub fn log_order_filled_checkpoint(
     )
 }
 
+/// Convenience: log a kill-switch request.
+pub fn log_kill_requested(audit: &mut AuditLog, method: &str, trigger_source: &str) -> Result<()> {
+    audit.log(
+        "kill_requested",
+        serde_json::json!({
+            "method": method,
+            "trigger_source": trigger_source,
+        }),
+    )
+}
+
+/// Convenience: log kill completion with a full summary.
+pub fn log_kill_completed_with_summary(
+    audit: &mut AuditLog,
+    method: &str,
+    orders_cancelled_count: usize,
+    orders_remaining_count: usize,
+    duration_seconds: f64,
+    error_messages: &[String],
+) -> Result<()> {
+    audit.log(
+        "kill_completed",
+        serde_json::json!({
+            "method": method,
+            "orders_cancelled_count": orders_cancelled_count,
+            "orders_remaining_count": orders_remaining_count,
+            "duration_seconds": duration_seconds,
+            "error_messages": error_messages,
+        }),
+    )
+}
+
 /// Convenience: log graceful kill completion.
 pub fn log_kill_completed(
     audit: &mut AuditLog,
@@ -1436,13 +1468,13 @@ pub fn log_kill_completed(
     orders_cancelled_count: usize,
     duration_seconds: f64,
 ) -> Result<()> {
-    audit.log(
-        "kill_completed",
-        serde_json::json!({
-            "method": method,
-            "orders_cancelled_count": orders_cancelled_count,
-            "duration_seconds": duration_seconds,
-        }),
+    log_kill_completed_with_summary(
+        audit,
+        method,
+        orders_cancelled_count,
+        0,
+        duration_seconds,
+        &[],
     )
 }
 
