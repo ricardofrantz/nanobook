@@ -447,14 +447,54 @@ fn run_two_phase_kill(config: &Config, timeout: Duration) -> Result<()> {
     }
 
     let pid = read_pid_file(pid_path)?;
-    log_kill_phase(&mut audit, "kill_phase1_started", pid)?;
-    send_sigterm(pid)?;
+    run_two_phase_kill_for_pid(
+        config,
+        &audit_path,
+        &mut audit,
+        pid,
+        timeout,
+        started,
+        send_sigterm,
+        wait_for_process_exit,
+        |config| {
+            let mut broker = IbkrBroker::new(
+                &config.connection.host,
+                config.connection.port,
+                config.connection.client_id,
+            );
+            broker
+                .connect()
+                .map_err(|error| Error::Connection(error.to_string()))?;
+            Ok(forceful_cancel_open_orders(&broker))
+        },
+    )
+}
 
-    if wait_for_process_exit(pid, timeout)? {
-        log_kill_phase(&mut audit, "kill_phase1_completed", pid)?;
-        let dangling = verify_no_dangling_orders(&audit_path)?;
+#[cfg(feature = "guaranteed_kill_switch")]
+fn run_two_phase_kill_for_pid<Send, Wait, Force>(
+    config: &Config,
+    audit_path: &Path,
+    audit: &mut AuditLog,
+    pid: u32,
+    timeout: Duration,
+    started: std::time::Instant,
+    send_sigterm_fn: Send,
+    wait_for_exit_fn: Wait,
+    forceful_cancel_fn: Force,
+) -> Result<()>
+where
+    Send: FnOnce(u32) -> Result<()>,
+    Wait: FnOnce(u32, Duration) -> Result<bool>,
+    Force: FnOnce(&Config) -> Result<ForcefulCancelReport>,
+{
+    log_kill_phase(audit, "kill_phase1_started", pid)?;
+    send_sigterm_fn(pid)?;
+
+    if wait_for_exit_fn(pid, timeout)? {
+        log_kill_phase(audit, "kill_phase1_completed", pid)?;
+        let dangling = verify_no_dangling_orders(audit_path)?;
         log_kill_completed_with_summary(
-            &mut audit,
+            audit,
             "graceful",
             0,
             dangling.len(),
@@ -466,16 +506,8 @@ fn run_two_phase_kill(config: &Config, timeout: Duration) -> Result<()> {
         }
     }
 
-    log_kill_phase(&mut audit, "kill_phase2_started", pid)?;
-    let mut broker = IbkrBroker::new(
-        &config.connection.host,
-        config.connection.port,
-        config.connection.client_id,
-    );
-    broker
-        .connect()
-        .map_err(|error| Error::Connection(error.to_string()))?;
-    let report = forceful_cancel_open_orders(&broker);
+    log_kill_phase(audit, "kill_phase2_started", pid)?;
+    let report = forceful_cancel_fn(config)?;
     audit.log(
         "kill_phase2_completed",
         serde_json::json!({
@@ -489,7 +521,7 @@ fn run_two_phase_kill(config: &Config, timeout: Duration) -> Result<()> {
         }),
     )?;
     log_kill_completed_with_summary(
-        &mut audit,
+        audit,
         "forced",
         report.cancelled_order_ids.len(),
         report.remaining_order_ids.len(),
@@ -792,6 +824,120 @@ timeout_secs = {timeout_secs}
         }
 
         assert_eq!(timeout, Duration::from_secs(23));
+    }
+
+    #[test]
+    #[cfg(feature = "guaranteed_kill_switch")]
+    fn two_phase_skips_forceful_when_phase1_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let audit_path = dir.path().join("audit.jsonl");
+        let config = test_config_with_kill_timeout(30);
+        {
+            let mut audit = AuditLog::open_in(&audit_path, dir.path()).unwrap();
+            run_two_phase_kill_for_pid(
+                &config,
+                &audit_path,
+                &mut audit,
+                4242,
+                Duration::from_secs(30),
+                std::time::Instant::now(),
+                |_| Ok(()),
+                |_, _| Ok(true),
+                |_| panic!("phase 2 should not run when phase 1 succeeds"),
+            )
+            .unwrap();
+        }
+
+        let events = crate::audit::parse_audit_events(&audit_path).unwrap();
+        let names: Vec<_> = events.iter().map(|event| event.event.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "kill_phase1_started",
+                "kill_phase1_completed",
+                "kill_completed"
+            ]
+        );
+        assert_eq!(events[2].data["method"], "graceful");
+    }
+
+    #[test]
+    #[cfg(feature = "guaranteed_kill_switch")]
+    fn two_phase_runs_forceful_when_phase1_times_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let audit_path = dir.path().join("audit.jsonl");
+        let config = test_config_with_kill_timeout(30);
+        {
+            let mut audit = AuditLog::open_in(&audit_path, dir.path()).unwrap();
+            run_two_phase_kill_for_pid(
+                &config,
+                &audit_path,
+                &mut audit,
+                4242,
+                Duration::from_secs(30),
+                std::time::Instant::now(),
+                |_| Ok(()),
+                |_, _| Ok(false),
+                |_| {
+                    Ok(ForcefulCancelReport {
+                        attempts: 2,
+                        cancelled_order_ids: vec![10, 11],
+                        remaining_order_ids: vec![],
+                        errors: vec![],
+                    })
+                },
+            )
+            .unwrap();
+        }
+
+        let events = crate::audit::parse_audit_events(&audit_path).unwrap();
+        let names: Vec<_> = events.iter().map(|event| event.event.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "kill_phase1_started",
+                "kill_phase2_started",
+                "kill_phase2_completed",
+                "kill_completed"
+            ]
+        );
+        assert_eq!(events[2].data["orders_cancelled_count"], 2);
+        assert_eq!(events[3].data["method"], "forced");
+    }
+
+    #[test]
+    #[cfg(feature = "guaranteed_kill_switch")]
+    fn two_phase_returns_error_when_forceful_leaves_orders() {
+        let dir = tempfile::tempdir().unwrap();
+        let audit_path = dir.path().join("audit.jsonl");
+        let config = test_config_with_kill_timeout(30);
+        {
+            let mut audit = AuditLog::open_in(&audit_path, dir.path()).unwrap();
+            let result = run_two_phase_kill_for_pid(
+                &config,
+                &audit_path,
+                &mut audit,
+                4242,
+                Duration::from_secs(30),
+                std::time::Instant::now(),
+                |_| Ok(()),
+                |_, _| Ok(false),
+                |_| {
+                    Ok(ForcefulCancelReport {
+                        attempts: 6,
+                        cancelled_order_ids: vec![10],
+                        remaining_order_ids: vec![11],
+                        errors: vec!["cancel_order(11) failed: cancel failed".into()],
+                    })
+                },
+            );
+            assert!(result.is_err());
+        }
+
+        let events = crate::audit::parse_audit_events(&audit_path).unwrap();
+        assert_eq!(events[2].data["orders_remaining_count"], 1);
+        assert_eq!(events[2].data["remaining_order_ids"][0], 11);
+        assert_eq!(events[3].data["orders_remaining_count"], 1);
     }
 
     #[test]
