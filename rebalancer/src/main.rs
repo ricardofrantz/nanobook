@@ -5,8 +5,8 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 
-use nanobook_broker::ibkr::IbkrBroker;
 use nanobook_broker::Broker;
+use nanobook_broker::ibkr::IbkrBroker;
 use nanobook_rebalancer::config::Config;
 use nanobook_rebalancer::error::Error;
 use nanobook_rebalancer::execution::{self, RunOptions};
@@ -78,9 +78,10 @@ enum Command {
 }
 
 fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .format_timestamp_secs()
-        .init();
+    if let Err(e) = nanobook_rebalancer::observability::init_tracing("logs") {
+        eprintln!("Error initializing tracing: {e}");
+        process::exit(1);
+    }
 
     let cli = Cli::parse();
 
