@@ -58,6 +58,18 @@ pub enum Checkpoint {
     /// Quotes fetch result logged after quotes are fetched (write-ahead logging)
     #[cfg(feature = "write_ahead_logging")]
     QuotesResult,
+    /// Account summary fetch intent logged before broker call (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    AccountSummaryIntent,
+    /// Account summary fetch result logged after account summary is fetched (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    AccountSummaryResult,
+    /// Order cancellation intent logged before broker call (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    CancelIntent,
+    /// Order cancellation result logged after cancellation attempt (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    CancelResult,
     /// Rebalance run completes (success or failure)
     RunCompleted,
 }
@@ -82,6 +94,14 @@ impl Checkpoint {
             Checkpoint::QuotesIntent => "quotes_intent",
             #[cfg(feature = "write_ahead_logging")]
             Checkpoint::QuotesResult => "quotes_result",
+            #[cfg(feature = "write_ahead_logging")]
+            Checkpoint::AccountSummaryIntent => "account_summary_intent",
+            #[cfg(feature = "write_ahead_logging")]
+            Checkpoint::AccountSummaryResult => "account_summary_result",
+            #[cfg(feature = "write_ahead_logging")]
+            Checkpoint::CancelIntent => "cancel_intent",
+            #[cfg(feature = "write_ahead_logging")]
+            Checkpoint::CancelResult => "cancel_result",
             Checkpoint::RunCompleted => "run_completed",
         }
     }
@@ -105,6 +125,14 @@ impl Checkpoint {
             "quotes_intent" => Some(Checkpoint::QuotesIntent),
             #[cfg(feature = "write_ahead_logging")]
             "quotes_result" => Some(Checkpoint::QuotesResult),
+            #[cfg(feature = "write_ahead_logging")]
+            "account_summary_intent" => Some(Checkpoint::AccountSummaryIntent),
+            #[cfg(feature = "write_ahead_logging")]
+            "account_summary_result" => Some(Checkpoint::AccountSummaryResult),
+            #[cfg(feature = "write_ahead_logging")]
+            "cancel_intent" => Some(Checkpoint::CancelIntent),
+            #[cfg(feature = "write_ahead_logging")]
+            "cancel_result" => Some(Checkpoint::CancelResult),
             "run_completed" => Some(Checkpoint::RunCompleted),
             _ => None,
         }
@@ -142,7 +170,7 @@ pub fn parse_audit_events(path: &Path) -> Result<Vec<AuditEvent>> {
                 return Err(Error::AuditValidation(format!(
                     "Corrupted audit log at line {}: invalid JSON",
                     line_num + 1
-                )))
+                )));
             }
         }
     }
@@ -151,26 +179,6 @@ pub fn parse_audit_events(path: &Path) -> Result<Vec<AuditEvent>> {
 
 pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
     let mut last_sequence: Option<u64> = None;
-
-    // Expected checkpoints differ based on feature flag
-    #[cfg(feature = "write_ahead_logging")]
-    let expected_checkpoints: Vec<Checkpoint> = vec![
-        Checkpoint::RunStarted,
-        Checkpoint::PositionsIntent,
-        Checkpoint::PositionsResult,
-        Checkpoint::DiffComputed,
-        Checkpoint::RiskCheckPassed,
-        Checkpoint::OrderIntent,
-    ];
-
-    #[cfg(not(feature = "write_ahead_logging"))]
-    let expected_checkpoints: Vec<Checkpoint> = vec![
-        Checkpoint::RunStarted,
-        Checkpoint::PositionsFetched,
-        Checkpoint::DiffComputed,
-        Checkpoint::RiskCheckPassed,
-        Checkpoint::OrderIntent,
-    ];
 
     let mut found_checkpoints: Vec<Checkpoint> = Vec::new();
 
@@ -199,21 +207,110 @@ pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
         }
     }
 
-    for (i, expected) in expected_checkpoints.iter().enumerate() {
-        if found_checkpoints.get(i) != Some(expected) {
-            return Err(Error::AuditValidation(format!(
-                "Missing checkpoint: expected {:?} at position {}, found {:?}",
-                expected,
-                i,
-                found_checkpoints.get(i)
-            )));
+    let index_of = |checkpoint: Checkpoint| {
+        found_checkpoints
+            .iter()
+            .position(|&candidate| candidate == checkpoint)
+    };
+
+    let require_checkpoint = |checkpoint: Checkpoint| -> Result<usize> {
+        index_of(checkpoint).ok_or_else(|| {
+            Error::AuditValidation(format!("Missing checkpoint: expected {:?}", checkpoint))
+        })
+    };
+
+    let run_started_idx = require_checkpoint(Checkpoint::RunStarted)?;
+    let diff_idx = require_checkpoint(Checkpoint::DiffComputed)?;
+    let risk_idx = require_checkpoint(Checkpoint::RiskCheckPassed)?;
+    let order_intent_idx = require_checkpoint(Checkpoint::OrderIntent)?;
+
+    if run_started_idx != 0 {
+        return Err(Error::AuditValidation(
+            "RunStarted must be the first checkpoint".to_string(),
+        ));
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    let positions_complete_idx = {
+        let intent_idx = require_checkpoint(Checkpoint::PositionsIntent)?;
+        let result_idx = require_checkpoint(Checkpoint::PositionsResult)?;
+        if result_idx <= intent_idx {
+            return Err(Error::AuditValidation(
+                "PositionsResult must come after PositionsIntent".to_string(),
+            ));
+        }
+        result_idx
+    };
+
+    #[cfg(not(feature = "write_ahead_logging"))]
+    let positions_complete_idx = require_checkpoint(Checkpoint::PositionsFetched)?;
+
+    if positions_complete_idx <= run_started_idx {
+        return Err(Error::AuditValidation(
+            "positions checkpoint must come after RunStarted".to_string(),
+        ));
+    }
+    if diff_idx <= positions_complete_idx {
+        return Err(Error::AuditValidation(
+            "DiffComputed must come after positions are available".to_string(),
+        ));
+    }
+    if risk_idx <= diff_idx {
+        return Err(Error::AuditValidation(
+            "RiskCheckPassed must come after DiffComputed".to_string(),
+        ));
+    }
+    if order_intent_idx <= risk_idx {
+        return Err(Error::AuditValidation(
+            "OrderIntent must come after RiskCheckPassed".to_string(),
+        ));
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    if let Some(intent_idx) = index_of(Checkpoint::AccountSummaryIntent) {
+        if let Some(result_idx) = index_of(Checkpoint::AccountSummaryResult) {
+            if result_idx <= intent_idx {
+                return Err(Error::AuditValidation(
+                    "AccountSummaryResult must come after AccountSummaryIntent".to_string(),
+                ));
+            }
+        }
+        if intent_idx <= run_started_idx {
+            return Err(Error::AuditValidation(
+                "AccountSummaryIntent must come after RunStarted".to_string(),
+            ));
+        }
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    if let Some(intent_idx) = index_of(Checkpoint::QuotesIntent) {
+        if let Some(result_idx) = index_of(Checkpoint::QuotesResult) {
+            if result_idx <= intent_idx {
+                return Err(Error::AuditValidation(
+                    "QuotesResult must come after QuotesIntent".to_string(),
+                ));
+            }
+        }
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    if let Some(intent_idx) = index_of(Checkpoint::CancelIntent) {
+        if let Some(result_idx) = index_of(Checkpoint::CancelResult) {
+            if result_idx <= intent_idx {
+                return Err(Error::AuditValidation(
+                    "CancelResult must come after CancelIntent".to_string(),
+                ));
+            }
         }
     }
 
     // Validate that OrderIntent has either OrderSubmitted or OrderFailed after it (not incomplete)
     // This is a soft validation - we allow incomplete intents during crash recovery
     // but we should warn about them
-    if let Some(intent_idx) = found_checkpoints.iter().position(|&c| c == Checkpoint::OrderIntent) {
+    if let Some(intent_idx) = found_checkpoints
+        .iter()
+        .position(|&c| c == Checkpoint::OrderIntent)
+    {
         let has_followup = found_checkpoints.iter().skip(intent_idx + 1).any(|c| {
             matches!(c, Checkpoint::OrderSubmitted) || matches!(c, Checkpoint::OrderFailed)
         });
@@ -226,10 +323,14 @@ pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
 
     // Validate that PositionsIntent has PositionsResult after it (not incomplete)
     #[cfg(feature = "write_ahead_logging")]
-    if let Some(intent_idx) = found_checkpoints.iter().position(|&c| c == Checkpoint::PositionsIntent) {
-        let has_followup = found_checkpoints.iter().skip(intent_idx + 1).any(|c| {
-            matches!(c, Checkpoint::PositionsResult)
-        });
+    if let Some(intent_idx) = found_checkpoints
+        .iter()
+        .position(|&c| c == Checkpoint::PositionsIntent)
+    {
+        let has_followup = found_checkpoints
+            .iter()
+            .skip(intent_idx + 1)
+            .any(|c| matches!(c, Checkpoint::PositionsResult));
         if !has_followup {
             log::warn!(
                 "Found PositionsIntent checkpoint without PositionsResult - this indicates an incomplete positions fetch that may need broker reconciliation"
@@ -239,13 +340,51 @@ pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
 
     // Validate that QuotesIntent has QuotesResult after it (not incomplete)
     #[cfg(feature = "write_ahead_logging")]
-    if let Some(intent_idx) = found_checkpoints.iter().position(|&c| c == Checkpoint::QuotesIntent) {
-        let has_followup = found_checkpoints.iter().skip(intent_idx + 1).any(|c| {
-            matches!(c, Checkpoint::QuotesResult)
-        });
+    if let Some(intent_idx) = found_checkpoints
+        .iter()
+        .position(|&c| c == Checkpoint::QuotesIntent)
+    {
+        let has_followup = found_checkpoints
+            .iter()
+            .skip(intent_idx + 1)
+            .any(|c| matches!(c, Checkpoint::QuotesResult));
         if !has_followup {
             log::warn!(
                 "Found QuotesIntent checkpoint without QuotesResult - this indicates an incomplete quotes fetch that may need broker reconciliation"
+            );
+        }
+    }
+
+    // Validate that AccountSummaryIntent has AccountSummaryResult after it (not incomplete)
+    #[cfg(feature = "write_ahead_logging")]
+    if let Some(intent_idx) = found_checkpoints
+        .iter()
+        .position(|&c| c == Checkpoint::AccountSummaryIntent)
+    {
+        let has_followup = found_checkpoints
+            .iter()
+            .skip(intent_idx + 1)
+            .any(|c| matches!(c, Checkpoint::AccountSummaryResult));
+        if !has_followup {
+            log::warn!(
+                "Found AccountSummaryIntent checkpoint without AccountSummaryResult - this indicates an incomplete account summary fetch that may need broker reconciliation"
+            );
+        }
+    }
+
+    // Validate that CancelIntent has CancelResult after it (not incomplete)
+    #[cfg(feature = "write_ahead_logging")]
+    if let Some(intent_idx) = found_checkpoints
+        .iter()
+        .position(|&c| c == Checkpoint::CancelIntent)
+    {
+        let has_followup = found_checkpoints
+            .iter()
+            .skip(intent_idx + 1)
+            .any(|c| matches!(c, Checkpoint::CancelResult));
+        if !has_followup {
+            log::warn!(
+                "Found CancelIntent checkpoint without CancelResult - this indicates an incomplete order cancellation that may need broker reconciliation"
             );
         }
     }
@@ -1065,6 +1204,150 @@ pub fn log_quotes_result_checkpoint(
         sequence_number,
         serde_json::json!({
             "quotes": quote_data,
+        }),
+    )
+}
+
+/// Convenience: log account summary fetch intent before broker call (write-ahead logging).
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_account_summary_intent(
+    audit: &mut AuditLog,
+    timestamp: chrono::DateTime<chrono::Utc>,
+    target_spec_reference: &str,
+) -> Result<()> {
+    audit.log(
+        "account_summary_intent",
+        serde_json::json!({
+            "timestamp": timestamp.to_rfc3339(),
+            "target_spec_reference": target_spec_reference,
+        }),
+    )
+}
+
+/// Convenience: log account summary fetch intent as a checkpoint.
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_account_summary_intent_checkpoint(
+    audit: &mut AuditLog,
+    sequence_number: u64,
+    timestamp: chrono::DateTime<chrono::Utc>,
+    target_spec_reference: &str,
+) -> Result<()> {
+    audit.log_checkpoint(
+        Checkpoint::AccountSummaryIntent,
+        sequence_number,
+        serde_json::json!({
+            "timestamp": timestamp.to_rfc3339(),
+            "target_spec_reference": target_spec_reference,
+        }),
+    )
+}
+
+/// Convenience: log account summary fetch result after account summary is fetched (write-ahead logging).
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_account_summary_result(
+    audit: &mut AuditLog,
+    equity_cents: i64,
+    cash_cents: i64,
+) -> Result<()> {
+    audit.log(
+        "account_summary_result",
+        serde_json::json!({
+            "equity": equity_cents as f64 / 100.0,
+            "cash": cash_cents as f64 / 100.0,
+        }),
+    )
+}
+
+/// Convenience: log account summary fetch result as a checkpoint.
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_account_summary_result_checkpoint(
+    audit: &mut AuditLog,
+    sequence_number: u64,
+    equity_cents: i64,
+    cash_cents: i64,
+) -> Result<()> {
+    audit.log_checkpoint(
+        Checkpoint::AccountSummaryResult,
+        sequence_number,
+        serde_json::json!({
+            "equity": equity_cents as f64 / 100.0,
+            "cash": cash_cents as f64 / 100.0,
+        }),
+    )
+}
+
+/// Convenience: log order cancellation intent before broker call (write-ahead logging).
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_cancel_intent(
+    audit: &mut AuditLog,
+    order_id: u64,
+    cancellation_reason: &str,
+    timestamp: chrono::DateTime<chrono::Utc>,
+) -> Result<()> {
+    audit.log(
+        "cancel_intent",
+        serde_json::json!({
+            "order_id": order_id,
+            "cancellation_reason": cancellation_reason,
+            "timestamp": timestamp.to_rfc3339(),
+        }),
+    )
+}
+
+/// Convenience: log order cancellation intent as a checkpoint.
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_cancel_intent_checkpoint(
+    audit: &mut AuditLog,
+    sequence_number: u64,
+    order_id: u64,
+    cancellation_reason: &str,
+    timestamp: chrono::DateTime<chrono::Utc>,
+) -> Result<()> {
+    audit.log_checkpoint(
+        Checkpoint::CancelIntent,
+        sequence_number,
+        serde_json::json!({
+            "order_id": order_id,
+            "cancellation_reason": cancellation_reason,
+            "timestamp": timestamp.to_rfc3339(),
+        }),
+    )
+}
+
+/// Convenience: log order cancellation result after cancellation attempt (write-ahead logging).
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_cancel_result(
+    audit: &mut AuditLog,
+    order_id: u64,
+    success: bool,
+    error_message: Option<&str>,
+) -> Result<()> {
+    audit.log(
+        "cancel_result",
+        serde_json::json!({
+            "order_id": order_id,
+            "success": success,
+            "error_message": error_message,
+        }),
+    )
+}
+
+/// Convenience: log order cancellation result as a checkpoint.
+#[cfg(feature = "write_ahead_logging")]
+pub fn log_cancel_result_checkpoint(
+    audit: &mut AuditLog,
+    sequence_number: u64,
+    order_id: u64,
+    success: bool,
+    error_message: Option<&str>,
+) -> Result<()> {
+    audit.log_checkpoint(
+        Checkpoint::CancelResult,
+        sequence_number,
+        serde_json::json!({
+            "order_id": order_id,
+            "success": success,
+            "error_message": error_message,
         }),
     )
 }
@@ -2128,14 +2411,20 @@ mod tests {
     #[cfg(feature = "write_ahead_logging")]
     #[test]
     fn checkpoint_as_event_name_positions_intent() {
-        assert_eq!(Checkpoint::PositionsIntent.as_event_name(), "positions_intent");
+        assert_eq!(
+            Checkpoint::PositionsIntent.as_event_name(),
+            "positions_intent"
+        );
     }
 
     /// Test that Checkpoint::PositionsResult.as_event_name returns "positions_result".
     #[cfg(feature = "write_ahead_logging")]
     #[test]
     fn checkpoint_as_event_name_positions_result() {
-        assert_eq!(Checkpoint::PositionsResult.as_event_name(), "positions_result");
+        assert_eq!(
+            Checkpoint::PositionsResult.as_event_name(),
+            "positions_result"
+        );
     }
 
     /// Test log_positions_intent creates a valid audit event with all required fields.
@@ -2171,8 +2460,7 @@ mod tests {
 
         {
             let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
-            log_positions_intent_checkpoint(&mut log, 2, timestamp, "target-spec-ref")
-                .unwrap();
+            log_positions_intent_checkpoint(&mut log, 2, timestamp, "target-spec-ref").unwrap();
         }
 
         let contents = std::fs::read_to_string(&path).unwrap();
@@ -2288,14 +2576,7 @@ mod tests {
 
         {
             let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
-            log_quotes_intent(
-                &mut log,
-                &symbols,
-                30,
-                timestamp,
-                "target-spec-ref",
-            )
-            .unwrap();
+            log_quotes_intent(&mut log, &symbols, 30, timestamp, "target-spec-ref").unwrap();
         }
 
         let contents = std::fs::read_to_string(&path).unwrap();
@@ -2430,7 +2711,9 @@ mod tests {
     #[test]
     fn checkpoint_validation_warns_incomplete_positions_intent() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test_validation_incomplete_positions.jsonl");
+        let path = dir
+            .path()
+            .join("test_validation_incomplete_positions.jsonl");
 
         {
             let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
@@ -2515,6 +2798,130 @@ mod tests {
         let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
         // Validation should succeed (soft validation), but we can't easily test the warning log
         // in unit tests without capturing logs. The important thing is it doesn't error.
+        assert!(log.validate_checkpoints().is_ok());
+    }
+
+    // ========================================================================
+    // AccountSummaryIntent and CancelIntent Checkpoint Tests
+    // ========================================================================
+
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_from_event_name_account_summary_and_cancel() {
+        assert_eq!(
+            Checkpoint::from_event_name("account_summary_intent"),
+            Some(Checkpoint::AccountSummaryIntent)
+        );
+        assert_eq!(
+            Checkpoint::from_event_name("account_summary_result"),
+            Some(Checkpoint::AccountSummaryResult)
+        );
+        assert_eq!(
+            Checkpoint::from_event_name("cancel_intent"),
+            Some(Checkpoint::CancelIntent)
+        );
+        assert_eq!(
+            Checkpoint::from_event_name("cancel_result"),
+            Some(Checkpoint::CancelResult)
+        );
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_as_event_name_account_summary_and_cancel() {
+        assert_eq!(
+            Checkpoint::AccountSummaryIntent.as_event_name(),
+            "account_summary_intent"
+        );
+        assert_eq!(
+            Checkpoint::AccountSummaryResult.as_event_name(),
+            "account_summary_result"
+        );
+        assert_eq!(Checkpoint::CancelIntent.as_event_name(), "cancel_intent");
+        assert_eq!(Checkpoint::CancelResult.as_event_name(), "cancel_result");
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn log_account_summary_intent_and_result_create_valid_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_account_summary.jsonl");
+        let timestamp = chrono::Utc::now();
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_account_summary_intent_checkpoint(&mut log, 2, timestamp, "target-spec-ref")
+                .unwrap();
+            log_account_summary_result_checkpoint(&mut log, 3, 150_000_00, 125_000_00).unwrap();
+        }
+
+        let events = parse_audit_events(&path).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event, "account_summary_intent");
+        assert_eq!(events[0].sequence_number, Some(2));
+        assert_eq!(events[0].data["target_spec_reference"], "target-spec-ref");
+        assert_eq!(events[1].event, "account_summary_result");
+        assert_eq!(events[1].sequence_number, Some(3));
+        assert_eq!(events[1].data["equity"], 150_000.0);
+        assert_eq!(events[1].data["cash"], 125_000.0);
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn log_cancel_intent_and_result_create_valid_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_cancel.jsonl");
+        let timestamp = chrono::Utc::now();
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log_cancel_intent_checkpoint(&mut log, 7, 42, "operator_requested", timestamp).unwrap();
+            log_cancel_result_checkpoint(&mut log, 8, 42, true, None).unwrap();
+        }
+
+        let events = parse_audit_events(&path).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event, "cancel_intent");
+        assert_eq!(events[0].sequence_number, Some(7));
+        assert_eq!(events[0].data["order_id"], 42);
+        assert_eq!(events[0].data["cancellation_reason"], "operator_requested");
+        assert_eq!(events[1].event, "cancel_result");
+        assert_eq!(events[1].sequence_number, Some(8));
+        assert_eq!(events[1].data["success"], true);
+        assert!(events[1].data["error_message"].is_null());
+    }
+
+    #[cfg(feature = "write_ahead_logging")]
+    #[test]
+    fn checkpoint_validation_accepts_phase1c_complete_sequence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_phase1c_sequence.jsonl");
+
+        {
+            let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
+            log.log_checkpoint(Checkpoint::RunStarted, 1, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::AccountSummaryIntent, 2, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::AccountSummaryResult, 3, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsIntent, 4, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::PositionsResult, 5, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::QuotesIntent, 6, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::QuotesResult, 7, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::DiffComputed, 8, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 9, serde_json::json!({}))
+                .unwrap();
+            log.log_checkpoint(Checkpoint::OrderIntent, 10, serde_json::json!({}))
+                .unwrap();
+        }
+
+        let mut log = AuditLog::open_in(&path, dir.path()).unwrap();
         assert!(log.validate_checkpoints().is_ok());
     }
 }

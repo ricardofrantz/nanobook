@@ -6,9 +6,10 @@ use crate::diff::CurrentPosition;
 use crate::error::{Error, Result};
 use crate::target::TargetSpec;
 use nanobook::Symbol;
-use nanobook_broker::types::f64_cents_checked;
 use nanobook_broker::Broker;
+use nanobook_broker::types::f64_cents_checked;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "write_ahead_logging")]
 use std::time::Duration;
 
 /// Recovery action to take after a crash.
@@ -53,6 +54,18 @@ pub struct RecoveredState {
     /// Whether quotes fetch result was logged (write-ahead logging)
     #[cfg(feature = "write_ahead_logging")]
     pub quotes_result_logged: bool,
+    /// Whether account summary fetch intent was logged (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    pub account_summary_intent_logged: bool,
+    /// Whether account summary fetch result was logged (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    pub account_summary_result_logged: bool,
+    /// Whether cancel intent was logged (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    pub cancel_intent_logged: bool,
+    /// Whether cancel result was logged (write-ahead logging)
+    #[cfg(feature = "write_ahead_logging")]
+    pub cancel_result_logged: bool,
 }
 
 /// Order reconstructed from audit log.
@@ -110,6 +123,17 @@ pub enum Discrepancy {
     #[cfg(feature = "write_ahead_logging")]
     IncompleteQuotesIntent {
         target_spec_reference: Option<String>,
+    },
+    /// Incomplete account summary intent (AccountSummaryIntent without AccountSummaryResult)
+    #[cfg(feature = "write_ahead_logging")]
+    IncompleteAccountSummaryIntent {
+        target_spec_reference: Option<String>,
+    },
+    /// Incomplete cancel intent (CancelIntent without CancelResult)
+    #[cfg(feature = "write_ahead_logging")]
+    IncompleteCancelIntent {
+        order_id: Option<u64>,
+        cancellation_reason: Option<String>,
     },
 }
 
@@ -224,6 +248,25 @@ pub fn compare_broker_state(
         });
     }
 
+    // Check for incomplete account summary intent (AccountSummaryIntent without AccountSummaryResult)
+    #[cfg(feature = "write_ahead_logging")]
+    if recovered_state.account_summary_intent_logged
+        && !recovered_state.account_summary_result_logged
+    {
+        discrepancies.push(Discrepancy::IncompleteAccountSummaryIntent {
+            target_spec_reference: None,
+        });
+    }
+
+    // Check for incomplete cancel intent (CancelIntent without CancelResult)
+    #[cfg(feature = "write_ahead_logging")]
+    if recovered_state.cancel_intent_logged && !recovered_state.cancel_result_logged {
+        discrepancies.push(Discrepancy::IncompleteCancelIntent {
+            order_id: None,
+            cancellation_reason: None,
+        });
+    }
+
     let has_critical_issues = !discrepancies.is_empty();
 
     Ok(DiscrepancyReport {
@@ -299,7 +342,9 @@ pub fn reconcile_order_intent(
     }
 
     // This should never be reached, but required for type checking
-    Err(Error::Recovery("Unexpected error in broker reconciliation".to_string()))
+    Err(Error::Recovery(
+        "Unexpected error in broker reconciliation".to_string(),
+    ))
 }
 
 /// Reconcile incomplete order intents with the broker and update audit log.
@@ -369,9 +414,7 @@ pub fn reconcile_incomplete_intents(
                 }
                 Ok(None) => {
                     // Order not found at broker - append OrderFailed event
-                    log::info!(
-                        "Order not found at broker, appending OrderFailed event",
-                    );
+                    log::info!("Order not found at broker, appending OrderFailed event",);
                     let mut audit = AuditLog::open_in(audit_log_path, workdir)?;
                     audit.log_checkpoint(
                         Checkpoint::OrderFailed,
@@ -415,7 +458,6 @@ pub fn reconcile_incomplete_intents(
     }
 }
 
-
 impl RecoveredState {
     /// Create an empty recovered state.
     pub fn new() -> Self {
@@ -435,6 +477,14 @@ impl RecoveredState {
             quotes_intent_logged: false,
             #[cfg(feature = "write_ahead_logging")]
             quotes_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            account_summary_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            account_summary_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_result_logged: false,
         }
     }
 
@@ -443,6 +493,15 @@ impl RecoveredState {
         // If run completed successfully, safe to restart
         if self.run_completed {
             return RecoveryAction::Restart;
+        }
+
+        // Check for incomplete cancel intent (CancelIntent without CancelResult) before
+        // the orders-empty shortcut. A cancellation may be initiated by an operator
+        // or future kill-switch path even when the reconstructed order list is empty;
+        // the broker-side cancellation state is still safety-critical.
+        #[cfg(feature = "write_ahead_logging")]
+        if self.cancel_intent_logged && !self.cancel_result_logged {
+            return RecoveryAction::ManualReview;
         }
 
         // If crashed before any orders were submitted, safe to restart
@@ -478,6 +537,13 @@ impl RecoveredState {
         #[cfg(feature = "write_ahead_logging")]
         if self.quotes_intent_logged && !self.quotes_result_logged {
             // Incomplete quotes fetch - safe to restart since quotes are read-only
+            return RecoveryAction::Restart;
+        }
+
+        // Check for incomplete account summary intent (AccountSummaryIntent without AccountSummaryResult)
+        #[cfg(feature = "write_ahead_logging")]
+        if self.account_summary_intent_logged && !self.account_summary_result_logged {
+            // Incomplete account summary fetch - safe to restart since account summary is read-only
             return RecoveryAction::Restart;
         }
 
@@ -643,7 +709,8 @@ pub fn reconstruct_state(
                     if let Some(action) = event.data.get("action").and_then(|a| a.as_str()) {
                         if let Some(shares) = event.data.get("shares").and_then(|s| s.as_i64()) {
                             if let Some(limit) = event.data.get("limit").and_then(|l| l.as_f64()) {
-                                let client_order_id = event.data
+                                let client_order_id = event
+                                    .data
                                     .get("client_order_id")
                                     .and_then(|id| id.as_str())
                                     .map(|s| s.to_string());
@@ -683,7 +750,8 @@ pub fn reconstruct_state(
                 state.timestamp = event.ts;
 
                 // Extract failure details and mark order as failed
-                let failure_reason = event.data
+                let failure_reason = event
+                    .data
                     .get("reason")
                     .and_then(|r| r.as_str())
                     .map(|s| s.to_string());
@@ -747,6 +815,48 @@ pub fn reconstruct_state(
                 state.quotes_result_logged = true;
                 // Quotes data is not stored in RecoveredState as it's transient
                 // but we mark that the fetch completed successfully
+            }
+            #[cfg(feature = "write_ahead_logging")]
+            Some(Checkpoint::AccountSummaryIntent) => {
+                state.checkpoint = Checkpoint::AccountSummaryIntent;
+                state.sequence_number = event.sequence_number.unwrap_or(0);
+                state.timestamp = event.ts;
+                state.account_summary_intent_logged = true;
+            }
+            #[cfg(feature = "write_ahead_logging")]
+            Some(Checkpoint::AccountSummaryResult) => {
+                state.checkpoint = Checkpoint::AccountSummaryResult;
+                state.sequence_number = event.sequence_number.unwrap_or(0);
+                state.timestamp = event.ts;
+                state.account_summary_result_logged = true;
+
+                // Extract equity from AccountSummaryResult
+                if let Some(equity) = event.data.get("equity") {
+                    if let Some(equity_val) = equity.as_f64() {
+                        if let Ok(cents) = f64_cents_checked(equity_val, "equity") {
+                            state.equity_cents = cents;
+                        }
+                    }
+                }
+                // Cash is not stored in RecoveredState but could be added if needed
+            }
+            #[cfg(feature = "write_ahead_logging")]
+            Some(Checkpoint::CancelIntent) => {
+                state.checkpoint = Checkpoint::CancelIntent;
+                state.sequence_number = event.sequence_number.unwrap_or(0);
+                state.timestamp = event.ts;
+                state.cancel_intent_logged = true;
+                // Cancel intent metadata (order_id, cancellation_reason) could be stored here
+                // but is not currently tracked in RecoveredState
+            }
+            #[cfg(feature = "write_ahead_logging")]
+            Some(Checkpoint::CancelResult) => {
+                state.checkpoint = Checkpoint::CancelResult;
+                state.sequence_number = event.sequence_number.unwrap_or(0);
+                state.timestamp = event.ts;
+                state.cancel_result_logged = true;
+                // Cancel result could update order status in RecoveredState
+                // but is not currently implemented as cancel is not used in the main flow
             }
             Some(Checkpoint::RunCompleted) => {
                 state.checkpoint = Checkpoint::RunCompleted;
@@ -897,6 +1007,25 @@ pub fn run_recover(
                                     target_spec_reference
                                 );
                             }
+                            #[cfg(feature = "write_ahead_logging")]
+                            Discrepancy::IncompleteAccountSummaryIntent {
+                                target_spec_reference,
+                            } => {
+                                println!(
+                                    "  - Incomplete account summary intent (target_spec_reference: {:?})",
+                                    target_spec_reference
+                                );
+                            }
+                            #[cfg(feature = "write_ahead_logging")]
+                            Discrepancy::IncompleteCancelIntent {
+                                order_id,
+                                cancellation_reason,
+                            } => {
+                                println!(
+                                    "  - Incomplete cancel intent (order_id: {:?}, cancellation_reason: {:?})",
+                                    order_id, cancellation_reason
+                                );
+                            }
                         }
                     }
                     println!("\nWARNING: Broker state does not match reconstructed state.");
@@ -981,7 +1110,9 @@ pub fn run_recover(
             println!("Please review broker state and decide on the appropriate action.");
             println!("IMPORTANT: Verify IBKR TWS for open orders and positions before proceeding.");
             if discrepancy_report.is_some() {
-                println!("\nNOTE: Discrepancies detected between broker and reconstructed state. Review the comparison above carefully.");
+                println!(
+                    "\nNOTE: Discrepancies detected between broker and reconstructed state. Review the comparison above carefully."
+                );
             }
             return Err(Error::Recovery("Manual review required".to_string()));
         }
@@ -991,7 +1122,9 @@ pub fn run_recover(
             println!("Please review broker open orders and cancel if necessary.");
             println!("IMPORTANT: Verify IBKR TWS for open orders and positions before proceeding.");
             if discrepancy_report.is_some() {
-                println!("\nNOTE: Orphan orders detected. These should be manually canceled in IBKR TWS before proceeding.");
+                println!(
+                    "\nNOTE: Orphan orders detected. These should be manually canceled in IBKR TWS before proceeding."
+                );
             }
             return Err(Error::Recovery(
                 "Rollback required - manual intervention needed".to_string(),
@@ -1258,6 +1391,14 @@ mod tests {
             quotes_intent_logged: false,
             #[cfg(feature = "write_ahead_logging")]
             quotes_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            account_summary_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            account_summary_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_result_logged: false,
         };
 
         let report = compare_broker_state(&broker, &state).unwrap();
@@ -1306,6 +1447,14 @@ mod tests {
             quotes_intent_logged: false,
             #[cfg(feature = "write_ahead_logging")]
             quotes_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            account_summary_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            account_summary_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_result_logged: false,
         };
 
         let report = compare_broker_state(&broker, &state).unwrap();
@@ -1343,6 +1492,14 @@ mod tests {
             quotes_intent_logged: false,
             #[cfg(feature = "write_ahead_logging")]
             quotes_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            account_summary_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            account_summary_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_result_logged: false,
         };
 
         let report = compare_broker_state(&broker, &state).unwrap();
@@ -1383,7 +1540,10 @@ mod tests {
         assert_eq!(state.sequence_number, 2);
         assert_eq!(state.orders.len(), 1);
         assert_eq!(state.orders[0].symbol.as_str(), "AAPL");
-        assert_eq!(state.orders[0].client_order_id, Some("test_client_order_123".to_string()));
+        assert_eq!(
+            state.orders[0].client_order_id,
+            Some("test_client_order_123".to_string())
+        );
         assert!(!state.orders[0].submitted);
         assert!(!state.orders[0].filled);
         assert!(!state.orders[0].failed);
@@ -1483,7 +1643,10 @@ mod tests {
         assert_eq!(state.orders.len(), 1);
         assert!(!state.orders[0].submitted);
         assert!(state.orders[0].failed);
-        assert_eq!(state.orders[0].failure_reason, Some("network_timeout".to_string()));
+        assert_eq!(
+            state.orders[0].failure_reason,
+            Some("network_timeout".to_string())
+        );
         assert_eq!(action, RecoveryAction::Restart);
     }
 
@@ -1529,6 +1692,14 @@ mod tests {
             quotes_intent_logged: false,
             #[cfg(feature = "write_ahead_logging")]
             quotes_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            account_summary_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            account_summary_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_result_logged: false,
         };
 
         let report = compare_broker_state(&broker, &state).unwrap();
@@ -1536,7 +1707,10 @@ mod tests {
         assert!(!report.discrepancies.is_empty());
 
         // Should have IncompleteIntent discrepancy
-        let has_incomplete = report.discrepancies.iter().any(|d| matches!(d, Discrepancy::IncompleteIntent { .. }));
+        let has_incomplete = report
+            .discrepancies
+            .iter()
+            .any(|d| matches!(d, Discrepancy::IncompleteIntent { .. }));
         assert!(has_incomplete);
     }
 
@@ -1613,6 +1787,14 @@ mod tests {
             quotes_intent_logged: false,
             #[cfg(feature = "write_ahead_logging")]
             quotes_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            account_summary_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            account_summary_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_result_logged: false,
         };
 
         let action = state.determine_recovery_action();
@@ -1649,6 +1831,14 @@ mod tests {
             quotes_intent_logged: false,
             #[cfg(feature = "write_ahead_logging")]
             quotes_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            account_summary_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            account_summary_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_intent_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_result_logged: false,
         };
 
         let action = state.determine_recovery_action();
@@ -1725,6 +1915,14 @@ mod tests {
                 positions_result_logged: false,
                 quotes_intent_logged: false,
                 quotes_result_logged: false,
+                #[cfg(feature = "write_ahead_logging")]
+                account_summary_intent_logged: false,
+                #[cfg(feature = "write_ahead_logging")]
+                account_summary_result_logged: false,
+                #[cfg(feature = "write_ahead_logging")]
+                cancel_intent_logged: false,
+                #[cfg(feature = "write_ahead_logging")]
+                cancel_result_logged: false,
             };
 
             let action = state.determine_recovery_action();
@@ -1771,7 +1969,10 @@ mod tests {
         let (state, _) = reconstruct_state(&path).unwrap();
         assert_eq!(state.checkpoint, Checkpoint::OrderIntent);
         assert_eq!(state.orders.len(), 1);
-        assert_eq!(state.orders[0].client_order_id, Some("test_client_order_123".to_string()));
+        assert_eq!(
+            state.orders[0].client_order_id,
+            Some("test_client_order_123".to_string())
+        );
     }
 
     #[test]
@@ -1806,7 +2007,10 @@ mod tests {
         let (state, _) = reconstruct_state(&path).unwrap();
         assert_eq!(state.checkpoint, Checkpoint::OrderIntent);
         assert_eq!(state.orders.len(), 1);
-        assert_eq!(state.orders[0].client_order_id, Some("test_client_order_123".to_string()));
+        assert_eq!(
+            state.orders[0].client_order_id,
+            Some("test_client_order_123".to_string())
+        );
     }
 
     #[test]
@@ -1908,6 +2112,9 @@ mod tests {
         let (state, _) = reconstruct_state(&path).unwrap();
         assert_eq!(state.checkpoint, Checkpoint::OrderIntent);
         assert_eq!(state.sequence_number, 4);
-        assert_eq!(state.orders[0].client_order_id, Some("test_client_order_123".to_string()));
+        assert_eq!(
+            state.orders[0].client_order_id,
+            Some("test_client_order_123".to_string())
+        );
     }
 }

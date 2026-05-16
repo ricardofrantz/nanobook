@@ -1,0 +1,13 @@
+{"event":"run_started","ts":"2024-01-15T10:00:00Z","sequence_number":1,"checkpoint":"RunStarted","target_file":"target.json","account":"U1234567"}
+{"event":"account_summary_intent","ts":"2024-01-15T10:00:01Z","sequence_number":2,"checkpoint":"AccountSummaryIntent","timestamp":"2024-01-15T10:00:01Z","target_spec_reference":"target.json"}
+{"event":"account_summary_result","ts":"2024-01-15T10:00:02Z","sequence_number":3,"checkpoint":"AccountSummaryResult","equity":15000.0,"cash":12000.0}
+{"event":"positions_intent","ts":"2024-01-15T10:00:03Z","sequence_number":4,"checkpoint":"PositionsIntent","timestamp":"2024-01-15T10:00:03Z","target_spec_reference":"target.json"}
+{"event":"positions_result","ts":"2024-01-15T10:00:04Z","sequence_number":5,"checkpoint":"PositionsResult","positions":[{"symbol":"AAPL","qty":100,"avg_cost":150.0}],"equity":15000.0}
+{"event":"diff_computed","ts":"2024-01-15T10:00:05Z","sequence_number":6,"checkpoint":"DiffComputed","orders":[{"symbol":"AAPL","action":"Buy","shares":50,"limit":160.0,"description":"test"}]}
+{"event":"risk_check_passed","ts":"2024-01-15T10:00:06Z","sequence_number":7,"checkpoint":"RiskCheckPassed","checks":[]}
+{"event":"quotes_intent","ts":"2024-01-15T10:00:07Z","sequence_number":8,"checkpoint":"QuotesIntent","symbols":["AAPL","MSFT"],"staleness_threshold_sec":30,"timestamp":"2024-01-15T10:00:07Z","target_spec_reference":"target.json"}
+{"event":"quotes_result","ts":"2024-01-15T10:00:08Z","sequence_number":9,"checkpoint":"QuotesResult","quotes":[{"symbol":"AAPL","bid_cents":14900,"ask_cents":15100,"last_cents":15000,"timestamp":"2024-01-15T10:00:08Z"},{"symbol":"MSFT","bid_cents":37900,"ask_cents":38100,"last_cents":38000,"timestamp":"2024-01-15T10:00:08Z"}]}
+{"event":"order_intent","ts":"2024-01-15T10:00:09Z","sequence_number":10,"checkpoint":"OrderIntent","symbol":"AAPL","action":"Buy","shares":50,"limit":160.0,"client_order_id":"test-456","timestamp":"2024-01-15T10:00:09Z","target_spec_reference":"target.json","execution_context":"rebalance_run:1"}
+{"event":"order_submitted","ts":"2024-01-15T10:00:10Z","sequence_number":11,"checkpoint":"OrderSubmitted","symbol":"AAPL","action":"Buy","shares":50,"limit":160.0,"ibkr_id":67890}
+{"event":"order_filled","ts":"2024-01-15T10:00:11Z","sequence_number":12,"checkpoint":"OrderFilled","symbol":"AAPL","ibkr_id":67890,"filled":50,"avg_price":160.0,"commission":0.5,"status":"Filled"}
+{"event":"run_completed","ts":"2024-01-15T10:00:12Z","sequence_number":13,"checkpoint":"RunCompleted","submitted":1,"filled":1,"failed":0}

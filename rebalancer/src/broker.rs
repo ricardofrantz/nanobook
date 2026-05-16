@@ -35,6 +35,18 @@ pub trait BrokerGateway {
         client_order_id: Option<&ClientOrderId>,
         timeout: Duration,
     ) -> BrokerResult<orders::OrderResult>;
+
+    /// Cancel a pending broker order.
+    ///
+    /// The rebalancer does not call this in the normal order path today
+    /// (timeouts are handled inside `execute_limit_order`), but exposing it here
+    /// lets cancellation paths use the same write-ahead audit discipline.
+    fn cancel_order(&self, order_id: u64) -> BrokerResult<()> {
+        let _ = order_id;
+        Err(BrokerError::Other(
+            "cancel_order is not supported by this broker gateway".into(),
+        ))
+    }
 }
 
 impl BrokerGateway for IbkrClient {
@@ -80,6 +92,12 @@ impl BrokerGateway for IbkrClient {
             timeout,
             None, // TODO: pass dedup cache when available
         )
+    }
+
+    fn cancel_order(&self, order_id: u64) -> BrokerResult<()> {
+        let order_id = i32::try_from(order_id)
+            .map_err(|_| BrokerError::Order("order id exceeds i32::MAX".into()))?;
+        orders::cancel_order(self.inner(), order_id)
     }
 }
 

@@ -1,6 +1,8 @@
 //! Integration tests for OrderIntent and OrderFailed checkpoint variants.
 
-use nanobook_rebalancer::audit::{parse_audit_events, validate_checkpoints_from_parsed, AuditLog, Checkpoint};
+#[cfg(feature = "write_ahead_logging")]
+use nanobook_rebalancer::audit::validate_checkpoints_from_parsed;
+use nanobook_rebalancer::audit::{AuditLog, Checkpoint, parse_audit_events};
 use std::path::PathBuf;
 
 /// Test that intent_only.jsonl (crash scenario) parses correctly.
@@ -41,6 +43,7 @@ fn fixture_intent_only_parses_correctly() {
 /// Note: This fixture is from Phase 1.6A and doesn't include Phase 1.6B checkpoints
 /// (PositionsIntent/PositionsResult/QuotesIntent/QuotesResult), so validation
 /// is expected to fail with the current validation rules.
+#[cfg(feature = "write_ahead_logging")]
 #[test]
 fn fixture_intent_only_validates_incomplete() {
     let fixture_path = PathBuf::from("tests/fixtures/intent_only.jsonl");
@@ -48,7 +51,10 @@ fn fixture_intent_only_validates_incomplete() {
 
     // Validation should fail because the sequence is incomplete (missing Phase 1.6B checkpoints)
     let result = validate_checkpoints_from_parsed(&events);
-    assert!(result.is_err(), "Validation should fail for incomplete sequence (missing Phase 1.6B checkpoints)");
+    assert!(
+        result.is_err(),
+        "Validation should fail for incomplete sequence (missing Phase 1.6B checkpoints)"
+    );
 }
 
 /// Test that intent_success.jsonl parses correctly.
@@ -87,6 +93,7 @@ fn fixture_intent_success_parses_correctly() {
 /// Note: This fixture is from Phase 1.6A and doesn't include Phase 1.6B checkpoints
 /// (PositionsIntent/PositionsResult/QuotesIntent/QuotesResult), so validation
 /// is expected to fail with the current validation rules.
+#[cfg(feature = "write_ahead_logging")]
 #[test]
 fn fixture_intent_success_validates_incomplete() {
     let fixture_path = PathBuf::from("tests/fixtures/intent_success.jsonl");
@@ -94,7 +101,10 @@ fn fixture_intent_success_validates_incomplete() {
 
     // Validation should fail because the sequence is incomplete (missing Phase 1.6B checkpoints)
     let result = validate_checkpoints_from_parsed(&events);
-    assert!(result.is_err(), "Validation should fail for incomplete sequence (missing Phase 1.6B checkpoints)");
+    assert!(
+        result.is_err(),
+        "Validation should fail for incomplete sequence (missing Phase 1.6B checkpoints)"
+    );
 }
 
 /// Test that intent_failure.jsonl parses correctly.
@@ -139,6 +149,7 @@ fn fixture_intent_failure_parses_correctly() {
 /// Note: This fixture is from Phase 1.6A and doesn't include Phase 1.6B checkpoints
 /// (PositionsIntent/PositionsResult/QuotesIntent/QuotesResult), so validation
 /// is expected to fail with the current validation rules.
+#[cfg(feature = "write_ahead_logging")]
 #[test]
 fn fixture_intent_failure_validates_incomplete() {
     let fixture_path = PathBuf::from("tests/fixtures/intent_failure.jsonl");
@@ -146,7 +157,10 @@ fn fixture_intent_failure_validates_incomplete() {
 
     // Validation should fail because the sequence is incomplete (missing Phase 1.6B checkpoints)
     let result = validate_checkpoints_from_parsed(&events);
-    assert!(result.is_err(), "Validation should fail for incomplete sequence (missing Phase 1.6B checkpoints)");
+    assert!(
+        result.is_err(),
+        "Validation should fail for incomplete sequence (missing Phase 1.6B checkpoints)"
+    );
 }
 
 /// Test that checkpoints can be round-tripped through the audit log.
@@ -253,27 +267,19 @@ fn full_sequence_with_order_intent_validates() {
         log.log_checkpoint(Checkpoint::PositionsResult, 3, serde_json::json!({}))
             .unwrap();
         #[cfg(not(feature = "write_ahead_logging"))]
-        log.log_checkpoint(
-            Checkpoint::PositionsFetched,
-            2,
-            serde_json::json!({}),
-        )
-        .unwrap();
+        log.log_checkpoint(Checkpoint::PositionsFetched, 2, serde_json::json!({}))
+            .unwrap();
         log.log_checkpoint(Checkpoint::DiffComputed, 4, serde_json::json!({}))
             .unwrap();
-        log.log_checkpoint(
-            Checkpoint::RiskCheckPassed,
-            5,
-            serde_json::json!({}),
-        )
-        .unwrap();
+        log.log_checkpoint(Checkpoint::RiskCheckPassed, 5, serde_json::json!({}))
+            .unwrap();
         // Note: QuotesIntent/QuotesResult are not in the expected validation sequence
         // They are optional checkpoints that can appear but are not required for validation
         #[cfg(feature = "write_ahead_logging")]
         log.log_checkpoint(Checkpoint::OrderIntent, 6, serde_json::json!({}))
             .unwrap();
         #[cfg(not(feature = "write_ahead_logging"))]
-        log.log_checkpoint(Checkpoint::OrderIntent, 3, serde_json::json!({}))
+        log.log_checkpoint(Checkpoint::OrderIntent, 6, serde_json::json!({}))
             .unwrap();
     }
 

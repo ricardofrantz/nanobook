@@ -8,12 +8,12 @@ use log::{error, info, warn};
 use nanobook::Symbol;
 use nanobook_broker::error::BrokerError;
 use nanobook_broker::ibkr::orders::{self, OrderOutcome};
-use nanobook_broker::types::Position;
+use nanobook_broker::types::{Account, Position, Quote};
 use nanobook_broker::{BrokerSide, ClientOrderId};
 use rustc_hash::FxHashMap;
 
 use crate::audit::{self, AuditLog};
-use crate::broker::{as_connection_error, connect_ibkr, BrokerGateway};
+use crate::broker::{BrokerGateway, as_connection_error, connect_ibkr};
 use crate::config::Config;
 use crate::diff::{self, Action, CurrentPosition, RebalanceOrder};
 use crate::error::{Error, Result};
@@ -94,6 +94,11 @@ pub fn enforce_max_orders_per_run(
     Ok(())
 }
 
+fn next_checkpoint_sequence(sequence_number: &mut u64) -> u64 {
+    *sequence_number = (*sequence_number).saturating_add(1);
+    *sequence_number
+}
+
 /// Derive the stable broker-side idempotency key for a computed rebalance order.
 pub fn derive_client_order_id(
     target: &TargetSpec,
@@ -139,24 +144,39 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
 
     // 2. Open audit log
     let mut audit = AuditLog::open(&config.audit_path())?;
+    let run_sequence_number = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| Error::Config(format!("clock error: {e}")))?
+        .as_secs();
+    let mut checkpoint_sequence = run_sequence_number;
+    let target_spec_ref = target.idempotency_scope();
+
+    #[cfg(feature = "write_ahead_logging")]
+    audit::log_run_started_checkpoint(
+        &mut audit,
+        next_checkpoint_sequence(&mut checkpoint_sequence),
+        &opts.target_file,
+        &config.account.id,
+    )?;
+    #[cfg(not(feature = "write_ahead_logging"))]
     audit::log_run_started(&mut audit, &opts.target_file, &config.account.id)?;
 
     // In cron mode, log the start with sequence number
     let cron_mode = if opts.cron_mode {
         let window_id = target.window_id();
-        // Use a simple sequence number based on timestamp (in production, this could be from a config)
-        let sequence_number = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| Error::Config(format!("clock error: {e}")))?
-            .as_secs();
-        audit::log_cron_start(&mut audit, sequence_number, &window_id)?;
-        Some(CronMode::new(sequence_number))
+        audit::log_cron_start(&mut audit, run_sequence_number, &window_id)?;
+        Some(CronMode::new(run_sequence_number))
     } else {
         None
     };
 
     // 3. Fetch account summary
-    let summary = as_connection_error(client.account_summary())?;
+    let summary = fetch_account_summary_with_write_ahead(
+        client.as_ref(),
+        &mut audit,
+        &mut checkpoint_sequence,
+        &target_spec_ref,
+    )?;
     println!(
         "Account {} ({}): ${:.2} equity, ${:.2} cash",
         config.account.id,
@@ -166,8 +186,16 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     );
 
     // 4. Fetch current positions (convert from broker types to rebalancer types)
-    let broker_positions = as_connection_error(client.positions())?;
+    let broker_positions = fetch_positions_with_write_ahead(
+        client.as_ref(),
+        &mut audit,
+        &mut checkpoint_sequence,
+        &target_spec_ref,
+        summary.equity_cents,
+    )?;
     let positions = to_current_positions(&broker_positions);
+
+    #[cfg(not(feature = "write_ahead_logging"))]
     audit::log_positions(&mut audit, &positions, summary.equity_cents)?;
 
     display_current_positions(&positions, summary.equity_cents);
@@ -182,7 +210,14 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     let all_symbols = collect_all_symbols(&positions, target);
 
     // Fetch quotes and check staleness
-    let quotes = as_connection_error(client.quotes(&all_symbols))?;
+    let quotes = fetch_quotes_with_write_ahead(
+        client.as_ref(),
+        &mut audit,
+        &mut checkpoint_sequence,
+        &target_spec_ref,
+        &all_symbols,
+        config.execution.quote_staleness_threshold_sec,
+    )?;
     for quote in &quotes {
         if quote.is_stale(config.execution.quote_staleness_threshold_sec) {
             let age_sec = quote.timestamp.elapsed().unwrap_or_default().as_secs();
@@ -229,6 +264,13 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
         return Ok(());
     }
 
+    #[cfg(feature = "write_ahead_logging")]
+    audit::log_diff_checkpoint(
+        &mut audit,
+        next_checkpoint_sequence(&mut checkpoint_sequence),
+        &orders,
+    )?;
+    #[cfg(not(feature = "write_ahead_logging"))]
     audit::log_diff(&mut audit, &orders)?;
 
     // 7. Display the plan
@@ -257,6 +299,13 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
             "one or more risk checks failed — aborting".into(),
         ));
     }
+
+    #[cfg(feature = "write_ahead_logging")]
+    audit::log_risk_check_passed_checkpoint(
+        &mut audit,
+        next_checkpoint_sequence(&mut checkpoint_sequence),
+        &risk_report,
+    )?;
 
     // 9. Dry run stops here
     if opts.dry_run {
@@ -287,19 +336,6 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     let mut filled = 0;
     let mut failed = 0;
 
-    // Determine sequence number for checkpoint logging
-    // Use cron_mode sequence_number if available, otherwise use timestamp
-    let sequence_number = if let Some(ref cron) = cron_mode {
-        cron.sequence_number
-    } else {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| Error::Config(format!("clock error: {e}")))?
-            .as_secs()
-    };
-
-    let target_spec_ref = target.idempotency_scope();
-
     for (i, order) in orders.iter().enumerate() {
         print!(
             "[{}/{}] {} {} {} @ ${:.2} ... ",
@@ -314,17 +350,28 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
         submitted += 1;
 
         let client_order_id = derive_client_order_id(target, order)?;
+        let order_sequence = next_checkpoint_sequence(&mut checkpoint_sequence);
 
-        match execute_order_with_write_ahead(
+        let execution_result = execute_order_with_write_ahead(
             client.as_ref(),
             &mut audit,
             order,
             &client_order_id,
             timeout,
-            sequence_number,
+            order_sequence,
             &target_spec_ref,
-        ) {
+        );
+        checkpoint_sequence = checkpoint_sequence.max(order_sequence.saturating_add(1));
+
+        match execution_result {
             Ok(result) => {
+                #[cfg(feature = "write_ahead_logging")]
+                audit::log_order_filled_checkpoint(
+                    &mut audit,
+                    next_checkpoint_sequence(&mut checkpoint_sequence),
+                    &result,
+                )?;
+                #[cfg(not(feature = "write_ahead_logging"))]
                 audit::log_order_filled(&mut audit, &result)?;
 
                 match result.status {
@@ -369,25 +416,26 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
         }
     }
 
-    // 12. Log completion
-    if let Some(cron) = cron_mode {
-        let window_id = target.window_id();
-        audit::log_cron_completed(&mut audit, cron.sequence_number, &window_id, submitted, filled, failed)?;
-    } else {
-        audit::log_run_completed(&mut audit, submitted, filled, failed)?;
-    }
-    println!(
-        "\n{submitted} submitted, {filled} filled, {failed} failed. Audit logged to {}",
-        config.audit_path().display()
-    );
-
-    // 13. Reconcile
+    // 12. Reconcile
     info!("Running post-execution reconciliation...");
-    let final_broker_positions = as_connection_error(client.positions())?;
+    let final_broker_positions = fetch_positions_with_write_ahead(
+        client.as_ref(),
+        &mut audit,
+        &mut checkpoint_sequence,
+        &target_spec_ref,
+        summary.equity_cents,
+    )?;
     let final_positions = to_current_positions(&final_broker_positions);
 
     // Fetch final quotes and extract mid prices
-    let final_quotes = as_connection_error(client.quotes(&all_symbols))?;
+    let final_quotes = fetch_quotes_with_write_ahead(
+        client.as_ref(),
+        &mut audit,
+        &mut checkpoint_sequence,
+        &target_spec_ref,
+        &all_symbols,
+        config.execution.quote_staleness_threshold_sec,
+    )?;
     let final_prices: Vec<(Symbol, i64)> = final_quotes
         .iter()
         .map(|q| {
@@ -401,7 +449,12 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
         })
         .collect();
 
-    let final_summary = as_connection_error(client.account_summary())?;
+    let final_summary = fetch_account_summary_with_write_ahead(
+        client.as_ref(),
+        &mut audit,
+        &mut checkpoint_sequence,
+        &target_spec_ref,
+    )?;
 
     let report = reconcile::reconcile(
         &final_positions,
@@ -410,6 +463,35 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
         final_summary.equity_cents,
     );
     print!("\n{report}");
+
+    // 13. Log completion after post-execution reconciliation so the final
+    // checkpoint means all broker-observed state was captured.
+    if let Some(cron) = cron_mode {
+        let window_id = target.window_id();
+        audit::log_cron_completed(
+            &mut audit,
+            cron.sequence_number,
+            &window_id,
+            submitted,
+            filled,
+            failed,
+        )?;
+    }
+    #[cfg(feature = "write_ahead_logging")]
+    audit::log_run_completed_checkpoint(
+        &mut audit,
+        next_checkpoint_sequence(&mut checkpoint_sequence),
+        submitted,
+        filled,
+        failed,
+    )?;
+    #[cfg(not(feature = "write_ahead_logging"))]
+    audit::log_run_completed(&mut audit, submitted, filled, failed)?;
+
+    println!(
+        "\n{submitted} submitted, {filled} filled, {failed} failed. Audit logged to {}",
+        config.audit_path().display()
+    );
 
     Ok(())
 }
@@ -570,10 +652,186 @@ pub fn apply_constraint_overrides(
     config
 }
 
+/// Fetch account summary with write-ahead intent/result logging.
+#[cfg(feature = "write_ahead_logging")]
+pub fn fetch_account_summary_with_write_ahead(
+    broker: &dyn BrokerGateway,
+    audit: &mut AuditLog,
+    sequence_number: &mut u64,
+    target_spec_reference: &str,
+) -> Result<Account> {
+    audit::log_account_summary_intent_checkpoint(
+        audit,
+        next_checkpoint_sequence(sequence_number),
+        Utc::now(),
+        target_spec_reference,
+    )?;
+
+    let summary = as_connection_error(broker.account_summary())?;
+
+    audit::log_account_summary_result_checkpoint(
+        audit,
+        next_checkpoint_sequence(sequence_number),
+        summary.equity_cents,
+        summary.cash_cents,
+    )?;
+
+    Ok(summary)
+}
+
+/// Fetch account summary without write-ahead logging when the feature is disabled.
+#[cfg(not(feature = "write_ahead_logging"))]
+pub fn fetch_account_summary_with_write_ahead(
+    broker: &dyn BrokerGateway,
+    _audit: &mut AuditLog,
+    _sequence_number: &mut u64,
+    _target_spec_reference: &str,
+) -> Result<Account> {
+    as_connection_error(broker.account_summary())
+}
+
+/// Fetch positions with write-ahead intent/result logging.
+#[cfg(feature = "write_ahead_logging")]
+pub fn fetch_positions_with_write_ahead(
+    broker: &dyn BrokerGateway,
+    audit: &mut AuditLog,
+    sequence_number: &mut u64,
+    target_spec_reference: &str,
+    equity_cents: i64,
+) -> Result<Vec<Position>> {
+    audit::log_positions_intent_checkpoint(
+        audit,
+        next_checkpoint_sequence(sequence_number),
+        Utc::now(),
+        target_spec_reference,
+    )?;
+
+    let positions = as_connection_error(broker.positions())?;
+    let current_positions = to_current_positions(&positions);
+
+    audit::log_positions_result_checkpoint(
+        audit,
+        next_checkpoint_sequence(sequence_number),
+        &current_positions,
+        equity_cents,
+    )?;
+
+    Ok(positions)
+}
+
+/// Fetch positions without write-ahead logging when the feature is disabled.
+#[cfg(not(feature = "write_ahead_logging"))]
+pub fn fetch_positions_with_write_ahead(
+    broker: &dyn BrokerGateway,
+    _audit: &mut AuditLog,
+    _sequence_number: &mut u64,
+    _target_spec_reference: &str,
+    _equity_cents: i64,
+) -> Result<Vec<Position>> {
+    as_connection_error(broker.positions())
+}
+
+/// Fetch quotes with write-ahead intent/result logging.
+#[cfg(feature = "write_ahead_logging")]
+pub fn fetch_quotes_with_write_ahead(
+    broker: &dyn BrokerGateway,
+    audit: &mut AuditLog,
+    sequence_number: &mut u64,
+    target_spec_reference: &str,
+    symbols: &[Symbol],
+    staleness_threshold_sec: u64,
+) -> Result<Vec<Quote>> {
+    audit::log_quotes_intent_checkpoint(
+        audit,
+        next_checkpoint_sequence(sequence_number),
+        symbols,
+        staleness_threshold_sec,
+        Utc::now(),
+        target_spec_reference,
+    )?;
+
+    let quotes = as_connection_error(broker.quotes(symbols))?;
+
+    audit::log_quotes_result_checkpoint(audit, next_checkpoint_sequence(sequence_number), &quotes)?;
+
+    Ok(quotes)
+}
+
+/// Fetch quotes without write-ahead logging when the feature is disabled.
+#[cfg(not(feature = "write_ahead_logging"))]
+pub fn fetch_quotes_with_write_ahead(
+    broker: &dyn BrokerGateway,
+    _audit: &mut AuditLog,
+    _sequence_number: &mut u64,
+    _target_spec_reference: &str,
+    symbols: &[Symbol],
+    _staleness_threshold_sec: u64,
+) -> Result<Vec<Quote>> {
+    as_connection_error(broker.quotes(symbols))
+}
+
+/// Cancel an order with write-ahead intent/result logging.
+#[cfg(feature = "write_ahead_logging")]
+pub fn cancel_order_with_write_ahead(
+    broker: &dyn BrokerGateway,
+    audit: &mut AuditLog,
+    sequence_number: &mut u64,
+    order_id: u64,
+    cancellation_reason: &str,
+) -> Result<()> {
+    audit::log_cancel_intent_checkpoint(
+        audit,
+        next_checkpoint_sequence(sequence_number),
+        order_id,
+        cancellation_reason,
+        Utc::now(),
+    )?;
+
+    match broker.cancel_order(order_id) {
+        Ok(()) => {
+            audit::log_cancel_result_checkpoint(
+                audit,
+                next_checkpoint_sequence(sequence_number),
+                order_id,
+                true,
+                None,
+            )?;
+            Ok(())
+        }
+        Err(error) => {
+            audit::log_cancel_result_checkpoint(
+                audit,
+                next_checkpoint_sequence(sequence_number),
+                order_id,
+                false,
+                Some(&error.to_string()),
+            )?;
+            Err(Error::Order(format!(
+                "cancel failed for order {order_id}: {error}"
+            )))
+        }
+    }
+}
+
+/// Cancel an order without write-ahead logging when the feature is disabled.
+#[cfg(not(feature = "write_ahead_logging"))]
+pub fn cancel_order_with_write_ahead(
+    broker: &dyn BrokerGateway,
+    _audit: &mut AuditLog,
+    _sequence_number: &mut u64,
+    order_id: u64,
+    _cancellation_reason: &str,
+) -> Result<()> {
+    broker
+        .cancel_order(order_id)
+        .map_err(|e| Error::Order(format!("cancel failed for order {order_id}: {e}")))
+}
+
 /// Determine if a broker error is transient (retryable) or permanent.
 ///
 /// Transient errors: network timeouts, connection resets, rate limits
 /// Permanent errors: invalid symbol, insufficient margin, authentication failures
+#[cfg_attr(not(feature = "write_ahead_logging"), allow(dead_code))]
 fn is_transient_error(error: &BrokerError) -> bool {
     match error {
         BrokerError::Connection(_) => true,
@@ -664,7 +922,7 @@ pub fn execute_order_with_write_ahead(
                 // Log OrderSubmitted checkpoint on success
                 audit::log_order_submitted_checkpoint(
                     audit,
-                    sequence_number,
+                    sequence_number.saturating_add(1),
                     order,
                     result.order_id,
                 )?;
@@ -690,10 +948,13 @@ pub fn execute_order_with_write_ahead(
                         );
                         audit::log_order_failed_checkpoint(
                             audit,
-                            sequence_number,
+                            sequence_number.saturating_add(1),
                             "max_retries_exceeded",
                             &format!("{} (attempts: {})", broker_error, attempt),
-                            &format!("symbol:{}, client_order_id:{}", order.symbol, client_order_id_str),
+                            &format!(
+                                "symbol:{}, client_order_id:{}",
+                                order.symbol, client_order_id_str
+                            ),
                         )?;
                         return Err(Error::Order(format!(
                             "order failed after {} retries: {}",
@@ -708,10 +969,13 @@ pub fn execute_order_with_write_ahead(
                     );
                     audit::log_order_failed_checkpoint(
                         audit,
-                        sequence_number,
+                        sequence_number.saturating_add(1),
                         "permanent_error",
                         &broker_error.to_string(),
-                        &format!("symbol:{}, client_order_id:{}", order.symbol, client_order_id_str),
+                        &format!(
+                            "symbol:{}, client_order_id:{}",
+                            order.symbol, client_order_id_str
+                        ),
                     )?;
                     return Err(Error::Order(format!("order failed: {}", broker_error)));
                 }
@@ -757,7 +1021,9 @@ mod tests {
 
     #[test]
     fn test_is_transient_error_connection() {
-        assert!(is_transient_error(&BrokerError::Connection("timeout".to_string())));
+        assert!(is_transient_error(&BrokerError::Connection(
+            "timeout".to_string()
+        )));
         assert!(is_transient_error(&BrokerError::NotConnected));
     }
 
@@ -784,17 +1050,23 @@ mod tests {
 
     #[test]
     fn test_is_not_transient_error_invalid_symbol() {
-        assert!(!is_transient_error(&BrokerError::InvalidSymbol("BAD".to_string())));
+        assert!(!is_transient_error(&BrokerError::InvalidSymbol(
+            "BAD".to_string()
+        )));
     }
 
     #[test]
     fn test_is_not_transient_error_auth() {
-        assert!(!is_transient_error(&BrokerError::Auth("unauthorized".to_string())));
+        assert!(!is_transient_error(&BrokerError::Auth(
+            "unauthorized".to_string()
+        )));
     }
 
     #[test]
     fn test_is_not_transient_error_order() {
-        assert!(!is_transient_error(&BrokerError::Order("insufficient margin".to_string())));
+        assert!(!is_transient_error(&BrokerError::Order(
+            "insufficient margin".to_string()
+        )));
     }
 
     #[test]
@@ -806,7 +1078,9 @@ mod tests {
 
     #[test]
     fn test_is_not_transient_error_other() {
-        assert!(!is_transient_error(&BrokerError::Other("unknown error".to_string())));
+        assert!(!is_transient_error(&BrokerError::Other(
+            "unknown error".to_string()
+        )));
     }
 
     #[test]

@@ -1,0 +1,2 @@
+{"event":"run_started","ts":"2024-01-15T10:00:00Z","sequence_number":1,"checkpoint":"RunStarted","target_file":"target.json","account":"U1234567"}
+{"event":"account_summary_intent","ts":"2024-01-15T10:00:01Z","sequence_number":2,"checkpoint":"AccountSummaryIntent","timestamp":"2024-01-15T10:00:01Z","target_spec_reference":"target.json"}

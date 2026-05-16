@@ -1,0 +1,4 @@
+{"event":"run_started","ts":"2024-01-15T10:00:00Z","sequence_number":1,"checkpoint":"RunStarted","target_file":"target.json","account":"U1234567"}
+{"event":"order_intent","ts":"2024-01-15T10:00:01Z","sequence_number":2,"checkpoint":"OrderIntent","symbol":"AAPL","action":"Buy","shares":100,"limit":150.0,"client_order_id":"test-123","timestamp":"2024-01-15T10:00:01Z","target_spec_reference":"target.json","execution_context":"rebalance_run:1"}
+{"event":"order_submitted","ts":"2024-01-15T10:00:02Z","sequence_number":3,"checkpoint":"OrderSubmitted","symbol":"AAPL","action":"Buy","shares":100,"limit":150.0,"ibkr_id":12345}
+{"event":"cancel_intent","ts":"2024-01-15T10:00:03Z","sequence_number":4,"checkpoint":"CancelIntent","order_id":12345,"cancellation_reason":"manual_intervention","timestamp":"2024-01-15T10:00:03Z"}
