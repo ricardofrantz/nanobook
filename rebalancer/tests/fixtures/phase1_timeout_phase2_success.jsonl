@@ -1,0 +1,5 @@
+{"event":"kill_requested","ts":"2026-05-17T00:00:00Z","method":"two_phase","trigger_source":"command"}
+{"event":"kill_phase1_started","ts":"2026-05-17T00:00:00Z","pid":4242}
+{"event":"kill_phase2_started","ts":"2026-05-17T00:00:30Z","pid":4242}
+{"event":"kill_phase2_completed","ts":"2026-05-17T00:00:32Z","pid":4242,"attempts":2,"orders_cancelled_count":2,"orders_remaining_count":0,"cancelled_order_ids":[10,11],"remaining_order_ids":[],"error_messages":[]}
+{"event":"kill_completed","ts":"2026-05-17T00:00:32Z","method":"forced","orders_cancelled_count":2,"orders_remaining_count":0,"duration_seconds":32.0,"error_messages":[]}

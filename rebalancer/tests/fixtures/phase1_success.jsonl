@@ -1,0 +1,4 @@
+{"event":"kill_requested","ts":"2026-05-17T00:00:00Z","method":"two_phase","trigger_source":"command"}
+{"event":"kill_phase1_started","ts":"2026-05-17T00:00:00Z","pid":4242}
+{"event":"kill_phase1_completed","ts":"2026-05-17T00:00:01Z","pid":4242}
+{"event":"kill_completed","ts":"2026-05-17T00:00:01Z","method":"graceful","orders_cancelled_count":0,"orders_remaining_count":0,"duration_seconds":1.0,"error_messages":[]}

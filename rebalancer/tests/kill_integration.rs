@@ -86,6 +86,67 @@ fn test_kill_requested_audit_event_includes_method_and_source() {
     assert_eq!(events[0].data["trigger_source"], "command");
 }
 
+fn assert_fixture_sequence(path: &str, expected_events: &[&str]) {
+    let fixture_path = std::path::PathBuf::from(path);
+    let events = parse_audit_events(&fixture_path).unwrap();
+    let names: Vec<_> = events.iter().map(|event| event.event.as_str()).collect();
+    assert_eq!(names, expected_events);
+}
+
+#[test]
+fn golden_fixture_phase1_success_parses() {
+    assert_fixture_sequence(
+        "tests/fixtures/phase1_success.jsonl",
+        &[
+            "kill_requested",
+            "kill_phase1_started",
+            "kill_phase1_completed",
+            "kill_completed",
+        ],
+    );
+}
+
+#[test]
+fn golden_fixture_phase1_timeout_phase2_success_parses() {
+    assert_fixture_sequence(
+        "tests/fixtures/phase1_timeout_phase2_success.jsonl",
+        &[
+            "kill_requested",
+            "kill_phase1_started",
+            "kill_phase2_started",
+            "kill_phase2_completed",
+            "kill_completed",
+        ],
+    );
+    let events = parse_audit_events(&std::path::PathBuf::from(
+        "tests/fixtures/phase1_timeout_phase2_success.jsonl",
+    ))
+    .unwrap();
+    assert_eq!(events[3].data["orders_cancelled_count"], 2);
+    assert_eq!(events[3].data["orders_remaining_count"], 0);
+}
+
+#[test]
+fn golden_fixture_phase2_partial_failure_parses() {
+    assert_fixture_sequence(
+        "tests/fixtures/phase2_partial_failure.jsonl",
+        &[
+            "kill_requested",
+            "kill_phase1_started",
+            "kill_phase2_started",
+            "kill_phase2_completed",
+            "kill_completed",
+        ],
+    );
+    let events = parse_audit_events(&std::path::PathBuf::from(
+        "tests/fixtures/phase2_partial_failure.jsonl",
+    ))
+    .unwrap();
+    assert_eq!(events[3].data["orders_cancelled_count"], 1);
+    assert_eq!(events[3].data["orders_remaining_count"], 1);
+    assert_eq!(events[3].data["remaining_order_ids"][0], 11);
+}
+
 #[test]
 fn test_kill_completed_audit_event_includes_remaining_orders_and_errors() {
     let temp_dir = tempfile::tempdir().unwrap();
