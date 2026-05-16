@@ -9,12 +9,14 @@ use nanobook::Symbol;
 use nanobook_broker::error::BrokerError;
 use nanobook_broker::types::{Account, Position, Quote};
 use nanobook_broker::{BrokerSide, ClientOrderId};
-use nanobook_rebalancer::audit::{AuditLog, parse_audit_events, validate_checkpoints_from_parsed};
+use nanobook_rebalancer::audit::{
+    max_checkpoint_sequence, parse_audit_events, validate_checkpoints_from_parsed, AuditLog,
+};
 use nanobook_rebalancer::broker::BrokerGateway;
 use nanobook_rebalancer::execution::{
     cancel_order_with_write_ahead, fetch_account_summary_with_write_ahead,
 };
-use nanobook_rebalancer::recovery::{RecoveryAction, reconstruct_state};
+use nanobook_rebalancer::recovery::{reconstruct_state, RecoveryAction};
 
 struct MockBroker {
     fail_account: bool,
@@ -202,12 +204,10 @@ fn cancel_failure_logs_negative_result() {
     assert_eq!(events[0].event, "cancel_intent");
     assert_eq!(events[1].event, "cancel_result");
     assert_eq!(events[1].data["success"], false);
-    assert!(
-        events[1].data["error_message"]
-            .as_str()
-            .unwrap()
-            .contains("already filled")
-    );
+    assert!(events[1].data["error_message"]
+        .as_str()
+        .unwrap()
+        .contains("already filled"));
 }
 
 #[test]
@@ -215,11 +215,9 @@ fn complete_coverage_fixture_validates() {
     let fixture_path = std::path::PathBuf::from("tests/fixtures/complete_coverage.jsonl");
     let events = parse_audit_events(&fixture_path).unwrap();
 
-    assert!(
-        events
-            .iter()
-            .any(|event| event.event == "account_summary_intent")
-    );
+    assert!(events
+        .iter()
+        .any(|event| event.event == "account_summary_intent"));
     assert!(events.iter().any(|event| event.event == "positions_intent"));
     assert!(events.iter().any(|event| event.event == "quotes_intent"));
     assert!(events.iter().any(|event| event.event == "order_intent"));
@@ -244,4 +242,87 @@ fn recovery_requires_manual_review_for_incomplete_cancel_intent() {
     assert!(state.cancel_intent_logged);
     assert!(!state.cancel_result_logged);
     assert_eq!(action, RecoveryAction::ManualReview);
+}
+
+#[test]
+fn recovery_requires_manual_review_for_failed_cancel_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let audit_path = dir.path().join("cancel_failed_recovery.jsonl");
+    std::fs::write(
+        &audit_path,
+        r#"{"event":"run_started","ts":"2024-01-15T10:00:00Z","sequence_number":1,"checkpoint":"RunStarted","target_file":"target.json","account":"U1234567"}
+{"event":"cancel_intent","ts":"2024-01-15T10:00:01Z","sequence_number":2,"checkpoint":"CancelIntent","order_id":42,"cancellation_reason":"operator_requested","timestamp":"2024-01-15T10:00:01Z"}
+{"event":"cancel_result","ts":"2024-01-15T10:00:02Z","sequence_number":3,"checkpoint":"CancelResult","order_id":42,"success":false,"error_message":"already filled"}
+"#,
+    )
+    .unwrap();
+
+    let (state, action) = reconstruct_state(&audit_path).unwrap();
+
+    assert!(state.cancel_result_logged);
+    assert!(state.cancel_failed);
+    assert_eq!(action, RecoveryAction::ManualReview);
+}
+
+#[test]
+fn recovery_detects_latest_account_summary_intent_without_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let audit_path = dir.path().join("latest_account_incomplete.jsonl");
+    std::fs::write(
+        &audit_path,
+        r#"{"event":"run_started","ts":"2024-01-15T10:00:00Z","sequence_number":1,"checkpoint":"RunStarted","target_file":"target.json","account":"U1234567"}
+{"event":"account_summary_intent","ts":"2024-01-15T10:00:01Z","sequence_number":2,"checkpoint":"AccountSummaryIntent","timestamp":"2024-01-15T10:00:01Z","target_spec_reference":"target.json"}
+{"event":"account_summary_result","ts":"2024-01-15T10:00:02Z","sequence_number":3,"checkpoint":"AccountSummaryResult","equity":15000.0,"cash":10000.0}
+{"event":"account_summary_intent","ts":"2024-01-15T10:00:03Z","sequence_number":4,"checkpoint":"AccountSummaryIntent","timestamp":"2024-01-15T10:00:03Z","target_spec_reference":"target.json"}
+"#,
+    )
+    .unwrap();
+
+    let (state, action) = reconstruct_state(&audit_path).unwrap();
+
+    assert_eq!(state.last_account_summary_intent_sequence, Some(4));
+    assert_eq!(state.last_account_summary_result_sequence, Some(3));
+    assert_eq!(action, RecoveryAction::Restart);
+}
+
+#[test]
+fn max_checkpoint_sequence_reads_existing_audit_tail() {
+    let dir = tempfile::tempdir().unwrap();
+    let audit_path = dir.path().join("max_sequence.jsonl");
+    std::fs::write(
+        &audit_path,
+        r#"{"event":"run_started","ts":"2024-01-15T10:00:00Z","sequence_number":10,"checkpoint":"RunStarted","target_file":"target.json","account":"U1234567"}
+{"event":"no_rebalance_needed","ts":"2024-01-15T10:00:01Z"}
+{"event":"run_completed","ts":"2024-01-15T10:00:02Z","sequence_number":12,"checkpoint":"RunCompleted","submitted":0,"filled":0,"failed":0}
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(max_checkpoint_sequence(&audit_path).unwrap(), 12);
+}
+
+#[test]
+fn no_rebalance_checkpoint_sequence_validates_as_completed_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let audit_path = dir.path().join("no_rebalance_completed.jsonl");
+    std::fs::write(
+        &audit_path,
+        r#"{"event":"run_started","ts":"2024-01-15T10:00:00Z","sequence_number":1,"checkpoint":"RunStarted","target_file":"target.json","account":"U1234567"}
+{"event":"account_summary_intent","ts":"2024-01-15T10:00:01Z","sequence_number":2,"checkpoint":"AccountSummaryIntent","timestamp":"2024-01-15T10:00:01Z","target_spec_reference":"target.json"}
+{"event":"account_summary_result","ts":"2024-01-15T10:00:02Z","sequence_number":3,"checkpoint":"AccountSummaryResult","equity":15000.0,"cash":10000.0}
+{"event":"positions_intent","ts":"2024-01-15T10:00:03Z","sequence_number":4,"checkpoint":"PositionsIntent","timestamp":"2024-01-15T10:00:03Z","target_spec_reference":"target.json"}
+{"event":"positions_result","ts":"2024-01-15T10:00:04Z","sequence_number":5,"checkpoint":"PositionsResult","positions":[],"equity":15000.0}
+{"event":"quotes_intent","ts":"2024-01-15T10:00:05Z","sequence_number":6,"checkpoint":"QuotesIntent","symbols":[],"staleness_threshold_sec":60,"timestamp":"2024-01-15T10:00:05Z","target_spec_reference":"target.json"}
+{"event":"quotes_result","ts":"2024-01-15T10:00:06Z","sequence_number":7,"checkpoint":"QuotesResult","quotes":[]}
+{"event":"diff_computed","ts":"2024-01-15T10:00:07Z","sequence_number":8,"checkpoint":"DiffComputed","orders":[]}
+{"event":"no_rebalance_needed","ts":"2024-01-15T10:00:08Z"}
+{"event":"run_completed","ts":"2024-01-15T10:00:09Z","sequence_number":9,"checkpoint":"RunCompleted","submitted":0,"filled":0,"failed":0}
+"#,
+    )
+    .unwrap();
+
+    let events = parse_audit_events(&audit_path).unwrap();
+    validate_checkpoints_from_parsed(&events).unwrap();
+    let (_state, action) = reconstruct_state(&audit_path).unwrap();
+    assert_eq!(action, RecoveryAction::Restart);
 }

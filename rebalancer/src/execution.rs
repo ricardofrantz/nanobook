@@ -13,7 +13,7 @@ use nanobook_broker::{BrokerSide, ClientOrderId};
 use rustc_hash::FxHashMap;
 
 use crate::audit::{self, AuditLog};
-use crate::broker::{BrokerGateway, as_connection_error, connect_ibkr};
+use crate::broker::{as_connection_error, connect_ibkr, BrokerGateway};
 use crate::config::Config;
 use crate::diff::{self, Action, CurrentPosition, RebalanceOrder};
 use crate::error::{Error, Result};
@@ -143,11 +143,14 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     let client = connect_ibkr(config)?;
 
     // 2. Open audit log
-    let mut audit = AuditLog::open(&config.audit_path())?;
+    let audit_path = config.audit_path();
+    let existing_checkpoint_sequence = audit::max_checkpoint_sequence(&audit_path)?;
+    let mut audit = AuditLog::open(&audit_path)?;
     let run_sequence_number = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| Error::Config(format!("clock error: {e}")))?
-        .as_secs();
+        .as_secs()
+        .max(existing_checkpoint_sequence);
     let mut checkpoint_sequence = run_sequence_number;
     let target_spec_ref = target.idempotency_scope();
 
@@ -258,12 +261,6 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
 
     enforce_max_orders_per_run(orders.len(), config.execution.max_orders_per_run)?;
 
-    if orders.is_empty() {
-        println!("\nNo rebalancing needed — portfolio matches target.");
-        audit.log_simple("no_rebalance_needed")?;
-        return Ok(());
-    }
-
     #[cfg(feature = "write_ahead_logging")]
     audit::log_diff_checkpoint(
         &mut audit,
@@ -272,6 +269,22 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     )?;
     #[cfg(not(feature = "write_ahead_logging"))]
     audit::log_diff(&mut audit, &orders)?;
+
+    if orders.is_empty() {
+        println!("\nNo rebalancing needed — portfolio matches target.");
+        audit.log_simple("no_rebalance_needed")?;
+        #[cfg(feature = "write_ahead_logging")]
+        audit::log_run_completed_checkpoint(
+            &mut audit,
+            next_checkpoint_sequence(&mut checkpoint_sequence),
+            0,
+            0,
+            0,
+        )?;
+        #[cfg(not(feature = "write_ahead_logging"))]
+        audit::log_run_completed(&mut audit, 0, 0, 0)?;
+        return Ok(());
+    }
 
     // 7. Display the plan
     display_plan(&orders, &config.cost);

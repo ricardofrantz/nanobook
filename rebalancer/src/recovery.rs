@@ -6,8 +6,8 @@ use crate::diff::CurrentPosition;
 use crate::error::{Error, Result};
 use crate::target::TargetSpec;
 use nanobook::Symbol;
-use nanobook_broker::Broker;
 use nanobook_broker::types::f64_cents_checked;
+use nanobook_broker::Broker;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "write_ahead_logging")]
 use std::time::Duration;
@@ -66,6 +66,33 @@ pub struct RecoveredState {
     /// Whether cancel result was logged (write-ahead logging)
     #[cfg(feature = "write_ahead_logging")]
     pub cancel_result_logged: bool,
+    /// Last positions intent checkpoint sequence.
+    #[cfg(feature = "write_ahead_logging")]
+    pub last_positions_intent_sequence: Option<u64>,
+    /// Last positions result checkpoint sequence.
+    #[cfg(feature = "write_ahead_logging")]
+    pub last_positions_result_sequence: Option<u64>,
+    /// Last quotes intent checkpoint sequence.
+    #[cfg(feature = "write_ahead_logging")]
+    pub last_quotes_intent_sequence: Option<u64>,
+    /// Last quotes result checkpoint sequence.
+    #[cfg(feature = "write_ahead_logging")]
+    pub last_quotes_result_sequence: Option<u64>,
+    /// Last account summary intent checkpoint sequence.
+    #[cfg(feature = "write_ahead_logging")]
+    pub last_account_summary_intent_sequence: Option<u64>,
+    /// Last account summary result checkpoint sequence.
+    #[cfg(feature = "write_ahead_logging")]
+    pub last_account_summary_result_sequence: Option<u64>,
+    /// Last cancel intent checkpoint sequence.
+    #[cfg(feature = "write_ahead_logging")]
+    pub last_cancel_intent_sequence: Option<u64>,
+    /// Last cancel result checkpoint sequence.
+    #[cfg(feature = "write_ahead_logging")]
+    pub last_cancel_result_sequence: Option<u64>,
+    /// Whether any cancellation result reported failure.
+    #[cfg(feature = "write_ahead_logging")]
+    pub cancel_failed: bool,
 }
 
 /// Order reconstructed from audit log.
@@ -485,6 +512,24 @@ impl RecoveredState {
             cancel_intent_logged: false,
             #[cfg(feature = "write_ahead_logging")]
             cancel_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            last_positions_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_positions_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_quotes_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_quotes_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_account_summary_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_account_summary_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_cancel_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_cancel_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_failed: false,
         }
     }
 
@@ -500,7 +545,14 @@ impl RecoveredState {
         // or future kill-switch path even when the reconstructed order list is empty;
         // the broker-side cancellation state is still safety-critical.
         #[cfg(feature = "write_ahead_logging")]
-        if self.cancel_intent_logged && !self.cancel_result_logged {
+        if self.cancel_failed {
+            return RecoveryAction::ManualReview;
+        }
+        #[cfg(feature = "write_ahead_logging")]
+        if self.last_cancel_intent_sequence.is_some_and(|intent| {
+            self.last_cancel_result_sequence
+                .is_none_or(|result| result < intent)
+        }) {
             return RecoveryAction::ManualReview;
         }
 
@@ -528,21 +580,33 @@ impl RecoveredState {
 
         // Check for incomplete positions intent (PositionsIntent without PositionsResult)
         #[cfg(feature = "write_ahead_logging")]
-        if self.positions_intent_logged && !self.positions_result_logged {
+        if self.last_positions_intent_sequence.is_some_and(|intent| {
+            self.last_positions_result_sequence
+                .is_none_or(|result| result < intent)
+        }) {
             // Incomplete positions fetch - safe to restart since positions are read-only
             return RecoveryAction::Restart;
         }
 
         // Check for incomplete quotes intent (QuotesIntent without QuotesResult)
         #[cfg(feature = "write_ahead_logging")]
-        if self.quotes_intent_logged && !self.quotes_result_logged {
+        if self.last_quotes_intent_sequence.is_some_and(|intent| {
+            self.last_quotes_result_sequence
+                .is_none_or(|result| result < intent)
+        }) {
             // Incomplete quotes fetch - safe to restart since quotes are read-only
             return RecoveryAction::Restart;
         }
 
         // Check for incomplete account summary intent (AccountSummaryIntent without AccountSummaryResult)
         #[cfg(feature = "write_ahead_logging")]
-        if self.account_summary_intent_logged && !self.account_summary_result_logged {
+        if self
+            .last_account_summary_intent_sequence
+            .is_some_and(|intent| {
+                self.last_account_summary_result_sequence
+                    .is_none_or(|result| result < intent)
+            })
+        {
             // Incomplete account summary fetch - safe to restart since account summary is read-only
             return RecoveryAction::Restart;
         }
@@ -589,6 +653,7 @@ pub fn reconstruct_state(
                 state.sequence_number = event.sequence_number.unwrap_or(0);
                 state.timestamp = event.ts;
                 state.positions_intent_logged = true;
+                state.last_positions_intent_sequence = event.sequence_number;
             }
             Some(Checkpoint::PositionsFetched) => {
                 state.checkpoint = Checkpoint::PositionsFetched;
@@ -630,6 +695,7 @@ pub fn reconstruct_state(
                 state.sequence_number = event.sequence_number.unwrap_or(0);
                 state.timestamp = event.ts;
                 state.positions_result_logged = true;
+                state.last_positions_result_sequence = event.sequence_number;
 
                 // Extract positions from PositionsResult (same format as PositionsFetched)
                 if let Some(positions_array) = event.data.get("positions") {
@@ -806,6 +872,7 @@ pub fn reconstruct_state(
                 state.sequence_number = event.sequence_number.unwrap_or(0);
                 state.timestamp = event.ts;
                 state.quotes_intent_logged = true;
+                state.last_quotes_intent_sequence = event.sequence_number;
             }
             #[cfg(feature = "write_ahead_logging")]
             Some(Checkpoint::QuotesResult) => {
@@ -813,6 +880,7 @@ pub fn reconstruct_state(
                 state.sequence_number = event.sequence_number.unwrap_or(0);
                 state.timestamp = event.ts;
                 state.quotes_result_logged = true;
+                state.last_quotes_result_sequence = event.sequence_number;
                 // Quotes data is not stored in RecoveredState as it's transient
                 // but we mark that the fetch completed successfully
             }
@@ -822,6 +890,7 @@ pub fn reconstruct_state(
                 state.sequence_number = event.sequence_number.unwrap_or(0);
                 state.timestamp = event.ts;
                 state.account_summary_intent_logged = true;
+                state.last_account_summary_intent_sequence = event.sequence_number;
             }
             #[cfg(feature = "write_ahead_logging")]
             Some(Checkpoint::AccountSummaryResult) => {
@@ -829,6 +898,7 @@ pub fn reconstruct_state(
                 state.sequence_number = event.sequence_number.unwrap_or(0);
                 state.timestamp = event.ts;
                 state.account_summary_result_logged = true;
+                state.last_account_summary_result_sequence = event.sequence_number;
 
                 // Extract equity from AccountSummaryResult
                 if let Some(equity) = event.data.get("equity") {
@@ -846,6 +916,7 @@ pub fn reconstruct_state(
                 state.sequence_number = event.sequence_number.unwrap_or(0);
                 state.timestamp = event.ts;
                 state.cancel_intent_logged = true;
+                state.last_cancel_intent_sequence = event.sequence_number;
                 // Cancel intent metadata (order_id, cancellation_reason) could be stored here
                 // but is not currently tracked in RecoveredState
             }
@@ -855,6 +926,12 @@ pub fn reconstruct_state(
                 state.sequence_number = event.sequence_number.unwrap_or(0);
                 state.timestamp = event.ts;
                 state.cancel_result_logged = true;
+                state.last_cancel_result_sequence = event.sequence_number;
+                state.cancel_failed |= event
+                    .data
+                    .get("success")
+                    .and_then(|success| success.as_bool())
+                    .is_some_and(|success| !success);
                 // Cancel result could update order status in RecoveredState
                 // but is not currently implemented as cancel is not used in the main flow
             }
@@ -1399,6 +1476,24 @@ mod tests {
             cancel_intent_logged: false,
             #[cfg(feature = "write_ahead_logging")]
             cancel_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            last_positions_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_positions_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_quotes_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_quotes_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_account_summary_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_account_summary_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_cancel_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_cancel_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_failed: false,
         };
 
         let report = compare_broker_state(&broker, &state).unwrap();
@@ -1455,6 +1550,24 @@ mod tests {
             cancel_intent_logged: false,
             #[cfg(feature = "write_ahead_logging")]
             cancel_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            last_positions_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_positions_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_quotes_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_quotes_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_account_summary_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_account_summary_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_cancel_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_cancel_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_failed: false,
         };
 
         let report = compare_broker_state(&broker, &state).unwrap();
@@ -1500,6 +1613,24 @@ mod tests {
             cancel_intent_logged: false,
             #[cfg(feature = "write_ahead_logging")]
             cancel_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            last_positions_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_positions_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_quotes_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_quotes_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_account_summary_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_account_summary_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_cancel_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_cancel_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_failed: false,
         };
 
         let report = compare_broker_state(&broker, &state).unwrap();
@@ -1700,6 +1831,24 @@ mod tests {
             cancel_intent_logged: false,
             #[cfg(feature = "write_ahead_logging")]
             cancel_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            last_positions_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_positions_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_quotes_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_quotes_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_account_summary_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_account_summary_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_cancel_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_cancel_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_failed: false,
         };
 
         let report = compare_broker_state(&broker, &state).unwrap();
@@ -1795,6 +1944,24 @@ mod tests {
             cancel_intent_logged: false,
             #[cfg(feature = "write_ahead_logging")]
             cancel_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            last_positions_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_positions_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_quotes_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_quotes_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_account_summary_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_account_summary_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_cancel_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_cancel_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_failed: false,
         };
 
         let action = state.determine_recovery_action();
@@ -1839,6 +2006,24 @@ mod tests {
             cancel_intent_logged: false,
             #[cfg(feature = "write_ahead_logging")]
             cancel_result_logged: false,
+            #[cfg(feature = "write_ahead_logging")]
+            last_positions_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_positions_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_quotes_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_quotes_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_account_summary_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_account_summary_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_cancel_intent_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            last_cancel_result_sequence: None,
+            #[cfg(feature = "write_ahead_logging")]
+            cancel_failed: false,
         };
 
         let action = state.determine_recovery_action();
@@ -1923,6 +2108,24 @@ mod tests {
                 cancel_intent_logged: false,
                 #[cfg(feature = "write_ahead_logging")]
                 cancel_result_logged: false,
+                #[cfg(feature = "write_ahead_logging")]
+                last_positions_intent_sequence: None,
+                #[cfg(feature = "write_ahead_logging")]
+                last_positions_result_sequence: None,
+                #[cfg(feature = "write_ahead_logging")]
+                last_quotes_intent_sequence: None,
+                #[cfg(feature = "write_ahead_logging")]
+                last_quotes_result_sequence: None,
+                #[cfg(feature = "write_ahead_logging")]
+                last_account_summary_intent_sequence: None,
+                #[cfg(feature = "write_ahead_logging")]
+                last_account_summary_result_sequence: None,
+                #[cfg(feature = "write_ahead_logging")]
+                last_cancel_intent_sequence: None,
+                #[cfg(feature = "write_ahead_logging")]
+                last_cancel_result_sequence: None,
+                #[cfg(feature = "write_ahead_logging")]
+                cancel_failed: false,
             };
 
             let action = state.determine_recovery_action();

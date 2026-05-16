@@ -159,6 +159,10 @@ pub struct AuditEvent {
 
 pub fn parse_audit_events(path: &Path) -> Result<Vec<AuditEvent>> {
     let contents = std::fs::read_to_string(path)?;
+    parse_audit_events_from_str(&contents)
+}
+
+pub fn parse_audit_events_from_str(contents: &str) -> Result<Vec<AuditEvent>> {
     let mut events = Vec::new();
     for (line_num, line) in contents.lines().enumerate() {
         if line.trim().is_empty() {
@@ -175,6 +179,24 @@ pub fn parse_audit_events(path: &Path) -> Result<Vec<AuditEvent>> {
         }
     }
     Ok(events)
+}
+
+/// Return the highest checkpoint sequence number currently present in an audit log.
+///
+/// Missing logs are treated as empty so the first run can create the file. Corrupt
+/// existing logs still fail closed because appending new checkpoints to them would
+/// make recovery ambiguity worse.
+pub fn max_checkpoint_sequence(path: &Path) -> Result<u64> {
+    match std::fs::read_to_string(path) {
+        Ok(contents) => Ok(parse_audit_events_from_str(&contents)?
+            .into_iter()
+            .filter(|event| Checkpoint::from_event_name(&event.event).is_some())
+            .filter_map(|event| event.sequence_number)
+            .max()
+            .unwrap_or(0)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(error.into()),
+    }
 }
 
 pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
@@ -221,8 +243,6 @@ pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
 
     let run_started_idx = require_checkpoint(Checkpoint::RunStarted)?;
     let diff_idx = require_checkpoint(Checkpoint::DiffComputed)?;
-    let risk_idx = require_checkpoint(Checkpoint::RiskCheckPassed)?;
-    let order_intent_idx = require_checkpoint(Checkpoint::OrderIntent)?;
 
     if run_started_idx != 0 {
         return Err(Error::AuditValidation(
@@ -255,15 +275,34 @@ pub fn validate_checkpoints_from_parsed(events: &[AuditEvent]) -> Result<()> {
             "DiffComputed must come after positions are available".to_string(),
         ));
     }
-    if risk_idx <= diff_idx {
-        return Err(Error::AuditValidation(
-            "RiskCheckPassed must come after DiffComputed".to_string(),
-        ));
-    }
-    if order_intent_idx <= risk_idx {
-        return Err(Error::AuditValidation(
-            "OrderIntent must come after RiskCheckPassed".to_string(),
-        ));
+
+    let diff_orders = events
+        .iter()
+        .rev()
+        .find(|event| Checkpoint::from_event_name(&event.event) == Some(Checkpoint::DiffComputed))
+        .and_then(|event| event.data.get("orders"))
+        .and_then(|orders| orders.as_array());
+    let empty_diff_completed_run = diff_orders.is_some_and(|orders| orders.is_empty());
+
+    if !empty_diff_completed_run {
+        let risk_idx = require_checkpoint(Checkpoint::RiskCheckPassed)?;
+        let order_intent_idx = require_checkpoint(Checkpoint::OrderIntent)?;
+        if risk_idx <= diff_idx {
+            return Err(Error::AuditValidation(
+                "RiskCheckPassed must come after DiffComputed".to_string(),
+            ));
+        }
+        if order_intent_idx <= risk_idx {
+            return Err(Error::AuditValidation(
+                "OrderIntent must come after RiskCheckPassed".to_string(),
+            ));
+        }
+    } else if let Some(run_completed_idx) = index_of(Checkpoint::RunCompleted) {
+        if run_completed_idx <= diff_idx {
+            return Err(Error::AuditValidation(
+                "RunCompleted must come after empty DiffComputed".to_string(),
+            ));
+        }
     }
 
     #[cfg(feature = "write_ahead_logging")]
