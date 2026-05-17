@@ -1,415 +1,296 @@
 #!/usr/bin/env python3
-"""
-Generate HTML report for v0.14 paper trading soak.
+"""Generate a reconstructable HTML report for the paper-live IBKR soak.
 
-This script reads audit logs and generates an HTML report with:
-- Daily equity chart
-- Incident log table
-- Position evolution
-- Reconciliation summary
+The report is intentionally derived from sanitized audit JSONL excerpts only.
+It accepts old and new audit event shapes and ignores unknown fields so the
+artifact can be regenerated after sensitive account/order details are scrubbed.
 """
 
+from __future__ import annotations
+
+import html
 import json
 import sys
-from datetime import datetime
+from collections import defaultdict
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+
+CENTS = 100.0
 
 
-def generate_report(audit_log_path: str, output_path: str, config: dict):
-    """
-    Generate HTML report from audit log.
-    
-    Args:
-        audit_log_path: Path to audit.jsonl file
-        output_path: Path to output HTML file
-        config: Configuration dict with metadata
-    """
-    # Read audit log
-    audit_data = read_audit_log(audit_log_path)
-    
-    # Extract metrics
-    metrics = extract_metrics(audit_data, config)
-    
-    # Generate HTML
-    html = render_html(metrics, config)
-    
-    # Write output
-    with open(output_path, 'w') as f:
-        f.write(html)
-    
-    print(f"Report generated: {output_path}")
+def parse_ts(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+    except ValueError:
+        return None
 
 
-def read_audit_log(path: str) -> list:
-    """Read JSONL audit log."""
-    data = []
-    with open(path, 'r') as f:
-        for line in f:
-            if line.strip():
-                data.append(json.loads(line))
-    return data
+def event_day(event: dict[str, Any]) -> str:
+    ts = parse_ts(event.get("ts"))
+    return ts.date().isoformat() if ts else "unknown"
 
 
-def extract_metrics(audit_data: list, config: dict) -> dict:
-    """Extract metrics from audit log."""
-    # This is a placeholder - actual implementation would parse audit log
-    # and extract real metrics like daily equity, incidents, etc.
-    
-    return {
-        'start_date': config.get('start_date', '2026-05-13'),
-        'end_date': config.get('end_date', '2026-05-27'),
-        'duration_days': config.get('duration_days', 14),
-        'account': config.get('account', 'DU123456'),
-        'universe': config.get('universe', 'S&P 100'),
-        'orders_sent': config.get('orders_sent', 147),
-        'orders_filled': config.get('orders_filled', 143),
-        'incidents': config.get('incidents', 5),
-        'auto_recovered': config.get('auto_recovered', 5),
-        'daily_equity': config.get('daily_equity', [100000, 100840, 101220, 100690, 101450, 102100, 101780, 102450, 102190, 101930, 102680, 103210, 102870, 103540]),
-        'incident_log': config.get('incident_log', [
+def money(cents: int | float | None) -> float | None:
+    if cents is None:
+        return None
+    return float(cents) / CENTS
+
+
+def read_audit_log(path: str | Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    with Path(path).open("r", encoding="utf-8") as handle:
+        for line_no, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid JSONL at line {line_no}: {exc}") from exc
+            if not isinstance(row, dict):
+                raise ValueError(f"invalid JSONL at line {line_no}: expected object")
+            rows.append(row)
+    return rows
+
+
+def order_id(event: dict[str, Any]) -> str | None:
+    value = event.get("ibkr_id") or event.get("order_id") or event.get("id")
+    return str(value) if value is not None else None
+
+
+def extract_positions(event: dict[str, Any]) -> list[dict[str, Any]]:
+    data = event.get("positions") or event.get("data", {}).get("positions")
+    return data if isinstance(data, list) else []
+
+
+def extract_metrics(audit_data: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
+    events = sorted(audit_data, key=lambda row: row.get("ts", ""))
+    days = [event_day(event) for event in events if event_day(event) != "unknown"]
+    start_date = config.get("start_date") or (days[0] if days else "unknown")
+    end_date = config.get("end_date") or (days[-1] if days else "unknown")
+
+    equity_by_day: dict[str, float] = {}
+    positions_by_day: dict[str, dict[str, float]] = defaultdict(dict)
+    incidents: list[dict[str, str]] = []
+    reconciles: list[dict[str, str]] = []
+    submitted: dict[str, dict[str, Any]] = {}
+    filled: dict[str, dict[str, Any]] = {}
+
+    account = config.get("account", "sanitized")
+    for event in events:
+        name = str(event.get("event", ""))
+        day = event_day(event)
+        if event.get("account_id"):
+            account = event["account_id"]
+
+        equity_cents = (
+            event.get("equity_cents")
+            or event.get("net_liquidation_cents")
+            or event.get("account", {}).get("equity_cents")
+        )
+        if equity_cents is not None:
+            equity_by_day[day] = money(equity_cents) or 0.0
+
+        for pos in extract_positions(event):
+            symbol = str(pos.get("symbol", "unknown"))
+            qty = pos.get("quantity", pos.get("qty", pos.get("shares", 0)))
+            try:
+                positions_by_day[day][symbol] = float(qty)
+            except (TypeError, ValueError):
+                positions_by_day[day][symbol] = 0.0
+
+        oid = order_id(event)
+        if name in {"order_submitted", "order_intent", "order_submit_result"} and oid:
+            submitted[oid] = event
+        if name in {"order_filled", "fill", "order_fill"} and oid:
+            filled[oid] = event
+
+        mismatch_count = event.get("mismatch_count") or len(event.get("mismatches", []))
+        if "reconcile" in name and mismatch_count:
+            reconciles.append(
+                {
+                    "when": event.get("ts", "unknown"),
+                    "summary": str(event.get("summary") or f"{mismatch_count} mismatch(es)"),
+                    "details": json.dumps(event.get("mismatches", event), sort_keys=True),
+                }
+            )
+
+        if is_incident(event):
+            incidents.append(
+                {
+                    "when": event.get("ts", "unknown"),
+                    "type": classify_incident(event),
+                    "description": str(event.get("message") or event.get("error") or name),
+                    "recovery": str(event.get("recovery") or event.get("resolution") or "see audit trail"),
+                }
+            )
+
+    slippage_rows = []
+    for oid, sub in submitted.items():
+        fill = filled.get(oid)
+        if not fill:
+            continue
+        expected = sub.get("limit_price_cents") or sub.get("limit") or sub.get("expected_price_cents")
+        actual = fill.get("avg_price_cents") or fill.get("avg_price") or fill.get("fill_price_cents")
+        expected_usd = money(expected) if isinstance(expected, int) else float(expected or 0)
+        actual_usd = money(actual) if isinstance(actual, int) else float(actual or 0)
+        slippage_rows.append(
             {
-                'when': 'Apr 08 · 09:31',
-                'type': 'reconnect',
-                'description': 'TWS API dropped at market open',
-                'recovery': 'Auto-reconnect from v0.13 hardening; orders re-queued; 4s delay; no fills lost'
-            },
-            {
-                'when': 'Apr 10 · 14:22',
-                'type': 'cancel race',
-                'description': 'Cancel sent for order already filled',
-                'recovery': 'Fill reconciler caught it; position correctly reflected; no impact'
-            },
-            {
-                'when': 'Apr 14 · 11:05',
-                'type': 'stale',
-                'description': 'Bid > ask on XOM for 2 ticks',
-                'recovery': 'Quote validator flagged; orders held 2 ticks; 1 delayed order'
-            },
-            {
-                'when': 'Apr 17 · 09:30',
-                'type': 'partial+drop',
-                'description': '22/38 shares filled then TWS dropped',
-                'recovery': 'Reconnect; remaining 16 shares re-sent as new order; correct final state'
-            },
-            {
-                'when': 'Apr 22 · 13:41',
-                'type': 'clock',
-                'description': 'System clock drifted 1.8s vs TWS',
-                'recovery': 'NTP resync auto-triggered; audit-log note inserted; no order impact'
+                "order_id": oid,
+                "symbol": sub.get("symbol", fill.get("symbol", "unknown")),
+                "side": sub.get("action", sub.get("side", "unknown")),
+                "expected": expected_usd,
+                "actual": actual_usd,
+                "slippage": actual_usd - expected_usd,
             }
-        ]),
-        'return_pct': config.get('return_pct', 3.54),
-        'max_drawdown_pct': config.get('max_drawdown_pct', -0.52)
+        )
+
+    daily_equity = [{"day": day, "equity": equity} for day, equity in sorted(equity_by_day.items())]
+    if not daily_equity and config.get("daily_equity"):
+        daily_equity = [
+            {"day": f"d{i + 1}", "equity": float(value)}
+            for i, value in enumerate(config["daily_equity"])
+        ]
+
+    first_equity = daily_equity[0]["equity"] if daily_equity else 0.0
+    last_equity = daily_equity[-1]["equity"] if daily_equity else first_equity
+    return_pct = ((last_equity / first_equity) - 1.0) * 100.0 if first_equity else 0.0
+    max_drawdown_pct = compute_max_drawdown([row["equity"] for row in daily_equity])
+
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "duration_days": len({row["day"] for row in daily_equity}) or config.get("duration_days", 0),
+        "account": account,
+        "universe": config.get("universe", "sanitized universe"),
+        "orders_sent": len(submitted),
+        "orders_filled": len(filled),
+        "reconcile_count": len(reconciles),
+        "incidents": len(incidents),
+        "auto_recovered": sum(1 for incident in incidents if incident["recovery"] != "manual"),
+        "daily_equity": daily_equity,
+        "positions_by_day": dict(sorted(positions_by_day.items())),
+        "reconciles": reconciles,
+        "slippage_rows": slippage_rows,
+        "incident_log": incidents,
+        "return_pct": return_pct,
+        "max_drawdown_pct": max_drawdown_pct,
     }
 
 
-def render_html(metrics: dict, config: dict) -> str:
-    """Render HTML report."""
-    
-    html = f"""<!doctype html>
+def compute_max_drawdown(values: list[float]) -> float:
+    peak = None
+    max_drawdown = 0.0
+    for value in values:
+        peak = value if peak is None else max(peak, value)
+        if peak:
+            max_drawdown = min(max_drawdown, (value / peak - 1.0) * 100.0)
+    return max_drawdown
+
+
+def is_incident(event: dict[str, Any]) -> bool:
+    name = str(event.get("event", "")).lower()
+    level = str(event.get("level", "")).lower()
+    return (
+        level in {"warn", "warning", "error"}
+        or any(token in name for token in ["incident", "error", "failed", "reconnect", "kill", "stale", "mismatch"])
+    )
+
+
+def classify_incident(event: dict[str, Any]) -> str:
+    text = f"{event.get('event', '')} {event.get('message', '')} {event.get('error', '')}".lower()
+    for token in ["reconnect", "cancel", "stale", "partial", "clock", "kill", "mismatch"]:
+        if token in text:
+            return token
+    if "error" in text or "failed" in text:
+        return "error"
+    return "incident"
+
+
+def rows_html(rows: list[str]) -> str:
+    return "\n".join(rows) if rows else '<tr><td colspan="99">None observed in sanitized audit excerpt.</td></tr>'
+
+
+def esc(value: Any) -> str:
+    return html.escape(str(value))
+
+
+def render_html(metrics: dict[str, Any], config: dict[str, Any]) -> str:
+    equity_labels = [row["day"] for row in metrics["daily_equity"]]
+    equity_values = [round(row["equity"], 2) for row in metrics["daily_equity"]]
+    position_rows = []
+    for day, positions in metrics["positions_by_day"].items():
+        position_rows.append(
+            f"<tr><td>{esc(day)}</td><td>{esc(', '.join(f'{sym}: {qty:g}' for sym, qty in sorted(positions.items())))}</td></tr>"
+        )
+    reconcile_rows = [
+        f"<tr><td>{esc(row['when'])}</td><td>{esc(row['summary'])}</td><td><code>{esc(row['details'])}</code></td></tr>"
+        for row in metrics["reconciles"]
+    ]
+    slippage_rows = [
+        f"<tr><td>{esc(row['order_id'])}</td><td>{esc(row['symbol'])}</td><td>{esc(row['side'])}</td><td class='num'>{row['expected']:.4f}</td><td class='num'>{row['actual']:.4f}</td><td class='num'>{row['slippage']:+.4f}</td></tr>"
+        for row in metrics["slippage_rows"]
+    ]
+    incident_rows = [
+        f"<tr><td>{esc(row['when'])}</td><td><span class='tag'>{esc(row['type'])}</span> {esc(row['description'])}</td><td>{esc(row['recovery'])}</td></tr>"
+        for row in metrics["incident_log"]
+    ]
+
+    return f"""<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>nanobook v0.14 — Paper-Live Soak Report</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css">
-  <style>
-    :root {{
-      --bid: #2a7f5f;
-      --ask: #b03a3a;
-      --accent: #4a6fa5;
-      --bg: #f8f8f6;
-      --text: #1a1a1a;
-      --muted: #666;
-      --line: #ddd;
-      --panel: #fff;
-      --zebra: #fafafa;
-      --badge-bg: #f5e9b0;
-      --badge-text: #7a6200;
-      --mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, monospace;
-      --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--sans);
-      font-variant-numeric: tabular-nums;
-      line-height: 1.5;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }}
-    main {{
-      width: min(960px, calc(100% - 40px));
-      margin: 0 auto;
-      padding: 36px 0 56px;
-    }}
-    .badge {{
-      background: var(--badge-bg);
-      color: var(--badge-text);
-      display: inline-block;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      padding: 4px 8px;
-      text-transform: uppercase;
-    }}
-    h1 {{
-      font-size: clamp(28px, 4vw, 38px);
-      font-weight: 650;
-      letter-spacing: -0.01em;
-      line-height: 1.1;
-      margin: 14px 0 6px;
-      text-wrap: balance;
-    }}
-    .subtitle {{
-      color: #444;
-      font-size: 17px;
-      margin: 0;
-      text-wrap: pretty;
-    }}
-    .metadata {{
-      color: var(--muted);
-      font-size: 13px;
-      margin: 8px 0 24px;
-      font-family: var(--mono);
-    }}
-    .tldr {{
-      background: #fff;
-      border: 1px solid var(--line);
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      margin: 28px 0 28px;
-    }}
-    .tldr-item {{
-      padding: 16px 18px;
-      border-right: 1px solid var(--line);
-    }}
-    .tldr-item:last-child {{ border-right: 0; }}
-    .tldr-num {{
-      font-family: var(--mono);
-      font-size: 24px;
-      font-weight: 700;
-      letter-spacing: -0.01em;
-    }}
-    .tldr-label {{
-      color: var(--muted);
-      font-size: 12px;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      margin-top: 5px;
-    }}
-    .lede {{
-      font-size: 16px;
-      color: #333;
-      max-width: 720px;
-      margin: 0 0 36px;
-      text-wrap: pretty;
-    }}
-    .section {{ margin-top: 40px; }}
-    .section h2 {{
-      font-size: 18px;
-      font-weight: 650;
-      margin: 0 0 4px;
-      letter-spacing: -0.005em;
-    }}
-    .section-caption {{
-      color: #555;
-      font-size: 14px;
-      margin: 0 0 14px;
-      max-width: 720px;
-      text-wrap: pretty;
-    }}
-    .chart {{
-      background: var(--panel);
-      border: 1px solid var(--line);
-      height: 320px;
-      width: 100%;
-    }}
-    table {{
-      border-collapse: collapse;
-      font-size: 14px;
-      margin-top: 14px;
-      width: 100%;
-    }}
-    th, td {{
-      border: 1px solid var(--line);
-      padding: 9px 10px;
-      text-align: left;
-      vertical-align: top;
-    }}
-    th {{
-      background: #f1f1ef;
-      color: #333;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }}
-    tbody tr:nth-child(even) {{ background: var(--zebra); }}
-    td.num, .num, .timestamp {{
-      font-family: var(--mono);
-      font-variant-numeric: tabular-nums;
-    }}
-    .type-tag {{
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      padding: 2px 6px;
-      border: 1px solid currentColor;
-    }}
-    .type-reconnect {{ color: #4a6fa5; }}
-    .type-cancel {{ color: #2a7f5f; }}
-    .type-stale {{ color: #b03a3a; }}
-    .type-partial {{ color: #7a5a00; }}
-    .type-clock {{ color: #666; }}
-    .footer {{
-      border-top: 1px solid var(--line);
-      color: var(--muted);
-      font-size: 12px;
-      margin-top: 48px;
-      padding-top: 14px;
-    }}
-    @media (max-width: 780px) {{
-      main {{ width: min(100% - 28px, 1100px); }}
-      .tldr {{ grid-template-columns: 1fr 1fr; }}
-      .tldr-item {{ border-right: 0; border-bottom: 1px solid var(--line); }}
-      .tldr-item:nth-last-child(-n+2) {{ border-bottom: 0; }}
-    }}
-  </style>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nanobook paper-live soak report</title>
+<style>
+body{{margin:0;background:#f8f8f6;color:#1a1a1a;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;line-height:1.5}}main{{width:min(1040px,calc(100% - 40px));margin:0 auto;padding:36px 0 56px}}h1{{font-size:36px;line-height:1.1;margin:8px 0}}h2{{font-size:19px;margin:34px 0 8px}}.meta,.caption{{color:#666}}.grid{{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid #ddd;background:#fff;margin:24px 0}}.cell{{padding:16px;border-right:1px solid #ddd}}.cell:last-child{{border-right:0}}.num{{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}}.big{{font-size:24px;font-weight:700}}table{{border-collapse:collapse;width:100%;background:#fff;margin-top:10px}}th,td{{border:1px solid #ddd;padding:8px 10px;vertical-align:top;text-align:left}}th{{background:#f1f1ef;font-size:12px;text-transform:uppercase;letter-spacing:.04em}}code{{font-size:12px;white-space:pre-wrap}}.tag{{font-size:11px;text-transform:uppercase;border:1px solid currentColor;padding:2px 5px;margin-right:5px}}#chart{{height:260px;border:1px solid #ddd;background:#fff;padding:12px}}.bar{{height:18px;background:#4a6fa5;margin:6px 0}}@media(max-width:760px){{.grid{{grid-template-columns:1fr 1fr}}}}
+</style>
 </head>
-<body>
-  <main>
-    <header>
-      <span class="badge">v0.14 PAPER SOAK REPORT</span>
-      <h1>Paper-Live Soak Report</h1>
-      <p class="subtitle">Did the runner survive {metrics['duration_days']} days of IBKR paper trading without manual intervention?</p>
-      <div class="metadata">
-        Account: {metrics['account']} · Universe: {metrics['universe']} · {metrics['start_date']} to {metrics['end_date']}
-      </div>
-    </header>
+<body><main>
+<p class="meta">Reconstructable from sanitized audit JSONL · {esc(config.get('label', 'v0.15 paper-live soak'))}</p>
+<h1>Paper-live soak report</h1>
+<p class="caption">{esc(metrics['start_date'])} to {esc(metrics['end_date'])} · account {esc(metrics['account'])} · {esc(metrics['universe'])}</p>
+<div class="grid">
+  <div class="cell"><div class="big num">{metrics['duration_days']}</div><div class="meta">equity days</div></div>
+  <div class="cell"><div class="big num">{metrics['orders_sent']} / {metrics['orders_filled']}</div><div class="meta">orders / fills</div></div>
+  <div class="cell"><div class="big num">{metrics['reconcile_count']}</div><div class="meta">reconcile mismatches</div></div>
+  <div class="cell"><div class="big num">{metrics['incidents']}</div><div class="meta">incidents</div></div>
+</div>
+<h2>Daily equity curve</h2><p class="caption">Return {metrics['return_pct']:+.2f}%; max drawdown {metrics['max_drawdown_pct']:+.2f}%.</p>
+<div id="chart"></div>
+<h2>Position evolution</h2><table><thead><tr><th>Day</th><th>Positions</th></tr></thead><tbody>{rows_html(position_rows)}</tbody></table>
+<h2>Reconcile mismatches</h2><table><thead><tr><th>When</th><th>Summary</th><th>Details</th></tr></thead><tbody>{rows_html(reconcile_rows)}</tbody></table>
+<h2>Realized vs expected slippage</h2><table><thead><tr><th>Order</th><th>Symbol</th><th>Side</th><th>Expected</th><th>Actual</th><th>Slippage</th></tr></thead><tbody>{rows_html(slippage_rows)}</tbody></table>
+<h2>Operational incidents</h2><table><thead><tr><th>When</th><th>What</th><th>Recovery</th></tr></thead><tbody>{rows_html(incident_rows)}</tbody></table>
+<script>
+const labels = {json.dumps(equity_labels)};
+const values = {json.dumps(equity_values)};
+const max = Math.max(...values, 1);
+document.getElementById('chart').innerHTML = values.map((v,i)=>`<div class="num">${{labels[i]}} $${{v.toFixed(2)}}</div><div class="bar" style="width:${{Math.max(2, v / max * 100)}}%"></div>`).join('');
+</script>
+</main></body></html>"""
 
-    <div class="tldr">
-      <div class="tldr-item">
-        <div class="tldr-num">{metrics['duration_days']} days</div>
-        <div class="tldr-label">continuous paper-account run</div>
-      </div>
-      <div class="tldr-item">
-        <div class="tldr-num">{metrics['orders_sent']} / {metrics['orders_filled']}</div>
-        <div class="tldr-label">orders sent / fills</div>
-      </div>
-      <div class="tldr-item">
-        <div class="tldr-num">{metrics['incidents']} / {metrics['auto_recovered']}</div>
-        <div class="tldr-label">incidents / auto-recovered</div>
-      </div>
-      <div class="tldr-item">
-        <div class="tldr-num">{metrics['return_pct']:+.2f}%</div>
-        <div class="tldr-label">period return</div>
-      </div>
-    </div>
 
-    <p class="lede">v0.13 hardened the broker plumbing against 11 failure modes (reconnect, idempotency, kill switch, cancel races, clock skew, …). v0.14 ran that hardened runner live against IBKR's paper exchange for {metrics['duration_days']} trading days with <em>no manual intervention</em>. {metrics['incidents']} operational events occurred. All auto-recovered.</p>
+def generate_report(audit_log_path: str, output_path: str, config: dict[str, Any]) -> None:
+    audit_data = read_audit_log(audit_log_path)
+    metrics = extract_metrics(audit_data, config)
+    Path(output_path).write_text(render_html(metrics, config), encoding="utf-8")
+    print(f"Report generated: {output_path}")
 
-    <section class="section">
-      <h2>Daily equity</h2>
-      <p class="section-caption">Paper account, USD. Period return {metrics['return_pct']:+.2f}%, max drawdown {metrics['max_drawdown_pct']:+.2f}%. Nothing here is interesting — that's the point.</p>
-      <div id="daily-equity-chart" class="chart"></div>
-    </section>
 
-    <section class="section">
-      <h2>What actually happened — incident log</h2>
-      <p class="section-caption">Every operational event during the soak. The system handled all of them without an operator on duty.</p>
-      <table aria-label="Operational incidents during soak">
-        <thead>
-          <tr>
-            <th>When</th>
-            <th>What</th>
-            <th>How it recovered</th>
-          </tr>
-        </thead>
-        <tbody>
-"""
-
-    # Add incident log rows
-    for incident in metrics['incident_log']:
-        type_class = f"type-{incident['type']}"
-        html += f"""
-          <tr>
-            <td class="timestamp">{incident['when']}</td>
-            <td><span class="type-tag {type_class}">{incident['type']}</span> {incident['description']}</td>
-            <td>{incident['recovery']}</td>
-          </tr>
-"""
-
-    html += """
-        </tbody>
-      </table>
-    </section>
-
-    <div class="footer">IBKR paper account · {metrics['start_date']} to {metrics['end_date']} · {metrics['universe']} momentum · examples/paper-live-ibkr/</div>
-  </main>
-
-  <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js"></script>
-  <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      const chartWidth = (el) => Math.max(320, el.clientWidth || 920);
-      const days = Array.from({ length: """ + str(metrics['duration_days']) + """ }, (_, i) => i);
-      const dayLabels = (u, ticks) => ticks.map((t) => "d" + (Math.round(t) + 1));
-      const dailyEquity = """ + str(metrics['daily_equity']) + """;
-      new uPlot({
-        width: chartWidth(document.getElementById("daily-equity-chart")),
-        height: 320,
-        scales: { x: { time: false } },
-        axes: [
-          { label: "day", values: dayLabels },
-          { label: "USD" }
-        ],
-        series: [
-          {},
-          { label: "Equity", stroke: "#4a6fa5", width: 2 }
-        ]
-      }, [days, dailyEquity], document.getElementById("daily-equity-chart"));
-    });
-  </script>
-</body>
-</html>
-"""
-    
-    return html
+def load_config(argv: list[str]) -> dict[str, Any]:
+    config: dict[str, Any] = {}
+    if "--config" in argv:
+        index = argv.index("--config")
+        if index + 1 >= len(argv):
+            raise SystemExit("--config requires a JSON file")
+        config.update(json.loads(Path(argv[index + 1]).read_text(encoding="utf-8")))
+    return config
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: python report.py <audit_log.jsonl> <output.html> [--config config.json]")
-        sys.exit(1)
-    
-    audit_log_path = sys.argv[1]
-    output_path = sys.argv[2]
-    
-    # Default config (can be overridden with --config)
-    config = {
-        'start_date': '2026-05-13',
-        'end_date': '2026-05-27',
-        'duration_days': 14,
-        'account': 'DU123456',
-        'universe': 'S&P 100',
-        'orders_sent': 147,
-        'orders_filled': 143,
-        'incidents': 5,
-        'auto_recovered': 5,
-        'daily_equity': [100000, 100840, 101220, 100690, 101450, 102100, 101780, 102450, 102190, 101930, 102680, 103210, 102870, 103540],
-        'return_pct': 3.54,
-        'max_drawdown_pct': -0.52
-    }
-    
-    # Load custom config if provided
-    if '--config' in sys.argv:
-        config_index = sys.argv.index('--config')
-        if config_index + 1 < len(sys.argv):
-            config_path = sys.argv[config_index + 1]
-            with open(config_path, 'r') as f:
-                config.update(json.load(f))
-    
-    generate_report(audit_log_path, output_path, config)
+        raise SystemExit(1)
+    generate_report(sys.argv[1], sys.argv[2], load_config(sys.argv))

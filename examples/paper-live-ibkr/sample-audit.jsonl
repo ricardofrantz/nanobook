@@ -1,0 +1,8 @@
+{"event":"account_summary_result","ts":"2026-05-01T20:00:00Z","account_id":"SANITIZED","equity_cents":10000000}
+{"event":"positions_result","ts":"2026-05-01T20:00:01Z","positions":[{"symbol":"AAPL","quantity":10},{"symbol":"MSFT","quantity":5}]}
+{"event":"order_submitted","ts":"2026-05-02T14:30:00Z","ibkr_id":101,"symbol":"AAPL","action":"Buy","limit_price_cents":19000}
+{"event":"order_filled","ts":"2026-05-02T14:30:03Z","ibkr_id":101,"symbol":"AAPL","avg_price_cents":19007}
+{"event":"reconcile_mismatch","ts":"2026-05-02T20:00:00Z","mismatch_count":1,"mismatches":[{"symbol":"MSFT","expected":5,"actual":4}]}
+{"event":"broker_reconnect","level":"warn","ts":"2026-05-02T20:00:05Z","message":"TWS socket reconnected","recovery":"automatic reconnect; no orders lost"}
+{"event":"account_summary_result","ts":"2026-05-02T20:01:00Z","account_id":"SANITIZED","equity_cents":10075000}
+{"event":"positions_result","ts":"2026-05-02T20:01:01Z","positions":[{"symbol":"AAPL","quantity":11},{"symbol":"MSFT","quantity":4}]}
