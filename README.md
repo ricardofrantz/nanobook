@@ -1017,8 +1017,6 @@ rebalancer recover target.json       # Recover from crash using audit log
 
 The rebalancer includes crash recovery via audit log reconstruction. After a process crash or TWS restart, use `rebalancer recover` to reconstruct state and determine the appropriate recovery action (Restart, Resume, ManualReview, or Rollback).
 
-See [docs/ops/warm-restart.md](docs/ops/warm-restart.md) for the complete warm restart guide, including worked examples and troubleshooting.
-
 ### target.json
 
 ```json

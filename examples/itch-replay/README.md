@@ -83,10 +83,6 @@ The HTML report (`report.html`) includes:
 - **Message rate timeline**: Events per second throughout the trading day
 - **Summary statistics**: Total messages, trades, executions, cancels, etc.
 
-## Learnings
-
-See `docs/solutions/itch-replay-learnings.md` for surprises, residual issues, and follow-up candidates identified during this work.
-
 ## Troubleshooting
 
 **Download fails**: Ensure you have internet access and sufficient disk space (≈10 GB free for the compressed + expanded data).

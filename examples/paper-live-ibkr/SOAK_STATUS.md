@@ -15,8 +15,8 @@
 | 14 trading-day minimum soak completed | pending | daily rows below + generated report |
 | Sanitized audit excerpt generated | pending | `sanitized-audit.jsonl` path/hash |
 | HTML report generated from sanitized excerpt | pending | `report.html` path/hash |
-| Paper-soak learnings filled from evidence | pending | `docs/solutions/paper-soak-learnings.md` |
-| README battle-tested numbers updated | pending | README commit + `docs/ops/v0.15-release-evidence-checklist.md` |
+| Paper-soak learnings filled from evidence | pending | local/private operator notes |
+| README battle-tested numbers updated | pending | README commit + release evidence note |
 | Release/tag completed | pending | tag + changelog commit |
 
 ## Daily check-ins

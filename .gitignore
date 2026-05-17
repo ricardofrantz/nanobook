@@ -23,5 +23,21 @@ Thumbs.db
 # Agent tooling
 .ntm/
 
+# Local/private planning and agent artifacts
+.beads/
+.unsafe-audit/
+.unsafe-audic/
+docs/
+CONTEXT.md
+SEMVER.md
+semver.MD
+UBIQUITOUS_LANGUAGE.md
+ubiquitous-language.md
+ubiquitous_language.md
+bug-hunt-findings.md
+BUG_HUNT_FINDINGS.md
+plan.md
+PLAN.md
+
 # Beads history
 .beads/.br_history/

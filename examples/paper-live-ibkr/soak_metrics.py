@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Compute paper-soak release numbers from sanitized audit JSONL.
 
-This is the machine-readable companion to SOAK_STATUS.md and
-`docs/ops/v0.15-release-evidence-checklist.md`. It intentionally uses only
-sanitized audit events, so README/release numbers can be reproduced offline.
+This is the machine-readable companion to SOAK_STATUS.md. It intentionally uses
+only sanitized audit events, so README/release numbers can be reproduced offline.
 """
 
 from __future__ import annotations
