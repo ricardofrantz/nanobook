@@ -623,24 +623,37 @@ mod tests {
     struct TestBroker {
         orders: RefCell<Vec<BrokerOrderStatus>>,
         fail_open_attempts: Cell<usize>,
+        fail_open_on_call: Cell<Option<usize>>,
+        open_calls: Cell<usize>,
         fail_cancel: Cell<bool>,
     }
 
     impl TestBroker {
         fn with_orders(ids: &[u64]) -> Self {
+            Self::with_statuses(
+                &ids.iter()
+                    .map(|id| (*id, OrderState::Submitted, 1))
+                    .collect::<Vec<_>>(),
+            )
+        }
+
+        fn with_statuses(statuses: &[(u64, OrderState, u64)]) -> Self {
             Self {
                 orders: RefCell::new(
-                    ids.iter()
-                        .map(|id| BrokerOrderStatus {
+                    statuses
+                        .iter()
+                        .map(|(id, status, remaining_quantity)| BrokerOrderStatus {
                             id: OrderId(*id),
-                            status: OrderState::Submitted,
+                            status: *status,
                             filled_quantity: 0,
-                            remaining_quantity: 1,
+                            remaining_quantity: *remaining_quantity,
                             avg_fill_price_cents: 0,
                         })
                         .collect(),
                 ),
                 fail_open_attempts: Cell::new(0),
+                fail_open_on_call: Cell::new(None),
+                open_calls: Cell::new(0),
                 fail_cancel: Cell::new(false),
             }
         }
@@ -683,6 +696,11 @@ mod tests {
         }
 
         fn open_orders(&self) -> std::result::Result<Vec<BrokerOrderStatus>, BrokerError> {
+            let call = self.open_calls.get() + 1;
+            self.open_calls.set(call);
+            if self.fail_open_on_call.get() == Some(call) {
+                return Err(BrokerError::Connection("open orders unavailable".into()));
+            }
             let remaining_failures = self.fail_open_attempts.get();
             if remaining_failures > 0 {
                 self.fail_open_attempts.set(remaining_failures - 1);
@@ -827,6 +845,101 @@ timeout_secs = {timeout_secs}
     }
 
     #[test]
+    fn verify_no_dangling_orders_errors_for_missing_audit_log() {
+        let path = std::path::PathBuf::from("/tmp/nanobook-missing-audit-log-for-test.jsonl");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(verify_no_dangling_orders(&path).is_err());
+    }
+
+    #[test]
+    fn verify_no_dangling_orders_handles_malformed_timestamp_and_logs_dangling() {
+        let temp_file = NamedTempFile::new().unwrap();
+        std::fs::write(
+            temp_file.path(),
+            r#"{"event":"order_submitted","ts":"not-a-time","symbol":"AAPL","action":"Buy","shares":1,"limit":12345,"ibkr_id":77}
+"#,
+        )
+        .unwrap();
+
+        let dangling = verify_no_dangling_orders(temp_file.path()).unwrap();
+
+        assert_eq!(dangling.len(), 1);
+        assert_eq!(dangling[0].symbol, "AAPL");
+        assert_eq!(dangling[0].ibkr_id, 77);
+    }
+
+    #[test]
+    fn wait_for_missing_process_reports_exited() {
+        assert!(wait_for_process_exit(999_999, Duration::from_millis(1)).unwrap());
+    }
+
+    #[test]
+    #[cfg(feature = "guaranteed_kill_switch")]
+    fn run_kill_reports_nonexistent_pid_from_pid_file() {
+        let _guard = match env_lock().lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let original_dir = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = test_config_with_kill_timeout(30);
+        config.logging.dir = dir.path().join("logs").display().to_string();
+        std::env::set_current_dir(dir.path()).unwrap();
+        std::fs::write(pid_file::DEFAULT_PID_FILE, "999999").unwrap();
+
+        let result = run_kill(&config);
+
+        std::env::set_current_dir(original_dir).unwrap();
+        assert!(
+            matches!(result, Err(Error::Aborted(message)) if message.contains("does not exist"))
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "guaranteed_kill_switch")]
+    fn run_kill_reports_missing_pid_file() {
+        let _guard = match env_lock().lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let original_dir = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = test_config_with_kill_timeout(30);
+        config.logging.dir = dir.path().join("logs").display().to_string();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let result = run_kill(&config);
+
+        std::env::set_current_dir(original_dir).unwrap();
+        assert!(
+            matches!(result, Err(Error::Aborted(message)) if message.contains("PID file not found"))
+        );
+    }
+
+    #[test]
+    fn test_broker_stub_methods_return_defaults() {
+        let mut broker = TestBroker::with_orders(&[7]);
+        broker.connect().unwrap();
+        broker.disconnect().unwrap();
+        assert_eq!(broker.positions().unwrap().len(), 0);
+        assert_eq!(broker.account().unwrap().cash_cents, 0);
+        let order = BrokerOrder {
+            symbol: Symbol::new("AAPL"),
+            side: nanobook_broker::types::BrokerSide::Buy,
+            quantity: 1,
+            order_type: nanobook_broker::types::BrokerOrderType::Market,
+            client_order_id: None,
+        };
+        assert_eq!(broker.submit_order(&order).unwrap(), OrderId(1));
+        assert_eq!(broker.order_status(OrderId(7)).unwrap().id, OrderId(7));
+        assert_eq!(
+            broker.quote(&Symbol::new("AAPL")).unwrap().symbol,
+            Symbol::new("AAPL")
+        );
+    }
+
+    #[test]
     #[cfg(feature = "guaranteed_kill_switch")]
     fn two_phase_skips_forceful_when_phase1_succeeds() {
         let dir = tempfile::tempdir().unwrap();
@@ -941,6 +1054,117 @@ timeout_secs = {timeout_secs}
     }
 
     #[test]
+    fn cancellable_open_orders_filters_terminal_and_zero_remaining_orders() {
+        let orders = vec![
+            BrokerOrderStatus {
+                id: OrderId(1),
+                status: OrderState::Pending,
+                filled_quantity: 0,
+                remaining_quantity: 1,
+                avg_fill_price_cents: 0,
+            },
+            BrokerOrderStatus {
+                id: OrderId(2),
+                status: OrderState::Submitted,
+                filled_quantity: 0,
+                remaining_quantity: 1,
+                avg_fill_price_cents: 0,
+            },
+            BrokerOrderStatus {
+                id: OrderId(3),
+                status: OrderState::PartiallyFilled,
+                filled_quantity: 1,
+                remaining_quantity: 1,
+                avg_fill_price_cents: 0,
+            },
+            BrokerOrderStatus {
+                id: OrderId(4),
+                status: OrderState::Filled,
+                filled_quantity: 1,
+                remaining_quantity: 0,
+                avg_fill_price_cents: 0,
+            },
+            BrokerOrderStatus {
+                id: OrderId(5),
+                status: OrderState::Cancelled,
+                filled_quantity: 0,
+                remaining_quantity: 0,
+                avg_fill_price_cents: 0,
+            },
+            BrokerOrderStatus {
+                id: OrderId(6),
+                status: OrderState::Submitted,
+                filled_quantity: 1,
+                remaining_quantity: 0,
+                avg_fill_price_cents: 0,
+            },
+        ];
+
+        let ids: Vec<_> = cancellable_open_orders(orders)
+            .into_iter()
+            .map(|order| order.id.0)
+            .collect();
+
+        assert_eq!(ids, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn forceful_cancel_ignores_non_cancellable_open_orders() {
+        let broker = TestBroker::with_statuses(&[
+            (1, OrderState::Filled, 0),
+            (2, OrderState::Cancelled, 0),
+            (3, OrderState::Submitted, 0),
+        ]);
+        let report = forceful_cancel_open_orders_with_retry(&broker, 1, |_| {});
+
+        assert!(report.succeeded());
+        assert!(report.cancelled_order_ids.is_empty());
+        assert_eq!(report.attempts, 1);
+    }
+
+    #[test]
+    fn forceful_cancel_reports_query_failure_after_max_retries() {
+        let broker = TestBroker::with_orders(&[10]);
+        broker.fail_open_attempts.set(3);
+        let mut slept = Vec::new();
+        let report = forceful_cancel_open_orders_with_retry(&broker, 2, |attempt| {
+            slept.push(attempt);
+        });
+
+        assert_eq!(report.attempts, 3);
+        assert_eq!(slept, vec![0, 1]);
+        assert_eq!(report.errors.len(), 3);
+        assert!(report.cancelled_order_ids.is_empty());
+    }
+
+    #[test]
+    fn forceful_cancel_keeps_previous_remaining_when_final_verification_fails() {
+        let broker = TestBroker::with_orders(&[10]);
+        broker.fail_open_on_call.set(Some(2));
+        broker.fail_cancel.set(true);
+        let report = forceful_cancel_open_orders_with_retry(&broker, 0, |_| {});
+
+        assert!(!report.succeeded());
+        assert_eq!(report.remaining_order_ids, vec![10]);
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|error| error.contains("final open_orders verification failed"))
+        );
+    }
+
+    #[test]
+    fn forceful_cancel_default_wrapper_uses_retry_policy() {
+        let broker = TestBroker::with_orders(&[]);
+        broker.fail_open_attempts.set(1);
+        let report = forceful_cancel_open_orders(&broker);
+
+        assert!(report.succeeded());
+        assert_eq!(report.attempts, 2);
+    }
+
+    #[test]
     fn forceful_cancel_cancels_all_open_orders() {
         let broker = TestBroker::with_orders(&[10, 11]);
         let report = forceful_cancel_open_orders_with_retry(&broker, 1, |_| {});
@@ -988,12 +1212,13 @@ timeout_secs = {timeout_secs}
 
     #[test]
     #[cfg(unix)]
-    fn test_send_sigterm_to_self() {
-        // Sending SIGTERM to ourselves should succeed
-        let _pid = std::process::id();
-        // Note: This will actually terminate the test if not handled,
-        // so we skip this test for now
-        // send_sigterm(pid).unwrap();
+    fn test_send_sigterm_to_child_process() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        send_sigterm(child.id()).unwrap();
+        let _ = child.wait().unwrap();
     }
 
     #[test]
