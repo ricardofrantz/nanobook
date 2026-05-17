@@ -86,6 +86,22 @@ pub fn action_to_side(action: Action) -> BrokerSide {
     }
 }
 
+fn quote_mid_cents(quote: &Quote) -> i64 {
+    match (quote.bid_cents, quote.ask_cents) {
+        (bid, ask) if bid > 0 && ask > 0 => bid + (ask - bid) / 2,
+        (bid, _) if bid > 0 => bid,
+        (_, ask) if ask > 0 => ask,
+        _ => quote.last_cents,
+    }
+}
+
+fn quote_mid_prices(quotes: &[Quote]) -> Vec<(Symbol, i64)> {
+    quotes
+        .iter()
+        .map(|quote| (quote.symbol, quote_mid_cents(quote)))
+        .collect()
+}
+
 pub fn enforce_max_orders_per_run(
     generated_orders: usize,
     max_orders_per_run: usize,
@@ -313,18 +329,7 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
     }
 
     // Extract mid prices from quotes for diff computation
-    let prices: Vec<(Symbol, i64)> = quotes
-        .iter()
-        .map(|q| {
-            let mid = match (q.bid_cents, q.ask_cents) {
-                (b, a) if b > 0 && a > 0 => b + (a - b) / 2,
-                (b, _) if b > 0 => b,
-                (_, a) if a > 0 => a,
-                _ => q.last_cents,
-            };
-            (q.symbol, mid)
-        })
-        .collect();
+    let prices = quote_mid_prices(&quotes);
 
     // 6. Compute diff
     let targets = target.as_target_pairs();
@@ -603,18 +608,7 @@ pub fn run(config: &Config, target: &TargetSpec, opts: &RunOptions) -> Result<()
         &all_symbols,
         config.execution.quote_staleness_threshold_sec,
     )?;
-    let final_prices: Vec<(Symbol, i64)> = final_quotes
-        .iter()
-        .map(|q| {
-            let mid = match (q.bid_cents, q.ask_cents) {
-                (b, a) if b > 0 && a > 0 => b + (a - b) / 2,
-                (b, _) if b > 0 => b,
-                (_, a) if a > 0 => a,
-                _ => q.last_cents,
-            };
-            (q.symbol, mid)
-        })
-        .collect();
+    let final_prices = quote_mid_prices(&final_quotes);
 
     let final_summary = fetch_account_summary_with_write_ahead(
         client.as_ref(),
@@ -713,18 +707,7 @@ pub fn run_reconcile(config: &Config, target: &TargetSpec) -> Result<()> {
 
     // Fetch quotes and extract mid prices
     let quotes = as_connection_error(client.quotes(&all_symbols))?;
-    let prices: Vec<(Symbol, i64)> = quotes
-        .iter()
-        .map(|q| {
-            let mid = match (q.bid_cents, q.ask_cents) {
-                (b, a) if b > 0 && a > 0 => b + (a - b) / 2,
-                (b, _) if b > 0 => b,
-                (_, a) if a > 0 => a,
-                _ => q.last_cents,
-            };
-            (q.symbol, mid)
-        })
-        .collect();
+    let prices = quote_mid_prices(&quotes);
 
     let targets = target.as_target_pairs();
 
