@@ -66,8 +66,7 @@ pub fn check_batch(
     });
 
     // 2. Leverage check — post-trade gross exposure / equity
-    let current_map: FxHashMap<Symbol, i64> = current_positions.iter().copied().collect();
-    let mut post_qty = current_map.clone();
+    let mut post_qty: FxHashMap<Symbol, i64> = current_positions.iter().copied().collect();
     let mut price_map: FxHashMap<Symbol, i64> = FxHashMap::default();
     for &(sym, side, qty, price) in orders {
         let sign = match side {
