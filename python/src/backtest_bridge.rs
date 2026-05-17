@@ -1,5 +1,6 @@
 //! PyO3 binding for the fast backtest bridge.
 
+use nanobook::Symbol;
 use nanobook::backtest_bridge::{self, BacktestBridgeOptions, BacktestStopConfig};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -7,6 +8,20 @@ use pyo3::types::{PyDict, PyList};
 
 use crate::metrics::PyMetrics;
 use crate::types::parse_symbol;
+
+fn parse_symbol_schedule<T: Copy>(
+    schedule: &[Vec<(String, T)>],
+) -> PyResult<Vec<Vec<(Symbol, T)>>> {
+    schedule
+        .iter()
+        .map(|period| {
+            period
+                .iter()
+                .map(|(symbol, value)| Ok((parse_symbol(symbol)?, *value)))
+                .collect::<PyResult<Vec<_>>>()
+        })
+        .collect()
+}
 
 /// Simulate portfolio returns from a pre-computed weight schedule.
 ///
@@ -41,25 +56,8 @@ pub fn backtest_weights(
     stop_cfg: Option<Bound<'_, PyDict>>,
 ) -> PyResult<Py<PyAny>> {
     // Convert Python types to Rust types.
-    let rust_weights: Vec<Vec<(nanobook::Symbol, f64)>> = weight_schedule
-        .iter()
-        .map(|period| {
-            period
-                .iter()
-                .map(|(s, w)| Ok((parse_symbol(s)?, *w)))
-                .collect::<PyResult<Vec<_>>>()
-        })
-        .collect::<PyResult<Vec<_>>>()?;
-
-    let rust_prices: Vec<Vec<(nanobook::Symbol, i64)>> = price_schedule
-        .iter()
-        .map(|period| {
-            period
-                .iter()
-                .map(|(s, p)| Ok((parse_symbol(s)?, *p)))
-                .collect::<PyResult<Vec<_>>>()
-        })
-        .collect::<PyResult<Vec<_>>>()?;
+    let rust_weights = parse_symbol_schedule(&weight_schedule)?;
+    let rust_prices = parse_symbol_schedule(&price_schedule)?;
 
     let options = BacktestBridgeOptions {
         stop_cfg: parse_stop_cfg(stop_cfg)?,
@@ -131,24 +129,8 @@ pub fn py_decompose_backtest(
     weight_schedule: Vec<Vec<(String, f64)>>,
     return_schedule: Vec<Vec<(String, f64)>>,
 ) -> PyResult<Py<PyAny>> {
-    let rust_weights: Vec<Vec<(nanobook::Symbol, f64)>> = weight_schedule
-        .iter()
-        .map(|period| {
-            period
-                .iter()
-                .map(|(s, w)| Ok((parse_symbol(s)?, *w)))
-                .collect::<PyResult<Vec<_>>>()
-        })
-        .collect::<PyResult<Vec<_>>>()?;
-    let rust_returns: Vec<Vec<(nanobook::Symbol, f64)>> = return_schedule
-        .iter()
-        .map(|period| {
-            period
-                .iter()
-                .map(|(s, r)| Ok((parse_symbol(s)?, *r)))
-                .collect::<PyResult<Vec<_>>>()
-        })
-        .collect::<PyResult<Vec<_>>>()?;
+    let rust_weights = parse_symbol_schedule(&weight_schedule)?;
+    let rust_returns = parse_symbol_schedule(&return_schedule)?;
 
     let result = py.detach(|| backtest_bridge::decompose_backtest(&rust_weights, &rust_returns));
     let dict = PyDict::new(py);
@@ -218,24 +200,8 @@ pub fn py_tear_sheet(
         .ok_or_else(|| PyValueError::new_err("backtest_result missing symbol_returns"))?
         .extract()?;
 
-    let holdings = holdings_raw
-        .iter()
-        .map(|period| {
-            period
-                .iter()
-                .map(|(s, w)| Ok((parse_symbol(s)?, *w)))
-                .collect::<PyResult<Vec<_>>>()
-        })
-        .collect::<PyResult<Vec<_>>>()?;
-    let symbol_returns = symbol_returns_raw
-        .iter()
-        .map(|period| {
-            period
-                .iter()
-                .map(|(s, r)| Ok((parse_symbol(s)?, *r)))
-                .collect::<PyResult<Vec<_>>>()
-        })
-        .collect::<PyResult<Vec<_>>>()?;
+    let holdings = parse_symbol_schedule(&holdings_raw)?;
+    let symbol_returns = parse_symbol_schedule(&symbol_returns_raw)?;
 
     let result = backtest_bridge::BacktestBridgeResult {
         returns,
