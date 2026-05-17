@@ -229,6 +229,8 @@ Preflight checks TOML/JSON syntax, required sections, paper-account-looking acco
 
 **Status:** Ready for v0.15 soak execution
 
+Track actual rehearsal/soak evidence in `SOAK_STATUS.md`. Keep every completed checklist item tied to a log, sanitized audit excerpt, generated report, note, or commit.
+
 **Execution Window:** 2-4 calendar weeks
 
 **Universe:** S&P 100 monthly
