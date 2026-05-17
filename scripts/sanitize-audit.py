@@ -12,7 +12,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, Any, Set
+from typing import Any
 
 
 # Placeholder values for scrubbed PII
@@ -36,7 +36,7 @@ def scrub_value(value: Any) -> Any:
     return value
 
 
-def scrub_json_object(obj: Dict[str, Any], pii_fields: Set[str]) -> Dict[str, Any]:
+def scrub_json_object(obj: dict[str, Any], pii_fields: set[str]) -> dict[str, Any]:
     """Recursively scrub PII fields from a JSON object."""
     if not isinstance(obj, dict):
         return obj
@@ -55,7 +55,7 @@ def scrub_json_object(obj: Dict[str, Any], pii_fields: Set[str]) -> Dict[str, An
     return scrubbed
 
 
-def has_pii(obj: Dict[str, Any], pii_fields: Set[str]) -> bool:
+def has_pii(obj: dict[str, Any], pii_fields: set[str]) -> bool:
     """Check if a JSON object contains PII (non-placeholder values)."""
     if not isinstance(obj, dict):
         return False
@@ -77,7 +77,7 @@ def has_pii(obj: Dict[str, Any], pii_fields: Set[str]) -> bool:
     return False
 
 
-def process_audit_log(input_path: Path, output_path: Path, check_mode: bool = False) -> int:
+def process_audit_log(input_path: Path, output_path: Path | None, check_mode: bool = False) -> int:
     """
     Process an audit log file.
     
@@ -85,12 +85,10 @@ def process_audit_log(input_path: Path, output_path: Path, check_mode: bool = Fa
     """
     pii_count = 0
     
-    with open(input_path, 'r', encoding='utf-8') as f_in:
+    with input_path.open('r', encoding='utf-8') as f_in:
         if check_mode:
             # Check mode: verify no PII remains
-            line_num = 0
-            for line in f_in:
-                line_num += 1
+            for line_num, line in enumerate(f_in, 1):
                 line = line.strip()
                 if not line:
                     continue
@@ -105,10 +103,9 @@ def process_audit_log(input_path: Path, output_path: Path, check_mode: bool = Fa
                     return 1
         else:
             # Scrub mode: write scrubbed output
-            with open(output_path, 'w', encoding='utf-8') as f_out:
-                line_num = 0
-                for line in f_in:
-                    line_num += 1
+            assert output_path is not None
+            with output_path.open('w', encoding='utf-8') as f_out:
+                for line_num, line in enumerate(f_in, 1):
                     line = line.strip()
                     if not line:
                         f_out.write('\n')
