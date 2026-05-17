@@ -70,15 +70,8 @@ def latency_data_for_histogram(events: list[dict[str, Any]]) -> dict[str, Any]:
     # for warmup events (`--warmup N`) and for non-cross-trade rows that
     # carry no book update. Bools count as int in Python but the harness
     # never emits true/false here.
-    parse_latencies: list[int] = []
-    book_latencies: list[int] = []
-    for event in events:
-        parse_value = event.get("parse_latency_ns")
-        if isinstance(parse_value, int) and not isinstance(parse_value, bool):
-            parse_latencies.append(parse_value)
-        book_value = event.get("book_update_latency_ns")
-        if isinstance(book_value, int) and not isinstance(book_value, bool):
-            book_latencies.append(book_value)
+    parse_latencies = latency_values(events, "parse_latency_ns")
+    book_latencies = latency_values(events, "book_update_latency_ns")
 
     def percentile(values: list[int], p: float) -> int:
         if not values:
