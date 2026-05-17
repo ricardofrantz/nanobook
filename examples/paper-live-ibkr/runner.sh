@@ -42,6 +42,12 @@ if [ ! -f "$TARGET_FILE" ]; then
     exit 1
 fi
 
+# Validate local inputs before contacting IBKR or submitting orders.
+if ! "$SCRIPT_DIR/preflight.sh" "$CONFIG_FILE" "$TARGET_FILE" 2>&1 | tee -a "$LOG_FILE"; then
+    echo "[$(date)] ERROR: Preflight failed; refusing to run rebalancer" | tee -a "$LOG_FILE"
+    exit 1
+fi
+
 # Log header
 echo "========================================" | tee -a "$LOG_FILE"
 echo "[$(date)] Starting rebalancer run" | tee -a "$LOG_FILE"

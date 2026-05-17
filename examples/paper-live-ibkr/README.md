@@ -211,6 +211,7 @@ Preflight checks TOML/JSON syntax, required sections, paper-account-looking acco
    ```
 
 2. **The runner script:**
+   - Runs `./preflight.sh` first and refuses to contact IBKR if local inputs are invalid
    - Uses `--cron-mode` for idempotency
    - Logs output to dated log files in `logs/`
    - Creates audit logs in `audit/`
