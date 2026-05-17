@@ -67,7 +67,7 @@ def extract_positions(event: dict[str, Any]) -> list[dict[str, Any]]:
 
 def extract_metrics(audit_data: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
     events = sorted(audit_data, key=lambda row: row.get("ts", ""))
-    days = [event_day(event) for event in events if event_day(event) != "unknown"]
+    days = [day for event in events if (day := event_day(event)) != "unknown"]
     start_date = config.get("start_date") or (days[0] if days else "unknown")
     end_date = config.get("end_date") or (days[-1] if days else "unknown")
 
