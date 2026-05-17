@@ -13,7 +13,7 @@ use nanobook_broker::error::BrokerError;
 use nanobook_broker::ibkr::orders::{self, OrderOutcome};
 use nanobook_broker::types::{Account, Position, Quote};
 use nanobook_broker::{BrokerSide, ClientOrderId};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::{error, info, warn};
 
 use crate::audit::{self, AuditLog};
@@ -720,12 +720,21 @@ pub fn run_reconcile(config: &Config, target: &TargetSpec) -> Result<()> {
 // === Helpers ===
 
 pub fn collect_all_symbols(positions: &[CurrentPosition], target: &TargetSpec) -> Vec<Symbol> {
-    let mut symbols: Vec<Symbol> = positions.iter().map(|p| p.symbol).collect();
-    for sym in target.symbols() {
-        if !symbols.contains(&sym) {
-            symbols.push(sym);
+    let target_symbols = target.symbols();
+    let mut symbols = Vec::with_capacity(positions.len() + target_symbols.len());
+    let mut seen = FxHashSet::default();
+
+    for position in positions {
+        symbols.push(position.symbol);
+        seen.insert(position.symbol);
+    }
+
+    for symbol in target_symbols {
+        if seen.insert(symbol) {
+            symbols.push(symbol);
         }
     }
+
     symbols
 }
 
