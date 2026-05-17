@@ -147,15 +147,7 @@ impl Portfolio {
     /// `prices` maps symbols to current prices (cents).
     pub fn total_equity(&self, prices: &[(Symbol, i64)]) -> i64 {
         let price_map: FxHashMap<Symbol, i64> = prices.iter().copied().collect();
-        let position_value: i64 = self
-            .positions
-            .iter()
-            .map(|(sym, pos)| {
-                let price = price_map.get(sym).copied().unwrap_or(0);
-                pos.market_value(price)
-            })
-            .sum();
-        self.cash + position_value
+        self.total_equity_from_price_map(&price_map)
     }
 
     /// Current portfolio weights as (symbol, weight) pairs.
@@ -163,20 +155,9 @@ impl Portfolio {
     /// Weights are fractions of total equity. Cash is not included
     /// (it's implicitly `1 - sum(weights)`).
     pub fn current_weights(&self, prices: &[(Symbol, i64)]) -> Vec<(Symbol, f64)> {
-        let equity = self.total_equity(prices);
-        if equity == 0 {
-            return Vec::new();
-        }
         let price_map: FxHashMap<Symbol, i64> = prices.iter().copied().collect();
-        self.positions
-            .iter()
-            .filter(|(_, pos)| !pos.is_flat())
-            .map(|(sym, pos)| {
-                let price = price_map.get(sym).copied().unwrap_or(0);
-                let mv = pos.market_value(price) as f64;
-                (*sym, mv / equity as f64)
-            })
-            .collect()
+        let equity = self.total_equity_from_price_map(&price_map);
+        self.current_weights_from_price_map(&price_map, equity)
     }
 
     /// The accumulated return series.
@@ -207,7 +188,7 @@ impl Portfolio {
     /// Positions not in `targets` are closed. Costs are deducted from cash.
     pub fn rebalance_simple(&mut self, targets: &[(Symbol, f64)], prices: &[(Symbol, i64)]) {
         let price_map: FxHashMap<Symbol, i64> = prices.iter().copied().collect();
-        let equity = self.total_equity(prices);
+        let equity = self.total_equity_from_price_map(&price_map);
         if equity <= 0 {
             return;
         }
@@ -304,7 +285,7 @@ impl Portfolio {
             .collect();
 
         let price_map: FxHashMap<Symbol, i64> = prices.iter().copied().collect();
-        let equity = self.total_equity(&prices);
+        let equity = self.total_equity_from_price_map(&price_map);
         if equity <= 0 {
             return;
         }
@@ -388,7 +369,8 @@ impl Portfolio {
     /// Call this at the end of each period (day, month, etc.) after rebalancing.
     /// `prices` are current market prices for computing equity.
     pub fn record_return(&mut self, prices: &[(Symbol, i64)]) {
-        let equity = self.total_equity(prices);
+        let price_map: FxHashMap<Symbol, i64> = prices.iter().copied().collect();
+        let equity = self.total_equity_from_price_map(&price_map);
         if self.prev_equity > 0 {
             let ret = (equity - self.prev_equity) as f64 / self.prev_equity as f64;
             self.returns.push(ret);
@@ -399,8 +381,9 @@ impl Portfolio {
 
     /// Take a snapshot of the portfolio state.
     pub fn snapshot(&self, prices: &[(Symbol, i64)]) -> PortfolioSnapshot {
-        let equity = self.total_equity(prices);
-        let weights = self.current_weights(prices);
+        let price_map: FxHashMap<Symbol, i64> = prices.iter().copied().collect();
+        let equity = self.total_equity_from_price_map(&price_map);
+        let weights = self.current_weights_from_price_map(&price_map, equity);
         let total_realized_pnl: i64 = self.positions.values().map(|p| p.realized_pnl).sum();
 
         PortfolioSnapshot {
@@ -429,6 +412,38 @@ impl Portfolio {
     }
 
     // === Internal ===
+
+    fn total_equity_from_price_map(&self, price_map: &FxHashMap<Symbol, i64>) -> i64 {
+        let position_value: i64 = self
+            .positions
+            .iter()
+            .map(|(sym, pos)| {
+                let price = price_map.get(sym).copied().unwrap_or(0);
+                pos.market_value(price)
+            })
+            .sum();
+        self.cash + position_value
+    }
+
+    fn current_weights_from_price_map(
+        &self,
+        price_map: &FxHashMap<Symbol, i64>,
+        equity: i64,
+    ) -> Vec<(Symbol, f64)> {
+        if equity == 0 {
+            return Vec::new();
+        }
+
+        self.positions
+            .iter()
+            .filter(|(_, pos)| !pos.is_flat())
+            .map(|(sym, pos)| {
+                let price = price_map.get(sym).copied().unwrap_or(0);
+                let mv = pos.market_value(price) as f64;
+                (*sym, mv / equity as f64)
+            })
+            .collect()
+    }
 
     /// Execute a fill: update position, deduct cost, adjust cash.
     fn execute_fill(&mut self, symbol: Symbol, qty: i64, price: i64) {
