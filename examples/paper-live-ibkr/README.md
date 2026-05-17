@@ -152,7 +152,7 @@ This is a 2-4 calendar week IBKR paper trading soak to validate v0.15's producti
 2. **Test connection with the rebalancer:**
    ```bash
    cd examples/paper-live-ibkr
-   ../../target/release/rebalancer status --config my-config.toml
+   ../../target/release/rebalancer --config my-config.toml status
    ```
 
 3. **Expected output:**
@@ -163,7 +163,7 @@ This is a 2-4 calendar week IBKR paper trading soak to validate v0.15's producti
 
 1. **Test with --dry-run flag (no orders executed):**
    ```bash
-   ../../target/release/rebalancer run --dry-run --config my-config.toml my-target.json
+   ../../target/release/rebalancer --config my-config.toml run my-target.json --dry-run
    ```
 
 2. **Review the output:**
@@ -175,7 +175,7 @@ This is a 2-4 calendar week IBKR paper trading soak to validate v0.15's producti
 
 1. **Run with actual execution (paper trading only):**
    ```bash
-   ../../target/release/rebalancer run --config my-config.toml my-target.json
+   ../../target/release/rebalancer --config my-config.toml run my-target.json
    ```
 
 2. **Confirm the orders:**

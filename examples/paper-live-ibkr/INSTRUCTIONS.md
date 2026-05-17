@@ -44,8 +44,8 @@ IBKR Gateway/TWS requires manual download and installation. It's a GUI applicati
 
 1. Download IBKR Gateway from: https://www.interactivebrokers.com/en/trading/ibgateway-stable.php
 2. Follow the detailed setup in `README.md`
-3. Run connection test: `../../target/release/rebalancer status --config my-config.toml`
-4. Start with dry-run: `../../target/release/rebalancer run --dry-run --config my-config.toml my-target.json`
+3. Run connection test: `../../target/release/rebalancer --config my-config.toml status`
+4. Start with dry-run: `../../target/release/rebalancer --config my-config.toml run my-target.json --dry-run`
 
 ## Files To Customize
 

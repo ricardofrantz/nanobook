@@ -58,9 +58,7 @@ if [ ! -f "$REBALANCER_BIN" ]; then
     exit 1
 fi
 
-if "$REBALANCER_BIN" run --cron-mode \
-    --config "$CONFIG_FILE" \
-    "$TARGET_FILE" \
+if "$REBALANCER_BIN" --config "$CONFIG_FILE" run "$TARGET_FILE" --cron-mode \
     2>&1 | tee -a "$LOG_FILE"; then
     EXIT_CODE=0
     STATUS="SUCCESS"
