@@ -16,6 +16,9 @@ Documents the parity check between nanobook's portfolio simulator and vectorbt's
 ### [v0.14 Kill Gate Criteria](v0.14-kill-gate-criteria.md)
 Defines the criteria for determining when v0.14 is ready to release, including completion of all blocking beads, test coverage requirements, documentation requirements, and stability requirements.
 
+### [Paper Soak Learnings (v0.15)](paper-soak-learnings.md)
+Pre-soak scaffold for the v0.15 IBKR paper-live learning document. It records the evidence sources, incident log format, daily/weekly check-in templates, and required "what's still papered-over" section that must be filled from sanitized audit excerpts after the actual soak.
+
 ## Purpose
 
 These documents serve as:
