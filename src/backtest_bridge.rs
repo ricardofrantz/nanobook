@@ -3,7 +3,7 @@
 //! Python computes the weight schedule (factor models, signals, etc.),
 //! Rust handles the inner simulation loop (rebalance, track positions, compute returns).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 use crate::portfolio::metrics::{
     DrawdownEvent, Metrics, compute_metrics, drawdown_series, rolling_sharpe,
@@ -531,15 +531,17 @@ fn apply_stop_cfg(
     for (sym, qty, price) in open_positions {
         let side = if qty >= 0 { 1 } else { -1 };
 
-        let tracker = trackers
-            .entry(sym)
-            .or_insert_with(|| StopTracker::new(price, side));
-
-        if tracker.side != side {
-            *tracker = StopTracker::new(price, side);
-        } else {
-            tracker.update(price, cfg.atr_period);
-        }
+        let tracker = match trackers.entry(sym) {
+            Entry::Occupied(mut entry) => {
+                if entry.get().side != side {
+                    entry.insert(StopTracker::new(price, side));
+                } else {
+                    entry.get_mut().update(price, cfg.atr_period);
+                }
+                entry.into_mut()
+            }
+            Entry::Vacant(entry) => entry.insert(StopTracker::new(price, side)),
+        };
 
         let Some((stop_level, reason)) = effective_stop_level(cfg, tracker) else {
             continue;
@@ -975,11 +977,11 @@ mod tests {
             vec![(aapl(), -1.0)],
             vec![(aapl(), -1.0)],
         ];
-        // Short: trailing stop moves down as price falls (protects profit)
+        // Short: trailing stop moves down as price falls, then triggers on a rebound.
         let prices = vec![
             vec![(aapl(), 100_00)],
-            vec![(aapl(), 90_00)], // profit, trailing stop adjusts down
-            vec![(aapl(), 98_00)], // rises but doesn't hit adjusted stop
+            vec![(aapl(), 90_00)], // profit, trailing stop adjusts down to 94.50
+            vec![(aapl(), 98_00)], // rebounds through adjusted stop
         ];
 
         let options = BacktestBridgeOptions {
@@ -994,8 +996,10 @@ mod tests {
         let result =
             backtest_weights_with_options(&weights, &prices, 100_000_00, 0, 252.0, 0.0, options);
 
-        // Should not trigger - price rose but trailing stop adjusted down
-        assert!(result.stop_events.is_empty());
+        assert_eq!(result.stop_events.len(), 1);
+        assert_eq!(result.stop_events[0].reason, "trailing");
+        assert_eq!(result.stop_events[0].trigger_price, 94_50);
+        assert_eq!(result.stop_events[0].exit_price, 98_00);
     }
 
     #[test]

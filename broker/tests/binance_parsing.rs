@@ -18,7 +18,7 @@ mod binance_tests {
         let query = "symbol=LTCBTC&side=BUY&type=LIMIT&timeInForce=GTC\
                      &quantity=1&price=0.1&recvWindow=5000&timestamp=1499827319559";
         let secret = "NhqPtmdSJYdKjVHjA7PZj4Mge3R5YNiP1e3UZjInClVN65XAbvqqM6A7H5fATj0j";
-        let sig = auth::sign(query, secret);
+        let sig = auth::sign(query, secret).expect("Binance docs HMAC example should sign");
         assert_eq!(
             sig,
             "c8db56825ae71d6d79447849e617115f4a920fa2acdcab2b053c4b2838bd6b71"
@@ -27,7 +27,7 @@ mod binance_tests {
 
     #[test]
     fn sign_empty_query() {
-        let sig = auth::sign("", "secret");
+        let sig = auth::sign("", "secret").expect("empty query should still sign");
         assert!(
             !sig.is_empty(),
             "empty query should still produce a signature"
@@ -37,15 +37,15 @@ mod binance_tests {
 
     #[test]
     fn sign_deterministic() {
-        let a = auth::sign("foo=bar", "key");
-        let b = auth::sign("foo=bar", "key");
+        let a = auth::sign("foo=bar", "key").expect("first signature should succeed");
+        let b = auth::sign("foo=bar", "key").expect("second signature should succeed");
         assert_eq!(a, b, "same input must produce same signature");
     }
 
     #[test]
     fn sign_different_keys_differ() {
-        let a = auth::sign("foo=bar", "key1");
-        let b = auth::sign("foo=bar", "key2");
+        let a = auth::sign("foo=bar", "key1").expect("first signature should succeed");
+        let b = auth::sign("foo=bar", "key2").expect("second signature should succeed");
         assert_ne!(a, b, "different keys must produce different signatures");
     }
 

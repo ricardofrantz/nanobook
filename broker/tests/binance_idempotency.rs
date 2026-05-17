@@ -2,7 +2,9 @@
 
 use nanobook::Symbol;
 use nanobook_broker::binance::BinanceBroker;
-use nanobook_broker::{BrokerError, BrokerOrder, BrokerOrderType, BrokerSide, ClientOrderId, OrderId};
+use nanobook_broker::{
+    BrokerError, BrokerOrder, BrokerOrderType, BrokerSide, ClientOrderId, OrderId,
+};
 
 #[test]
 fn test_generate_client_order_id() {

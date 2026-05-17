@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod mock_tws;
-use mock_tws::{MockTws, FailureMode, FailureTiming};
+use mock_tws::{FailureMode, FailureTiming, MockTws};
 
 /// Recorded callback for comparison.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,9 +50,9 @@ struct Divergence {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Severity {
-    Critical,  // Mock behavior is fundamentally wrong
-    Warning,   // Mock behavior differs but may not break tests
-    Info,      // Minor difference or informational note
+    Critical, // Mock behavior is fundamentally wrong
+    Warning,  // Mock behavior differs but may not break tests
+    Info,     // Minor difference or informational note
 }
 
 /// Validation result for a test case.
@@ -170,8 +170,7 @@ fn is_paper_mode() -> bool {
 
 /// Get paper trading configuration from environment.
 fn get_paper_config() -> Result<(String, u16, i32), String> {
-    let host = env::var("IBKR_HOST")
-        .map_err(|_| "IBKR_HOST not set".to_string())?;
+    let host = env::var("IBKR_HOST").map_err(|_| "IBKR_HOST not set".to_string())?;
     let port = env::var("IBKR_PORT")
         .map_err(|_| "IBKR_PORT not set".to_string())?
         .parse::<u16>()
@@ -197,7 +196,10 @@ fn test_paper_connection() {
     println!("Testing connection to {}:{}", host, port);
 
     // This would connect to real IBKR - for now we just verify config
-    println!("Config: host={}, port={}, client_id={}", host, port, client_id);
+    println!(
+        "Config: host={}, port={}, client_id={}",
+        host, port, client_id
+    );
     println!("Paper connection test would connect to real IBKR here");
     println!("Skipping actual connection in this validation script");
 }
@@ -383,7 +385,10 @@ fn test_f3_partial_fill_disconnect() {
     mock.connect().unwrap();
     ctx.record_mock_callback(CallbackRecord::new("Connected", None, Some(1), ""));
 
-    mock.inject_failure(FailureMode::F3PartialFillDisconnect, FailureTiming::PostFill);
+    mock.inject_failure(
+        FailureMode::F3PartialFillDisconnect,
+        FailureTiming::PostFill,
+    );
 
     let order_id = mock.submit_order("AAPL", 100).unwrap();
     ctx.record_mock_callback(CallbackRecord::new(
@@ -448,7 +453,11 @@ fn generate_divergence_report() {
         ("mock".to_string(), 0, 0)
     };
 
-    let mode = if is_paper_mode() { "Paper Trading" } else { "Mock Only" };
+    let mode = if is_paper_mode() {
+        "Paper Trading"
+    } else {
+        "Mock Only"
+    };
 
     let mut report = format!(
         "# Mock vs Paper Trading Divergence Report\n\n\
@@ -469,10 +478,23 @@ fn generate_divergence_report() {
         port,
         client_id,
         ctx.divergences.len(),
-        ctx.divergences.iter().filter(|d| d.severity == Severity::Critical).count(),
-        ctx.divergences.iter().filter(|d| d.severity == Severity::Warning).count(),
-        ctx.divergences.iter().filter(|d| d.severity == Severity::Info).count(),
-        if ctx.divergences.iter().any(|d| d.severity == Severity::Critical) {
+        ctx.divergences
+            .iter()
+            .filter(|d| d.severity == Severity::Critical)
+            .count(),
+        ctx.divergences
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .count(),
+        ctx.divergences
+            .iter()
+            .filter(|d| d.severity == Severity::Info)
+            .count(),
+        if ctx
+            .divergences
+            .iter()
+            .any(|d| d.severity == Severity::Critical)
+        {
             "FAIL"
         } else {
             "PASS"
@@ -503,16 +525,20 @@ fn generate_divergence_report() {
             if let Some(ref mock_cb) = div.mock_callback {
                 report.push_str("**Mock Callback**:\n");
                 report.push_str(&format!("```\n"));
-                report.push_str(&format!("{} - Order ID: {:?} - Sequence: {:?} - Details: {}\n",
-                    mock_cb.event_type, mock_cb.order_id, mock_cb.sequence, mock_cb.details));
+                report.push_str(&format!(
+                    "{} - Order ID: {:?} - Sequence: {:?} - Details: {}\n",
+                    mock_cb.event_type, mock_cb.order_id, mock_cb.sequence, mock_cb.details
+                ));
                 report.push_str(&format!("```\n\n"));
             }
 
             if let Some(ref paper_cb) = div.paper_callback {
                 report.push_str("**Paper Callback**:\n");
                 report.push_str(&format!("```\n"));
-                report.push_str(&format!("{} - Order ID: {:?} - Sequence: {:?} - Details: {}\n",
-                    paper_cb.event_type, paper_cb.order_id, paper_cb.sequence, paper_cb.details));
+                report.push_str(&format!(
+                    "{} - Order ID: {:?} - Sequence: {:?} - Details: {}\n",
+                    paper_cb.event_type, paper_cb.order_id, paper_cb.sequence, paper_cb.details
+                ));
                 report.push_str(&format!("```\n\n"));
             }
 
@@ -568,7 +594,14 @@ fn generate_divergence_report() {
 #[ignore] // Run separately for full validation
 fn run_full_validation() {
     println!("Running full mock vs paper validation...");
-    println!("Mode: {}", if is_paper_mode() { "Paper Trading" } else { "Mock Only" });
+    println!(
+        "Mode: {}",
+        if is_paper_mode() {
+            "Paper Trading"
+        } else {
+            "Mock Only"
+        }
+    );
 
     // Run individual tests
     test_normal_order_submission();

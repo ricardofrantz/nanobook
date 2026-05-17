@@ -98,7 +98,9 @@ impl PriceLevels {
         }
 
         // Safe: we just inserted the level if it didn't exist
-        self.levels.get_mut(&price).expect("level should exist after insertion")
+        self.levels
+            .get_mut(&price)
+            .expect("level should exist after insertion")
     }
 
     /// Add an order at the given price.

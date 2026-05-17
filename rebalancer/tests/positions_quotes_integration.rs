@@ -6,11 +6,11 @@ use nanobook::Symbol;
 use nanobook_broker::error::BrokerError;
 use nanobook_broker::{BrokerSide, ClientOrderId};
 use nanobook_rebalancer::audit::{
-    parse_audit_events, validate_checkpoints_from_parsed, AuditLog, Checkpoint,
+    AuditLog, Checkpoint, parse_audit_events, validate_checkpoints_from_parsed,
 };
 use nanobook_rebalancer::audit::{
-    log_positions_intent_checkpoint, log_positions_result_checkpoint,
-    log_quotes_intent_checkpoint, log_quotes_result_checkpoint,
+    log_positions_intent_checkpoint, log_positions_result_checkpoint, log_quotes_intent_checkpoint,
+    log_quotes_result_checkpoint,
 };
 use nanobook_rebalancer::broker::BrokerGateway;
 use nanobook_rebalancer::diff::CurrentPosition;
@@ -71,7 +71,9 @@ impl BrokerGateway for MockBroker {
         *self.positions_call_count.borrow_mut() += 1;
 
         if self.should_fail_positions {
-            Err(BrokerError::Connection("Failed to fetch positions".to_string()))
+            Err(BrokerError::Connection(
+                "Failed to fetch positions".to_string(),
+            ))
         } else {
             Ok(vec![nanobook_broker::types::Position {
                 symbol: Symbol::new("AAPL"),
@@ -87,11 +89,16 @@ impl BrokerGateway for MockBroker {
         unimplemented!()
     }
 
-    fn quotes(&self, symbols: &[Symbol]) -> Result<Vec<nanobook_broker::types::Quote>, BrokerError> {
+    fn quotes(
+        &self,
+        symbols: &[Symbol],
+    ) -> Result<Vec<nanobook_broker::types::Quote>, BrokerError> {
         *self.quotes_call_count.borrow_mut() += 1;
 
         if self.should_fail_quotes {
-            Err(BrokerError::Connection("Failed to fetch quotes".to_string()))
+            Err(BrokerError::Connection(
+                "Failed to fetch quotes".to_string(),
+            ))
         } else {
             Ok(symbols
                 .iter()
@@ -150,8 +157,13 @@ fn test_positions_fetch_with_write_ahead() {
 
     // Log positions result
     let equity_cents = 15000_00;
-    log_positions_result_checkpoint(&mut audit, sequence_number + 1, &current_positions, equity_cents)
-        .unwrap();
+    log_positions_result_checkpoint(
+        &mut audit,
+        sequence_number + 1,
+        &current_positions,
+        equity_cents,
+    )
+    .unwrap();
 
     // Verify audit log contains positions_intent and positions_result
     let events = parse_audit_events(&audit_path).unwrap();
@@ -297,12 +309,21 @@ fn test_positions_intent_to_result_ratio() {
 
     // Verify ratio
     let events = parse_audit_events(&audit_path).unwrap();
-    let intent_count = events.iter().filter(|e| e.event == "positions_intent").count();
-    let result_count = events.iter().filter(|e| e.event == "positions_result").count();
+    let intent_count = events
+        .iter()
+        .filter(|e| e.event == "positions_intent")
+        .count();
+    let result_count = events
+        .iter()
+        .filter(|e| e.event == "positions_result")
+        .count();
 
     assert_eq!(intent_count, 1);
     assert_eq!(result_count, 1);
-    assert_eq!(intent_count, result_count, "Intent:Result ratio should be 1:1");
+    assert_eq!(
+        intent_count, result_count,
+        "Intent:Result ratio should be 1:1"
+    );
 }
 
 /// Test audit log validity: quotes_intent to quotes_result ratio should be 1:1.
@@ -340,7 +361,10 @@ fn test_quotes_intent_to_result_ratio() {
 
     assert_eq!(intent_count, 1);
     assert_eq!(result_count, 1);
-    assert_eq!(intent_count, result_count, "Intent:Result ratio should be 1:1");
+    assert_eq!(
+        intent_count, result_count,
+        "Intent:Result ratio should be 1:1"
+    );
 }
 
 /// Test recovery from crash at PositionsIntent checkpoint.
@@ -379,7 +403,10 @@ fn test_positions_intent_crash_recovery() {
     );
     assert_eq!(state.sequence_number, 2);
     assert!(!state.run_completed);
-    assert_eq!(action, nanobook_rebalancer::recovery::RecoveryAction::Restart);
+    assert_eq!(
+        action,
+        nanobook_rebalancer::recovery::RecoveryAction::Restart
+    );
 }
 
 /// Test recovery from crash at QuotesIntent checkpoint.
@@ -446,7 +473,10 @@ fn test_quotes_intent_crash_recovery() {
     );
     assert_eq!(state.sequence_number, 4);
     assert!(!state.run_completed);
-    assert_eq!(action, nanobook_rebalancer::recovery::RecoveryAction::Restart);
+    assert_eq!(
+        action,
+        nanobook_rebalancer::recovery::RecoveryAction::Restart
+    );
 }
 
 /// Test recovery from crash at PositionsResult checkpoint.
@@ -498,7 +528,10 @@ fn test_positions_result_crash_recovery() {
     );
     assert_eq!(state.sequence_number, 3);
     assert!(!state.run_completed);
-    assert_eq!(action, nanobook_rebalancer::recovery::RecoveryAction::Restart);
+    assert_eq!(
+        action,
+        nanobook_rebalancer::recovery::RecoveryAction::Restart
+    );
 }
 
 /// Test recovery from crash at QuotesResult checkpoint.
@@ -583,7 +616,10 @@ fn test_quotes_result_crash_recovery() {
     );
     assert_eq!(state.sequence_number, 5);
     assert!(!state.run_completed);
-    assert_eq!(action, nanobook_rebalancer::recovery::RecoveryAction::Restart);
+    assert_eq!(
+        action,
+        nanobook_rebalancer::recovery::RecoveryAction::Restart
+    );
 }
 
 // ============================================================================
@@ -629,7 +665,10 @@ fn fixture_positions_intent_only_validates_incomplete() {
 
     // Validation should fail because the sequence is incomplete
     let result = validate_checkpoints_from_parsed(&events);
-    assert!(result.is_err(), "Validation should fail for incomplete sequence");
+    assert!(
+        result.is_err(),
+        "Validation should fail for incomplete sequence"
+    );
 }
 
 /// Test that positions_intent_success.jsonl parses correctly.
@@ -670,7 +709,10 @@ fn fixture_positions_intent_success_validates_incomplete() {
 
     // Validation should fail because the sequence is incomplete
     let result = validate_checkpoints_from_parsed(&events);
-    assert!(result.is_err(), "Validation should fail for incomplete sequence");
+    assert!(
+        result.is_err(),
+        "Validation should fail for incomplete sequence"
+    );
 }
 
 /// Test that quotes_intent_only.jsonl (crash scenario) parses correctly.
@@ -717,7 +759,10 @@ fn fixture_quotes_intent_only_validates_incomplete() {
 
     // Validation should fail because the sequence is incomplete
     let result = validate_checkpoints_from_parsed(&events);
-    assert!(result.is_err(), "Validation should fail for incomplete sequence");
+    assert!(
+        result.is_err(),
+        "Validation should fail for incomplete sequence"
+    );
 }
 
 /// Test that quotes_intent_success.jsonl parses correctly.
@@ -761,7 +806,10 @@ fn fixture_quotes_intent_success_validates_incomplete() {
 
     // Validation should fail because the sequence is incomplete
     let result = validate_checkpoints_from_parsed(&events);
-    assert!(result.is_err(), "Validation should fail for incomplete sequence");
+    assert!(
+        result.is_err(),
+        "Validation should fail for incomplete sequence"
+    );
 }
 
 /// Test that checkpoints can be round-tripped through the audit log for PositionsIntent.

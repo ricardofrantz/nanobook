@@ -1,8 +1,8 @@
 //! Binance-specific API response types.
 
-use serde::Deserialize;
-use nanobook::Symbol;
 use crate::types::{OrderId, OrderState};
+use nanobook::Symbol;
+use serde::Deserialize;
 
 /// Binance account balance entry.
 #[derive(Debug, Deserialize)]
@@ -60,13 +60,9 @@ pub struct DiscrepancyReport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Discrepancy {
     /// Order exists on broker but not in local cache.
-    OrphanOrder {
-        order_id: OrderId,
-    },
+    OrphanOrder { order_id: OrderId },
     /// Order exists in local cache but not on broker.
-    MissingOrder {
-        order_id: OrderId,
-    },
+    MissingOrder { order_id: OrderId },
     /// Order status differs between local cache and broker.
     OrderStatusMismatch {
         order_id: OrderId,

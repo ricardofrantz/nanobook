@@ -7,11 +7,11 @@ use nanobook::Symbol;
 use nanobook_broker::error::BrokerError;
 use nanobook_broker::ibkr::orders::{OrderOutcome, OrderResult};
 use nanobook_broker::{BrokerSide, ClientOrderId};
-use nanobook_rebalancer::audit::{parse_audit_events, AuditLog, Checkpoint};
+use nanobook_rebalancer::audit::{AuditLog, Checkpoint, parse_audit_events};
+use nanobook_rebalancer::broker::BrokerGateway;
 use nanobook_rebalancer::diff::{Action, RebalanceOrder};
 use nanobook_rebalancer::execution::execute_order_with_write_ahead;
-use nanobook_rebalancer::broker::BrokerGateway;
-use nanobook_rebalancer::recovery::{reconstruct_state, RecoveryAction};
+use nanobook_rebalancer::recovery::{RecoveryAction, reconstruct_state};
 use std::time::Duration;
 
 /// Mock broker for testing write-ahead logging.
@@ -48,7 +48,10 @@ impl BrokerGateway for MockBroker {
         unimplemented!()
     }
 
-    fn quotes(&self, _symbols: &[Symbol]) -> Result<Vec<nanobook_broker::types::Quote>, BrokerError> {
+    fn quotes(
+        &self,
+        _symbols: &[Symbol],
+    ) -> Result<Vec<nanobook_broker::types::Quote>, BrokerError> {
         unimplemented!()
     }
 
@@ -377,7 +380,10 @@ fn test_parse_new_audit_log_with_old_code() {
     assert_eq!(state.orders.len(), 1);
     assert!(state.orders[0].submitted);
     assert_eq!(state.orders[0].ibkr_id, 12345);
-    assert_eq!(state.orders[0].client_order_id, Some("test_client_order_123".to_string()));
+    assert_eq!(
+        state.orders[0].client_order_id,
+        Some("test_client_order_123".to_string())
+    );
 }
 
 #[test]
@@ -466,7 +472,10 @@ fn test_mixed_checkpoint_sequences() {
     // Order from new format - has client_order_id
     assert!(state.orders[0].submitted);
     assert_eq!(state.orders[0].ibkr_id, 67890);
-    assert_eq!(state.orders[0].client_order_id, Some("test_client_order_456".to_string()));
+    assert_eq!(
+        state.orders[0].client_order_id,
+        Some("test_client_order_456".to_string())
+    );
 }
 
 // ============================================================================
@@ -557,8 +566,14 @@ fn test_golden_fixture_mixed_format() {
     assert_eq!(events.len(), 13);
 
     // Verify mixed format: first run has no OrderIntent, second run has OrderIntent
-    let first_run_events: Vec<_> = events.iter().filter(|e| e.sequence_number.unwrap_or(0) <= 6).collect();
-    let second_run_events: Vec<_> = events.iter().filter(|e| e.sequence_number.unwrap_or(0) > 6).collect();
+    let first_run_events: Vec<_> = events
+        .iter()
+        .filter(|e| e.sequence_number.unwrap_or(0) <= 6)
+        .collect();
+    let second_run_events: Vec<_> = events
+        .iter()
+        .filter(|e| e.sequence_number.unwrap_or(0) > 6)
+        .collect();
 
     assert!(!first_run_events.iter().any(|e| e.event == "order_intent"));
     assert!(second_run_events.iter().any(|e| e.event == "order_intent"));
@@ -658,7 +673,10 @@ fn test_feature_disabled_new_format_audit_log() {
     let (state, _action) = reconstruct_state(&path).unwrap();
     assert_eq!(state.checkpoint, Checkpoint::OrderSubmitted);
     assert_eq!(state.orders.len(), 1);
-    assert_eq!(state.orders[0].client_order_id, Some("test_client_order_123".to_string()));
+    assert_eq!(
+        state.orders[0].client_order_id,
+        Some("test_client_order_123".to_string())
+    );
 }
 
 #[test]
@@ -914,7 +932,10 @@ fn fixture_phase1a_dryrun_success_parses_correctly() {
     // Verify OrderIntent has dry_run execution context
     let intent_event = &events[4];
     assert_eq!(intent_event.event, "order_intent");
-    let execution_context = intent_event.data.get("execution_context").and_then(|v| v.as_str());
+    let execution_context = intent_event
+        .data
+        .get("execution_context")
+        .and_then(|v| v.as_str());
     assert_eq!(execution_context, Some("dry_run"));
 
     // Verify no OrderSubmitted (dry-run mode)
@@ -955,7 +976,10 @@ fn fixture_phase1a_live_success_parses_correctly() {
 
     // Verify OrderIntent has live_run execution context
     let intent_event = &events[4];
-    let execution_context = intent_event.data.get("execution_context").and_then(|v| v.as_str());
+    let execution_context = intent_event
+        .data
+        .get("execution_context")
+        .and_then(|v| v.as_str());
     assert_eq!(execution_context, Some("live_run:1"));
 }
 

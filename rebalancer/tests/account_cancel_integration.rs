@@ -10,13 +10,13 @@ use nanobook_broker::error::BrokerError;
 use nanobook_broker::types::{Account, Position, Quote};
 use nanobook_broker::{BrokerSide, ClientOrderId};
 use nanobook_rebalancer::audit::{
-    max_checkpoint_sequence, parse_audit_events, validate_checkpoints_from_parsed, AuditLog,
+    AuditLog, max_checkpoint_sequence, parse_audit_events, validate_checkpoints_from_parsed,
 };
 use nanobook_rebalancer::broker::BrokerGateway;
 use nanobook_rebalancer::execution::{
     cancel_order_with_write_ahead, fetch_account_summary_with_write_ahead,
 };
-use nanobook_rebalancer::recovery::{reconstruct_state, RecoveryAction};
+use nanobook_rebalancer::recovery::{RecoveryAction, reconstruct_state};
 
 struct MockBroker {
     fail_account: bool,
@@ -204,10 +204,12 @@ fn cancel_failure_logs_negative_result() {
     assert_eq!(events[0].event, "cancel_intent");
     assert_eq!(events[1].event, "cancel_result");
     assert_eq!(events[1].data["success"], false);
-    assert!(events[1].data["error_message"]
-        .as_str()
-        .unwrap()
-        .contains("already filled"));
+    assert!(
+        events[1].data["error_message"]
+            .as_str()
+            .unwrap()
+            .contains("already filled")
+    );
 }
 
 #[test]
@@ -215,9 +217,11 @@ fn complete_coverage_fixture_validates() {
     let fixture_path = std::path::PathBuf::from("tests/fixtures/complete_coverage.jsonl");
     let events = parse_audit_events(&fixture_path).unwrap();
 
-    assert!(events
-        .iter()
-        .any(|event| event.event == "account_summary_intent"));
+    assert!(
+        events
+            .iter()
+            .any(|event| event.event == "account_summary_intent")
+    );
     assert!(events.iter().any(|event| event.event == "positions_intent"));
     assert!(events.iter().any(|event| event.event == "quotes_intent"));
     assert!(events.iter().any(|event| event.event == "order_intent"));

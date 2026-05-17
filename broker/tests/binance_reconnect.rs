@@ -88,7 +88,10 @@ async fn test_send_ping_requires_connection() {
     // Should fail when not connected
     let result = ws.send_ping().await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().to_string(), "Binance WebSocket is not connected");
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "Binance WebSocket is not connected"
+    );
 }
 
 #[test]

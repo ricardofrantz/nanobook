@@ -276,6 +276,7 @@ impl BinanceBroker {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn cache_order_with_binance_id(
         &self,
         order_id: OrderId,

@@ -3,16 +3,15 @@
 use nanobook::Symbol;
 use nanobook_broker::mock::{FillMode, MockBroker};
 use nanobook_broker::{Broker, BrokerOrder, BrokerOrderType, BrokerSide};
-use nanobook_rebalancer::audit::{log_positions_checkpoint, AuditLog};
+use nanobook_rebalancer::audit::{AuditLog, log_positions_checkpoint};
 use nanobook_rebalancer::config::Config;
 use nanobook_rebalancer::diff::CurrentPosition;
-use nanobook_rebalancer::recovery::{reconstruct_state, RecoveryAction, run_recover};
+use nanobook_rebalancer::recovery::{RecoveryAction, reconstruct_state, run_recover};
 use nanobook_rebalancer::target::TargetSpec;
 use tempfile::tempdir;
 
 #[test]
 fn roundtrip_position_through_audit_log_preserves_avg_cost() {
-
     let dir = tempfile::tempdir().unwrap();
     let audit_path = dir.path().join("roundtrip_audit.jsonl");
     let workdir = dir.path();
@@ -772,9 +771,15 @@ fn test_recovery_with_golden_fixture_intent_only() {
     let (state, action) = reconstruct_state(&fixture_path).unwrap();
 
     // Verify state
-    assert_eq!(state.checkpoint, nanobook_rebalancer::audit::Checkpoint::OrderIntent);
+    assert_eq!(
+        state.checkpoint,
+        nanobook_rebalancer::audit::Checkpoint::OrderIntent
+    );
     assert_eq!(state.orders.len(), 1);
-    assert_eq!(state.orders[0].client_order_id, Some("client-123".to_string()));
+    assert_eq!(
+        state.orders[0].client_order_id,
+        Some("client-123".to_string())
+    );
     assert!(!state.orders[0].submitted);
     assert!(!state.orders[0].failed);
 
@@ -797,7 +802,10 @@ fn test_recovery_with_golden_fixture_resolved_success() {
     let (state, _action) = reconstruct_state(&fixture_path).unwrap();
 
     // Verify state
-    assert_eq!(state.checkpoint, nanobook_rebalancer::audit::Checkpoint::OrderSubmitted);
+    assert_eq!(
+        state.checkpoint,
+        nanobook_rebalancer::audit::Checkpoint::OrderSubmitted
+    );
     assert_eq!(state.orders.len(), 1);
     assert!(state.orders[0].submitted);
     assert_eq!(state.orders[0].ibkr_id, 54321);
@@ -815,10 +823,16 @@ fn test_recovery_with_golden_fixture_resolved_failure() {
     let (state, action) = reconstruct_state(&fixture_path).unwrap();
 
     // Verify state
-    assert_eq!(state.checkpoint, nanobook_rebalancer::audit::Checkpoint::OrderFailed);
+    assert_eq!(
+        state.checkpoint,
+        nanobook_rebalancer::audit::Checkpoint::OrderFailed
+    );
     assert_eq!(state.orders.len(), 1);
     assert!(state.orders[0].failed);
-    assert_eq!(state.orders[0].failure_reason, Some("not_found_at_broker".to_string()));
+    assert_eq!(
+        state.orders[0].failure_reason,
+        Some("not_found_at_broker".to_string())
+    );
 
     // Should be safe to restart since order failed
     assert_eq!(action, RecoveryAction::Restart);
@@ -843,4 +857,3 @@ fn test_recovery_with_golden_fixture_mixed_intents() {
     // Should require manual review due to unfilled submitted order
     assert_eq!(action, RecoveryAction::ManualReview);
 }
-

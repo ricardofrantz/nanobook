@@ -53,7 +53,9 @@ pub enum BrokerError {
     /// order execution, potentially after a partial fill has occurred.
     /// The filled_quantity field captures the last known filled quantity
     /// before the disconnect, enabling reconciliation on reconnect.
-    #[error("connection lost during order execution (order_id={order_id}, filled_quantity={filled_quantity})")]
+    #[error(
+        "connection lost during order execution (order_id={order_id}, filled_quantity={filled_quantity})"
+    )]
     ConnectionLost { order_id: i32, filled_quantity: i64 },
 
     /// Reconnect attempt failed after multiple backoff attempts.

@@ -1158,26 +1158,35 @@ mod tests {
         ];
 
         let corr = correlation_matrix(&returns);
-        
+
         // Verify correlation structure: assets 0 and 1 highly correlated, asset 2 uncorrelated
-        assert!(corr[0][1] > 0.99, "Assets 0 and 1 should be highly correlated");
-        assert!(corr[0][2].abs() < 0.1, "Asset 2 should be uncorrelated with asset 0");
-        assert!(corr[1][2].abs() < 0.1, "Asset 2 should be uncorrelated with asset 1");
+        assert!(
+            corr[0][1] > 0.99,
+            "Assets 0 and 1 should be highly correlated"
+        );
+        assert!(
+            corr[0][2].abs() < 0.1,
+            "Asset 2 should be uncorrelated with asset 0"
+        );
+        assert!(
+            corr[1][2].abs() < 0.1,
+            "Asset 2 should be uncorrelated with asset 1"
+        );
 
         // HRP should cluster assets 0 and 1 together, separate from asset 2
         let w = optimize_hrp(&returns);
-        
+
         assert_valid_weights(&w, 3);
-        
+
         // Assets 0 and 1 should get similar weights (clustered together)
         // Asset 2 should get a different weight (separate cluster)
         let w0 = w[0];
         let w1 = w[1];
         let w2 = w[2];
-        
+
         let cluster_01_diff = (w0 - w1).abs();
         let cluster_01_vs_2_diff = ((w0 + w1) / 2.0 - w2).abs();
-        
+
         assert!(
             cluster_01_diff < cluster_01_vs_2_diff,
             "Assets 0 and 1 should have more similar weights than either vs asset 2"

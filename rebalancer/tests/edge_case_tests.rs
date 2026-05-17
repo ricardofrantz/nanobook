@@ -14,8 +14,8 @@
 use nanobook::Symbol;
 use nanobook_broker::mock::{FillMode, MockBroker};
 use nanobook_broker::{Broker, BrokerOrder, BrokerOrderType, BrokerSide};
-use nanobook_rebalancer::audit::{parse_audit_events, AuditLog, Checkpoint};
-use nanobook_rebalancer::recovery::{reconstruct_state, RecoveryAction};
+use nanobook_rebalancer::audit::{AuditLog, Checkpoint, parse_audit_events};
+use nanobook_rebalancer::recovery::{RecoveryAction, reconstruct_state};
 
 #[cfg(feature = "write_ahead_logging")]
 use nanobook_rebalancer::recovery::reconcile_incomplete_intents;
@@ -60,10 +60,7 @@ fn test_partial_audit_log_write() {
     // Append a partial JSON line
     use std::fs::OpenOptions;
     use std::io::Write;
-    let mut file = OpenOptions::new()
-        .append(true)
-        .open(&audit_path)
-        .unwrap();
+    let mut file = OpenOptions::new().append(true).open(&audit_path).unwrap();
     writeln!(file, r#"{{"event":"order_intent","ts":"2024-01-15T10:00:05Z","sequence_number":3,"checkpoint":"order_intent""#).unwrap();
 
     // Verify that parsing fails due to validation
@@ -72,7 +69,10 @@ fn test_partial_audit_log_write() {
 
     // Verify that reconstruction also fails
     let result = reconstruct_state(&audit_path);
-    assert!(result.is_err(), "Reconstruction should fail due to partial JSON");
+    assert!(
+        result.is_err(),
+        "Reconstruction should fail due to partial JSON"
+    );
 }
 
 /// Test broker query failure during recovery.
@@ -152,10 +152,7 @@ fn test_audit_log_corruption_invalid_json() {
     // Append invalid JSON
     use std::fs::OpenOptions;
     use std::io::Write;
-    let mut file = OpenOptions::new()
-        .append(true)
-        .open(&audit_path)
-        .unwrap();
+    let mut file = OpenOptions::new().append(true).open(&audit_path).unwrap();
     writeln!(file, "this is not valid json").unwrap();
     writeln!(file, r#"{{"event":"valid","ts":"2024-01-15T10:00:05Z"}}"#).unwrap();
 
@@ -165,7 +162,10 @@ fn test_audit_log_corruption_invalid_json() {
 
     // Verify that reconstruction also fails
     let result = reconstruct_state(&audit_path);
-    assert!(result.is_err(), "Reconstruction should fail due to invalid JSON");
+    assert!(
+        result.is_err(),
+        "Reconstruction should fail due to invalid JSON"
+    );
 }
 
 /// Test empty audit log (no checkpoints).
@@ -187,7 +187,10 @@ fn test_empty_audit_log() {
     // Recovery should handle empty log gracefully
     let result = reconstruct_state(&audit_path);
     // Empty log should result in an error or default state
-    assert!(result.is_err() || result.is_ok(), "Recovery should handle empty log");
+    assert!(
+        result.is_err() || result.is_ok(),
+        "Recovery should handle empty log"
+    );
 }
 
 /// Test audit log file does not exist.
@@ -204,7 +207,10 @@ fn test_audit_log_not_exist() {
 
     // Recovery should handle non-existent file
     let result = reconstruct_state(&audit_path);
-    assert!(result.is_err(), "Recovery should fail for non-existent file");
+    assert!(
+        result.is_err(),
+        "Recovery should fail for non-existent file"
+    );
 }
 
 /// Test multiple crashes in sequence.
@@ -349,7 +355,10 @@ fn test_broker_unexpected_order_state() {
         let result = reconcile_incomplete_intents(&broker, &state, &audit_path);
         // Reconciliation should succeed even with unexpected states
         // (the implementation should handle various order states)
-        assert!(result.is_ok(), "Reconciliation should handle unexpected states");
+        assert!(
+            result.is_ok(),
+            "Reconciliation should handle unexpected states"
+        );
     }
 }
 
@@ -389,15 +398,16 @@ fn test_duplicate_sequence_numbers() {
     // Manually append a duplicate sequence number event
     use std::fs::OpenOptions;
     use std::io::Write;
-    let mut file = OpenOptions::new()
-        .append(true)
-        .open(&audit_path)
-        .unwrap();
+    let mut file = OpenOptions::new().append(true).open(&audit_path).unwrap();
     writeln!(file, r#"{{"event":"order_intent","ts":"2024-01-15T10:00:05Z","sequence_number":2,"checkpoint":"order_intent","data":{{"symbol":"AAPL"}}}}"#).unwrap();
 
     // Verify events are parsed
     let events = parse_audit_events(&audit_path).unwrap();
-    assert_eq!(events.len(), 3, "Should parse all events including duplicate");
+    assert_eq!(
+        events.len(),
+        3,
+        "Should parse all events including duplicate"
+    );
 
     // Recovery should handle duplicate sequence numbers
     let (state, _action) = reconstruct_state(&audit_path).unwrap();
@@ -430,10 +440,7 @@ fn test_missing_sequence_numbers() {
     // Manually append an event without sequence number
     use std::fs::OpenOptions;
     use std::io::Write;
-    let mut file = OpenOptions::new()
-        .append(true)
-        .open(&audit_path)
-        .unwrap();
+    let mut file = OpenOptions::new().append(true).open(&audit_path).unwrap();
     writeln!(file, r#"{{"event":"order_intent","ts":"2024-01-15T10:00:05Z","checkpoint":"order_intent","data":{{"symbol":"AAPL"}}}}"#).unwrap();
 
     // Verify events are parsed
@@ -445,7 +452,11 @@ fn test_missing_sequence_numbers() {
         .iter()
         .filter(|e| e.sequence_number.is_none())
         .collect();
-    assert_eq!(events_without_seq.len(), 1, "One event should have no sequence number");
+    assert_eq!(
+        events_without_seq.len(),
+        1,
+        "One event should have no sequence number"
+    );
 
     // Recovery should handle missing sequence numbers
     let (_state, _action) = reconstruct_state(&audit_path).unwrap();
@@ -491,10 +502,7 @@ fn test_out_of_order_sequence_numbers() {
     // Manually append an event with lower sequence number
     use std::fs::OpenOptions;
     use std::io::Write;
-    let mut file = OpenOptions::new()
-        .append(true)
-        .open(&audit_path)
-        .unwrap();
+    let mut file = OpenOptions::new().append(true).open(&audit_path).unwrap();
     writeln!(file, r#"{{"event":"order_intent","ts":"2024-01-15T10:00:05Z","sequence_number":1,"checkpoint":"order_intent","data":{{"symbol":"AAPL"}}}}"#).unwrap();
 
     // Verify events are parsed
@@ -579,7 +587,11 @@ fn test_concurrent_audit_log_access() {
 
     // Verify all events are parsed
     let events = parse_audit_events(&audit_path).unwrap();
-    assert_eq!(events.len(), 2, "Should parse all events from concurrent writes");
+    assert_eq!(
+        events.len(),
+        2,
+        "Should parse all events from concurrent writes"
+    );
 
     // Recovery should work
     let (state, _action) = reconstruct_state(&audit_path).unwrap();

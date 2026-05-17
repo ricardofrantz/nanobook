@@ -2,14 +2,14 @@
 
 use std::error::Error;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::net::TcpStream;
-use tokio::time::{sleep, Instant};
+use tokio::time::{Instant, sleep};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
@@ -101,10 +101,9 @@ impl BinanceWebSocket {
     pub async fn connect(&mut self) -> Result<(), Box<dyn Error>> {
         self.state = ConnectionState::Reconnecting;
         self.reconnect_attempts = 0;
-        let (stream, _) = connect_async(self.endpoint()).await.map_err(|err| {
+        let (stream, _) = connect_async(self.endpoint()).await.inspect_err(|_| {
             self.connected.store(false, Ordering::SeqCst);
             self.state = ConnectionState::Disconnected;
-            err
         })?;
 
         self.client = Some(stream);
@@ -157,7 +156,10 @@ impl BinanceWebSocket {
         }
         self.connected.store(false, Ordering::SeqCst);
         self.state = ConnectionState::Disconnected;
-        *self.last_heartbeat.lock().expect("heartbeat mutex poisoned") = None;
+        *self
+            .last_heartbeat
+            .lock()
+            .expect("heartbeat mutex poisoned") = None;
         self.reconnect_attempts = 0;
     }
 
@@ -211,7 +213,10 @@ impl BinanceWebSocket {
     /// Returns true if the heartbeat is still valid (no timeout),
     /// false if a timeout has occurred.
     pub fn check_heartbeat(&self) -> bool {
-        let last_heartbeat = self.last_heartbeat.lock().expect("heartbeat mutex poisoned");
+        let last_heartbeat = self
+            .last_heartbeat
+            .lock()
+            .expect("heartbeat mutex poisoned");
         if let Some(last) = *last_heartbeat {
             last.elapsed() < self.heartbeat_interval
         } else {
@@ -221,7 +226,10 @@ impl BinanceWebSocket {
 
     /// Update the last heartbeat timestamp to now.
     pub fn update_heartbeat(&self) {
-        *self.last_heartbeat.lock().expect("heartbeat mutex poisoned") = Some(Instant::now());
+        *self
+            .last_heartbeat
+            .lock()
+            .expect("heartbeat mutex poisoned") = Some(Instant::now());
     }
 
     /// Get the current number of reconnect attempts.

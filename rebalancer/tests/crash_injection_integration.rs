@@ -6,8 +6,8 @@
 use nanobook::Symbol;
 use nanobook_broker::mock::{FillMode, MockBroker};
 use nanobook_broker::{Broker, BrokerOrder, BrokerOrderType, BrokerSide};
-use nanobook_rebalancer::audit::{parse_audit_events, AuditLog, Checkpoint};
-use nanobook_rebalancer::recovery::{reconstruct_state, RecoveryAction};
+use nanobook_rebalancer::audit::{AuditLog, Checkpoint, parse_audit_events};
+use nanobook_rebalancer::recovery::{RecoveryAction, reconstruct_state};
 
 #[cfg(feature = "write_ahead_logging")]
 use nanobook_rebalancer::recovery::reconcile_incomplete_intents;
@@ -64,12 +64,8 @@ fn test_crash_after_order_intent_before_broker_call() {
             }),
         )
         .unwrap();
-        log.log_checkpoint(
-            Checkpoint::RiskCheckPassed,
-            4,
-            serde_json::json!({}),
-        )
-        .unwrap();
+        log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+            .unwrap();
         // CRASH HERE: OrderIntent logged but broker not called
         log.log_checkpoint(
             Checkpoint::OrderIntent,
@@ -189,12 +185,8 @@ fn test_crash_after_broker_call_before_order_submitted_logging() {
             }),
         )
         .unwrap();
-        log.log_checkpoint(
-            Checkpoint::RiskCheckPassed,
-            4,
-            serde_json::json!({}),
-        )
-        .unwrap();
+        log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+            .unwrap();
         // CRASH HERE: OrderIntent logged, broker called, but OrderSubmitted not logged
         log.log_checkpoint(
             Checkpoint::OrderIntent,
@@ -257,12 +249,19 @@ fn test_crash_after_broker_call_before_order_submitted_logging() {
             .iter()
             .filter(|e| e.event == "order_submitted")
             .collect();
-        assert_eq!(submitted_events.len(), 1, "Should have one OrderSubmitted event");
+        assert_eq!(
+            submitted_events.len(),
+            1,
+            "Should have one OrderSubmitted event"
+        );
 
         // Verify the submitted event has reconciled flag
         let submitted_event = &submitted_events[0];
         assert!(submitted_event.data.get("reconciled").is_some());
-        let reconciled = submitted_event.data.get("reconciled").and_then(|v| v.as_bool());
+        let reconciled = submitted_event
+            .data
+            .get("reconciled")
+            .and_then(|v| v.as_bool());
         assert_eq!(reconciled, Some(true));
     }
 
@@ -315,12 +314,8 @@ fn test_crash_after_order_submitted_before_next_order() {
             }),
         )
         .unwrap();
-        log.log_checkpoint(
-            Checkpoint::RiskCheckPassed,
-            4,
-            serde_json::json!({}),
-        )
-        .unwrap();
+        log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+            .unwrap();
         // First order completes
         log.log_checkpoint(
             Checkpoint::OrderIntent,
@@ -427,12 +422,8 @@ fn test_multiple_sequential_crashes() {
             }),
         )
         .unwrap();
-        log.log_checkpoint(
-            Checkpoint::RiskCheckPassed,
-            4,
-            serde_json::json!({}),
-        )
-        .unwrap();
+        log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+            .unwrap();
         log.log_checkpoint(
             Checkpoint::OrderIntent,
             5,
@@ -553,12 +544,8 @@ fn test_audit_log_validity_after_crash() {
                 }),
             )
             .unwrap();
-            log.log_checkpoint(
-                Checkpoint::RiskCheckPassed,
-                4,
-                serde_json::json!({}),
-            )
-            .unwrap();
+            log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+                .unwrap();
             log.log_checkpoint(
                 Checkpoint::OrderIntent,
                 5,
@@ -602,7 +589,10 @@ fn test_audit_log_validity_after_crash() {
         // Verify all events are valid JSON
         for event in &events {
             assert!(!event.event.is_empty(), "Event name should not be empty");
-            assert!(event.sequence_number.is_some(), "Event should have sequence number");
+            assert!(
+                event.sequence_number.is_some(),
+                "Event should have sequence number"
+            );
         }
 
         // Verify checkpoint sequence is valid
@@ -662,12 +652,8 @@ fn test_recovery_time_typical_scenarios() {
             }),
         )
         .unwrap();
-        log.log_checkpoint(
-            Checkpoint::RiskCheckPassed,
-            4,
-            serde_json::json!({}),
-        )
-        .unwrap();
+        log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+            .unwrap();
         log.log_checkpoint(
             Checkpoint::OrderIntent,
             5,

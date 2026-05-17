@@ -146,8 +146,10 @@ impl MockTws {
         });
         drop(orders);
 
-        self.record_callback(&format!("OrderSubmitted: id={}, seq={}, symbol={}, qty={}",
-            order_id, seq_num, symbol, quantity));
+        self.record_callback(&format!(
+            "OrderSubmitted: id={}, seq={}, symbol={}, qty={}",
+            order_id, seq_num, symbol, quantity
+        ));
 
         // Check for post-submit failures
         if self.should_trigger(FailureTiming::PostSubmit) {
@@ -165,7 +167,9 @@ impl MockTws {
         }
 
         let orders = self.orders.lock().unwrap();
-        let order = orders.iter().find(|o| o.id == order_id)
+        let order = orders
+            .iter()
+            .find(|o| o.id == order_id)
             .ok_or_else(|| format!("Order {order_id} not found"))?;
         Ok(order.clone())
     }
@@ -189,8 +193,10 @@ impl MockTws {
             } else {
                 "PartiallyFilled".to_string()
             };
-            self.record_callback(&format!("OrderFill: id={}, filled={}/{}",
-                order_id, fill_quantity, order.quantity));
+            self.record_callback(&format!(
+                "OrderFill: id={}, filled={}/{}",
+                order_id, fill_quantity, order.quantity
+            ));
         }
 
         // Check for post-fill failures
@@ -253,8 +259,10 @@ impl MockTws {
             } else {
                 "PartiallyFilled".to_string()
             };
-            self.record_callback(&format!("SimulatedPartialFill: id={}, filled={}/{}",
-                order_id, fill_quantity, order.quantity));
+            self.record_callback(&format!(
+                "SimulatedPartialFill: id={}, filled={}/{}",
+                order_id, fill_quantity, order.quantity
+            ));
             Ok(())
         } else {
             Err(format!("Order {order_id} not found"))

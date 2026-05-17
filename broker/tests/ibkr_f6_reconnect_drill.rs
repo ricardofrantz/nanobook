@@ -48,7 +48,10 @@ fn test_no_double_submit_on_reconnect() {
     // Simulate disconnect
     mock.simulate_disconnect();
     assert!(!mock.is_connected());
-    assert!(mock.callbacks().contains(&"SimulatedDisconnect".to_string()));
+    assert!(
+        mock.callbacks()
+            .contains(&"SimulatedDisconnect".to_string())
+    );
 
     // Simulate reconnect
     mock.simulate_reconnect();
@@ -128,7 +131,14 @@ fn test_reconnect_within_30s() {
     println!("F6 Reconnect Drill Timing Metrics:");
     println!("  Reconnect + reconcile duration: {}ms", reconnect_duration);
     println!("  Target: < 30000ms");
-    println!("  Status: {}", if reconnect_duration < 30_000 { "PASS" } else { "FAIL" });
+    println!(
+        "  Status: {}",
+        if reconnect_duration < 30_000 {
+            "PASS"
+        } else {
+            "FAIL"
+        }
+    );
 
     // Verify order state persisted correctly
     let order_1 = mock.get_order(order_id_1).unwrap();

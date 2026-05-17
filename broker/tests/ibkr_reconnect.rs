@@ -29,7 +29,10 @@ mod ibkr_reconnect_tests {
         assert!(!broker.is_connected());
 
         // is_connected() should return false when state is Disconnected
-        assert_eq!(broker.is_connected(), broker.connection_state() == ConnectionState::Connected);
+        assert_eq!(
+            broker.is_connected(),
+            broker.connection_state() == ConnectionState::Connected
+        );
     }
 
     #[test]
@@ -49,8 +52,14 @@ mod ibkr_reconnect_tests {
     fn test_connection_state_debug() {
         // Test that ConnectionState can be formatted for debugging
         assert_eq!(format!("{:?}", ConnectionState::Connected), "Connected");
-        assert_eq!(format!("{:?}", ConnectionState::Disconnected), "Disconnected");
-        assert_eq!(format!("{:?}", ConnectionState::Reconnecting), "Reconnecting");
+        assert_eq!(
+            format!("{:?}", ConnectionState::Disconnected),
+            "Disconnected"
+        );
+        assert_eq!(
+            format!("{:?}", ConnectionState::Reconnecting),
+            "Reconnecting"
+        );
     }
 
     // ========================================================================

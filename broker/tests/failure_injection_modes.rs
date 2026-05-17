@@ -2,7 +2,7 @@
 
 mod mock_tws;
 
-use mock_tws::{MockTws, FailureMode, FailureTiming};
+use mock_tws::{FailureMode, FailureTiming, MockTws};
 
 /// F1: Test duplicate order-status callback injection
 #[test]
@@ -66,7 +66,10 @@ fn test_f3_partial_fill_disconnect() {
     let order_id = mock.submit_order("AAPL", 100).unwrap();
 
     // Inject F3 failure post-fill
-    mock.inject_failure(FailureMode::F3PartialFillDisconnect, FailureTiming::PostFill);
+    mock.inject_failure(
+        FailureMode::F3PartialFillDisconnect,
+        FailureTiming::PostFill,
+    );
 
     // Partial fill should succeed
     mock.fill_order(order_id, 50).unwrap();

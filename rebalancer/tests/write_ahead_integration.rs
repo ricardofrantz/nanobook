@@ -6,10 +6,10 @@ use nanobook::Symbol;
 use nanobook_broker::error::BrokerError;
 use nanobook_broker::ibkr::orders::{OrderOutcome, OrderResult};
 use nanobook_broker::{BrokerSide, ClientOrderId};
-use nanobook_rebalancer::audit::{parse_audit_events, AuditLog};
+use nanobook_rebalancer::audit::{AuditLog, parse_audit_events};
+use nanobook_rebalancer::broker::BrokerGateway;
 use nanobook_rebalancer::diff::{Action, RebalanceOrder};
 use nanobook_rebalancer::execution::execute_order_with_write_ahead;
-use nanobook_rebalancer::broker::BrokerGateway;
 use std::time::Duration;
 
 /// Mock broker for testing write-ahead logging.
@@ -54,7 +54,10 @@ impl BrokerGateway for MockBroker {
         unimplemented!()
     }
 
-    fn quotes(&self, _symbols: &[Symbol]) -> Result<Vec<nanobook_broker::types::Quote>, BrokerError> {
+    fn quotes(
+        &self,
+        _symbols: &[Symbol],
+    ) -> Result<Vec<nanobook_broker::types::Quote>, BrokerError> {
         unimplemented!()
     }
 
@@ -187,11 +190,7 @@ fn test_write_ahead_permanent_error_no_retry() {
 fn test_write_ahead_transient_error_classification() {
     // This test verifies that transient errors are correctly classified
     // The actual retry logic is tested via mock call count in a separate test
-    let transient_messages = vec![
-        "timeout",
-        "connection lost",
-        "rate limit",
-    ];
+    let transient_messages = vec!["timeout", "connection lost", "rate limit"];
 
     for msg in transient_messages {
         let dir = tempfile::tempdir().unwrap();

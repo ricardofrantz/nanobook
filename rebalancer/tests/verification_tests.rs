@@ -9,8 +9,10 @@
 use nanobook::Symbol;
 use nanobook_broker::mock::{FillMode, MockBroker};
 use nanobook_broker::{Broker, BrokerOrder, BrokerOrderType, BrokerSide};
-use nanobook_rebalancer::audit::{parse_audit_events, validate_checkpoints_from_parsed, AuditLog, Checkpoint};
-use nanobook_rebalancer::recovery::{reconstruct_state, RecoveryAction};
+use nanobook_rebalancer::audit::{
+    AuditLog, Checkpoint, parse_audit_events, validate_checkpoints_from_parsed,
+};
+use nanobook_rebalancer::recovery::{RecoveryAction, reconstruct_state};
 
 #[cfg(feature = "write_ahead_logging")]
 use nanobook_rebalancer::recovery::reconcile_incomplete_intents;
@@ -63,12 +65,8 @@ fn test_no_duplicate_orders_idempotency() {
             }),
         )
         .unwrap();
-        log.log_checkpoint(
-            Checkpoint::RiskCheckPassed,
-            4,
-            serde_json::json!({}),
-        )
-        .unwrap();
+        log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+            .unwrap();
         log.log_checkpoint(
             Checkpoint::OrderIntent,
             5,
@@ -183,7 +181,10 @@ fn test_audit_log_always_valid_json() {
     // Verify all parsed events are valid JSON with required fields
     for event in &events {
         assert!(!event.event.is_empty(), "Event should have a name");
-        assert!(event.sequence_number.is_some(), "Event should have sequence number");
+        assert!(
+            event.sequence_number.is_some(),
+            "Event should have sequence number"
+        );
     }
 }
 
@@ -271,19 +272,11 @@ fn test_checkpoint_sequence_validity() {
         )
         .unwrap();
         #[cfg(feature = "write_ahead_logging")]
-        log.log_checkpoint(
-            Checkpoint::RiskCheckPassed,
-            5,
-            serde_json::json!({}),
-        )
-        .unwrap();
+        log.log_checkpoint(Checkpoint::RiskCheckPassed, 5, serde_json::json!({}))
+            .unwrap();
         #[cfg(not(feature = "write_ahead_logging"))]
-        log.log_checkpoint(
-            Checkpoint::RiskCheckPassed,
-            4,
-            serde_json::json!({}),
-        )
-        .unwrap();
+        log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+            .unwrap();
         #[cfg(feature = "write_ahead_logging")]
         log.log_checkpoint(
             Checkpoint::OrderIntent,
@@ -381,12 +374,8 @@ fn test_audit_log_complete_parseable() {
             }),
         )
         .unwrap();
-        log.log_checkpoint(
-            Checkpoint::RiskCheckPassed,
-            4,
-            serde_json::json!({}),
-        )
-        .unwrap();
+        log.log_checkpoint(Checkpoint::RiskCheckPassed, 4, serde_json::json!({}))
+            .unwrap();
         log.log_checkpoint(
             Checkpoint::OrderIntent,
             5,
@@ -441,7 +430,10 @@ fn test_audit_log_complete_parseable() {
     // Verify all events can be parsed
     for event in &events {
         assert!(!event.event.is_empty(), "Event should have a name");
-        assert!(event.sequence_number.is_some(), "Event should have sequence number");
+        assert!(
+            event.sequence_number.is_some(),
+            "Event should have sequence number"
+        );
     }
 
     // Verify recovery from complete log
@@ -671,7 +663,11 @@ fn test_broker_reconciliation_finds_order() {
             .iter()
             .filter(|e| e.event == "order_submitted")
             .collect();
-        assert_eq!(submitted_events.len(), 1, "Should have OrderSubmitted event");
+        assert_eq!(
+            submitted_events.len(),
+            1,
+            "Should have OrderSubmitted event"
+        );
     }
 }
 
@@ -866,7 +862,10 @@ fn fixture_crash_recovery_recovery_works() {
 
     // Verify order states
     assert!(state.orders[0].filled, "First order should be filled");
-    assert!(!state.orders[1].submitted, "Second order should not be submitted (crashed)");
+    assert!(
+        !state.orders[1].submitted,
+        "Second order should not be submitted (crashed)"
+    );
     assert!(!state.orders[1].failed, "Second order should not be failed");
 
     // Verify recovery action is Resume (to reconcile incomplete intent)

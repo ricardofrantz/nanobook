@@ -187,6 +187,7 @@ pub fn verify_no_dangling_orders(audit_path: &Path) -> Result<Vec<DanglingOrder>
 /// - The process does not exist (ESRCH)
 /// - Permission is denied to send the signal (EPERM)
 /// - Other system errors occur
+///
 /// Compile-time kill workflow selected by Cargo features.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KillWorkflow {
@@ -471,6 +472,7 @@ fn run_two_phase_kill(config: &Config, timeout: Duration) -> Result<()> {
 }
 
 #[cfg(feature = "guaranteed_kill_switch")]
+#[allow(clippy::too_many_arguments)]
 fn run_two_phase_kill_for_pid<Send, Wait, Force>(
     config: &Config,
     audit_path: &Path,

@@ -39,7 +39,10 @@ fn test_f_bin1_idempotency_duplicate_submission() {
 
     // Attempt to submit the same order again
     let result2 = broker.submit_order(&order);
-    assert!(matches!(result2, Err(BrokerError::DuplicateOrder { .. })), "Second submission should be rejected");
+    assert!(
+        matches!(result2, Err(BrokerError::DuplicateOrder { .. })),
+        "Second submission should be rejected"
+    );
 
     // Verify only one order exists in MockBinance
     let all_orders = broker.binance().all_orders();
@@ -47,14 +50,29 @@ fn test_f_bin1_idempotency_duplicate_submission() {
 
     // Verify audit log contains one OrderSubmitted and one IdempotencyRejection
     let content = std::fs::read_to_string(&log_path).unwrap();
-    let order_submitted_count = content.lines().filter(|l| l.contains("order_submitted")).count();
-    let rejection_count = content.lines().filter(|l| l.contains("idempotency_rejection")).count();
-    assert_eq!(order_submitted_count, 1, "Should have one OrderSubmitted event");
-    assert_eq!(rejection_count, 1, "Should have one IdempotencyRejection event");
+    let order_submitted_count = content
+        .lines()
+        .filter(|l| l.contains("order_submitted"))
+        .count();
+    let rejection_count = content
+        .lines()
+        .filter(|l| l.contains("idempotency_rejection"))
+        .count();
+    assert_eq!(
+        order_submitted_count, 1,
+        "Should have one OrderSubmitted event"
+    );
+    assert_eq!(
+        rejection_count, 1,
+        "Should have one IdempotencyRejection event"
+    );
 
     // Verify the order in MockBinance matches
     let stored_order = broker.binance().get_order(&order_id1.0.to_string());
-    assert!(stored_order.is_some(), "Order should be stored in MockBinance");
+    assert!(
+        stored_order.is_some(),
+        "Order should be stored in MockBinance"
+    );
 }
 
 #[test]
@@ -88,7 +106,10 @@ fn test_f_bin1_sequence_collision_different_orders() {
     };
 
     let result_b = broker.submit_order(&order_b);
-    assert!(matches!(result_b, Err(BrokerError::DuplicateOrder { .. })), "Order B should be rejected due to sequence collision");
+    assert!(
+        matches!(result_b, Err(BrokerError::DuplicateOrder { .. })),
+        "Order B should be rejected due to sequence collision"
+    );
 
     // Verify only order A exists in MockBinance
     let all_orders = broker.binance().all_orders();
@@ -97,12 +118,22 @@ fn test_f_bin1_sequence_collision_different_orders() {
     // Verify the order is order A
     let stored_order = broker.binance().get_order(&order_id_a.0.to_string());
     assert!(stored_order.is_some(), "Order A should be stored");
-    assert_eq!(stored_order.unwrap().symbol, "BTC", "Stored order should be BTC (order A)");
+    assert_eq!(
+        stored_order.unwrap().symbol,
+        "BTC",
+        "Stored order should be BTC (order A)"
+    );
 
     // Verify audit log shows rejection for order B
     let content = std::fs::read_to_string(&log_path).unwrap();
-    assert!(content.contains("idempotency_rejection"), "Audit log should contain rejection");
-    assert!(content.contains("ETH"), "Rejection should mention ETH symbol");
+    assert!(
+        content.contains("idempotency_rejection"),
+        "Audit log should contain rejection"
+    );
+    assert!(
+        content.contains("ETH"),
+        "Rejection should mention ETH symbol"
+    );
 }
 
 #[test]
@@ -131,18 +162,33 @@ fn test_f_bin1_audit_log_verification() {
     let content = std::fs::read_to_string(&log_path).unwrap();
 
     // Verify audit log contains OrderSubmitted event with sequence 42
-    assert!(content.contains("order_submitted"), "Audit log should contain order_submitted event");
-    assert!(content.contains("42"), "Audit log should contain sequence number 42");
+    assert!(
+        content.contains("order_submitted"),
+        "Audit log should contain order_submitted event"
+    );
+    assert!(
+        content.contains("42"),
+        "Audit log should contain sequence number 42"
+    );
 
     // Verify audit log contains correct fields
-    assert!(content.contains("BTC"), "Audit log should contain symbol BTC");
-    assert!(content.contains(client_order_id), "Audit log should contain client_order_id");
-    assert!(content.contains(&order_id.0.to_string()), "Audit log should contain order_id");
+    assert!(
+        content.contains("BTC"),
+        "Audit log should contain symbol BTC"
+    );
+    assert!(
+        content.contains(client_order_id),
+        "Audit log should contain client_order_id"
+    );
+    assert!(
+        content.contains(&order_id.0.to_string()),
+        "Audit log should contain order_id"
+    );
 
     // Verify audit log format is valid JSONL (one JSON object per line)
     for line in content.lines() {
-        let _: serde_json::Value = serde_json::from_str(line)
-            .expect("Each line should be valid JSON");
+        let _: serde_json::Value =
+            serde_json::from_str(line).expect("Each line should be valid JSON");
     }
 
     // Verify the JSON structure
@@ -233,19 +279,38 @@ fn test_f_bin1_end_to_end_scenario() {
     // Second run: attempt to submit same orders with same sequences
     for order in &orders {
         let result = broker.submit_order(order);
-        assert!(matches!(result, Err(BrokerError::DuplicateOrder { .. })), "Second run submissions should be rejected");
+        assert!(
+            matches!(result, Err(BrokerError::DuplicateOrder { .. })),
+            "Second run submissions should be rejected"
+        );
     }
 
     // Verify only first-run orders exist in MockBinance
     let all_orders = broker.binance().all_orders();
-    assert_eq!(all_orders.len(), 3, "Should have exactly three orders from first run");
+    assert_eq!(
+        all_orders.len(),
+        3,
+        "Should have exactly three orders from first run"
+    );
 
     // Verify audit log shows correct sequence of events
     let content = std::fs::read_to_string(&log_path).unwrap();
-    let order_submitted_count = content.lines().filter(|l| l.contains("order_submitted")).count();
-    let rejection_count = content.lines().filter(|l| l.contains("idempotency_rejection")).count();
-    assert_eq!(order_submitted_count, 3, "Should have three OrderSubmitted events");
-    assert_eq!(rejection_count, 3, "Should have three IdempotencyRejection events");
+    let order_submitted_count = content
+        .lines()
+        .filter(|l| l.contains("order_submitted"))
+        .count();
+    let rejection_count = content
+        .lines()
+        .filter(|l| l.contains("idempotency_rejection"))
+        .count();
+    assert_eq!(
+        order_submitted_count, 3,
+        "Should have three OrderSubmitted events"
+    );
+    assert_eq!(
+        rejection_count, 3,
+        "Should have three IdempotencyRejection events"
+    );
 
     // Verify the order of events: first all submissions, then all rejections
     let lines: Vec<&str> = content.lines().collect();

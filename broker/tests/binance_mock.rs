@@ -13,9 +13,7 @@ use std::time::SystemTime;
 fn test_mock_binance_submit_order() {
     let binance = MockBinance::new();
 
-    let order_id = binance
-        .submit_order("BTCUSDT", "BUY", "100", None)
-        .unwrap();
+    let order_id = binance.submit_order("BTCUSDT", "BUY", "100", None).unwrap();
 
     assert_eq!(order_id, "1");
 
@@ -68,9 +66,7 @@ fn test_mock_binance_get_order() {
 fn test_mock_binance_cancel_order() {
     let binance = MockBinance::new();
 
-    let order_id = binance
-        .submit_order("BTCUSDT", "BUY", "100", None)
-        .unwrap();
+    let order_id = binance.submit_order("BTCUSDT", "BUY", "100", None).unwrap();
 
     // Verify initial status
     let order = binance.get_order(&order_id).unwrap();
@@ -110,7 +106,9 @@ fn test_mock_binance_reset() {
     let binance = MockBinance::new();
 
     // Submit orders
-    binance.submit_order("BTCUSDT", "BUY", "100", Some("cid-1")).unwrap();
+    binance
+        .submit_order("BTCUSDT", "BUY", "100", Some("cid-1"))
+        .unwrap();
     binance.submit_order("ETHUSDT", "SELL", "50", None).unwrap();
 
     // Verify state
@@ -125,7 +123,9 @@ fn test_mock_binance_reset() {
     assert_eq!(binance.next_order_id(), 1);
 
     // Duplicate client_order_id should now work
-    binance.submit_order("BTCUSDT", "BUY", "100", Some("cid-1")).unwrap();
+    binance
+        .submit_order("BTCUSDT", "BUY", "100", Some("cid-1"))
+        .unwrap();
 }
 
 #[test]
@@ -242,7 +242,10 @@ fn test_mock_broker_submit_order_with_client_order_id() {
 
     // Verify client_order_id was stored
     let binance_order = broker.binance().get_order("1").unwrap();
-    assert_eq!(binance_order.client_order_id, Some("my-custom-id-123".to_string()));
+    assert_eq!(
+        binance_order.client_order_id,
+        Some("my-custom-id-123".to_string())
+    );
 }
 
 #[test]
@@ -283,7 +286,10 @@ fn test_mock_broker_not_connected() {
         order_type: BrokerOrderType::Market,
         client_order_id: None,
     };
-    assert!(matches!(broker.submit_order(&order), Err(BrokerError::NotConnected)));
+    assert!(matches!(
+        broker.submit_order(&order),
+        Err(BrokerError::NotConnected)
+    ));
 }
 
 #[test]

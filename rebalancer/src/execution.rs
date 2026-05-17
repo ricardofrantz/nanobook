@@ -1064,7 +1064,7 @@ pub fn execute_order_with_write_ahead(
         audit,
         sequence_number,
         order,
-        &client_order_id_str,
+        client_order_id_str,
         timestamp,
         target_spec,
         &execution_context,

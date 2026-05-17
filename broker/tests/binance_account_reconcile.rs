@@ -3,8 +3,8 @@
 #[cfg(feature = "binance")]
 mod binance_reconcile_tests {
     use nanobook::Symbol;
-    use nanobook_broker::binance::BinanceBroker;
     use nanobook_broker::Broker;
+    use nanobook_broker::binance::BinanceBroker;
     use nanobook_broker::error::BrokerError;
     use nanobook_broker::types::*;
 

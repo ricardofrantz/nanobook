@@ -5,8 +5,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use nanobook::Symbol;
 
@@ -15,9 +15,11 @@ use nanobook_broker::error::BrokerError;
 use nanobook_broker::types::*;
 
 #[cfg(feature = "binance")]
-use nanobook_broker::binance::{check_audit_log_for_sequence, log_idempotency_rejection, log_order_submitted};
-#[cfg(feature = "binance")]
 use nanobook_broker::binance::types::{AccountInfo, BalanceInfo, OrderInfo};
+#[cfg(feature = "binance")]
+use nanobook_broker::binance::{
+    check_audit_log_for_sequence, log_idempotency_rejection, log_order_submitted,
+};
 
 /// Failure modes that can be injected by the mock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,11 +106,17 @@ impl MockBinance {
         }
 
         // Generate order ID
-        let order_id = self.next_order_id.fetch_add(1, Ordering::Relaxed).to_string();
+        let order_id = self
+            .next_order_id
+            .fetch_add(1, Ordering::Relaxed)
+            .to_string();
 
         // Store client_order_id if provided
         if let Some(cid) = client_order_id {
-            self.client_order_ids.lock().unwrap().insert(cid.to_string());
+            self.client_order_ids
+                .lock()
+                .unwrap()
+                .insert(cid.to_string());
         }
 
         // Create and store order
@@ -226,13 +234,11 @@ impl MockBinance {
             .collect();
 
         AccountInfo {
-            balances: vec![
-                BalanceInfo {
-                    asset: "USDT".to_string(),
-                    free: "10000.0".to_string(),
-                    locked: "0.0".to_string(),
-                },
-            ],
+            balances: vec![BalanceInfo {
+                asset: "USDT".to_string(),
+                free: "10000.0".to_string(),
+                locked: "0.0".to_string(),
+            }],
             positions: vec![],
             open_orders,
             can_trade: true,
@@ -374,9 +380,8 @@ impl Broker for MockBroker {
 
         // Extract sequence number from client_order_id if it follows the pattern
         // Format: "nanobook-{short_uuid}-{sequence}"
-        let sequence_number = client_order_id.and_then(|cid| {
-            cid.rsplit('-').next().and_then(|s| s.parse::<u64>().ok())
-        });
+        let sequence_number = client_order_id
+            .and_then(|cid| cid.rsplit('-').next().and_then(|s| s.parse::<u64>().ok()));
 
         // Check for duplicate in audit log if enabled (requires binance feature)
         #[cfg(feature = "binance")]
@@ -397,7 +402,8 @@ impl Broker for MockBroker {
         }
 
         // Submit the order
-        let order_id = self.binance
+        let order_id = self
+            .binance
             .submit_order(order.symbol.as_str(), side_str, &qty_str, client_order_id)
             .map_err(|e| BrokerError::Order(e))?
             .parse::<u64>()
@@ -457,10 +463,7 @@ impl Broker for MockBroker {
         let mut result = Vec::new();
 
         for order in orders {
-            let order_id: u64 = order
-                .symbol
-                .parse()
-                .unwrap_or_else(|_| 0); // Fallback, though this shouldn't happen
+            let order_id: u64 = order.symbol.parse().unwrap_or_else(|_| 0); // Fallback, though this shouldn't happen
             let quantity: u64 = order
                 .quantity
                 .parse()

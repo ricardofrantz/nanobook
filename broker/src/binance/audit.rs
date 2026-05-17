@@ -90,11 +90,7 @@ pub fn log_idempotency_rejection(
 /// Write an audit event to the log file (JSONL format).
 fn write_audit_event(path: &Path, event: &AuditEvent) {
     if let Ok(json) = serde_json::to_string(event) {
-        if let Ok(mut file) = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-        {
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
             if let Err(e) = writeln!(file, "{}", json) {
                 log::warn!("Failed to write audit log entry: {}", e);
             }
