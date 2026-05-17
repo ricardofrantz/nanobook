@@ -60,7 +60,8 @@ Stop and patch before continuing if any of these happen:
 # cron/idempotent run via wrapper
 ./runner.sh my-config.toml my-target.json
 
-# sanitize and report after evidence exists
+# sanitize, summarize, and report after evidence exists
 python3 ../../scripts/sanitize-audit.py audit/audit.jsonl > sanitized-audit.jsonl
+python3 soak_metrics.py sanitized-audit.jsonl
 python3 report.py sanitized-audit.jsonl report.html
 ```
