@@ -16,7 +16,7 @@
 | Sanitized audit excerpt generated | pending | `sanitized-audit.jsonl` path/hash |
 | HTML report generated from sanitized excerpt | pending | `report.html` path/hash |
 | Paper-soak learnings filled from evidence | pending | `docs/solutions/paper-soak-learnings.md` |
-| README battle-tested numbers updated | pending | README commit |
+| README battle-tested numbers updated | pending | README commit + `docs/ops/v0.15-release-evidence-checklist.md` |
 | Release/tag completed | pending | tag + changelog commit |
 
 ## Daily check-ins
