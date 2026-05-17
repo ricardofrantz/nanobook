@@ -28,6 +28,7 @@
 
 use crate::portfolio::{CostModel, Metrics, Portfolio};
 use crate::types::Symbol;
+use rustc_hash::FxHashMap;
 
 /// A trading strategy that produces target portfolio weights each period.
 ///
@@ -82,8 +83,9 @@ pub fn run_backtest<S: Strategy>(
 
     for (i, prices) in price_series.iter().enumerate() {
         let weights = strategy.compute_weights(i, prices, &portfolio);
-        portfolio.rebalance_simple(&weights, prices);
-        portfolio.record_return(prices);
+        let price_map: FxHashMap<Symbol, i64> = prices.iter().copied().collect();
+        portfolio.rebalance_simple_from_price_map(&weights, &price_map);
+        portfolio.record_return_from_price_map(&price_map);
     }
 
     let metrics =

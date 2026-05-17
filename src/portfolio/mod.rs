@@ -188,7 +188,15 @@ impl Portfolio {
     /// Positions not in `targets` are closed. Costs are deducted from cash.
     pub fn rebalance_simple(&mut self, targets: &[(Symbol, f64)], prices: &[(Symbol, i64)]) {
         let price_map: FxHashMap<Symbol, i64> = prices.iter().copied().collect();
-        let equity = self.total_equity_from_price_map(&price_map);
+        self.rebalance_simple_from_price_map(targets, &price_map);
+    }
+
+    pub(crate) fn rebalance_simple_from_price_map(
+        &mut self,
+        targets: &[(Symbol, f64)],
+        price_map: &FxHashMap<Symbol, i64>,
+    ) {
+        let equity = self.total_equity_from_price_map(price_map);
         if equity <= 0 {
             return;
         }
@@ -370,7 +378,11 @@ impl Portfolio {
     /// `prices` are current market prices for computing equity.
     pub fn record_return(&mut self, prices: &[(Symbol, i64)]) {
         let price_map: FxHashMap<Symbol, i64> = prices.iter().copied().collect();
-        let equity = self.total_equity_from_price_map(&price_map);
+        self.record_return_from_price_map(&price_map);
+    }
+
+    pub(crate) fn record_return_from_price_map(&mut self, price_map: &FxHashMap<Symbol, i64>) {
+        let equity = self.total_equity_from_price_map(price_map);
         if self.prev_equity > 0 {
             let ret = (equity - self.prev_equity) as f64 / self.prev_equity as f64;
             self.returns.push(ret);
@@ -413,7 +425,7 @@ impl Portfolio {
 
     // === Internal ===
 
-    fn total_equity_from_price_map(&self, price_map: &FxHashMap<Symbol, i64>) -> i64 {
+    pub(crate) fn total_equity_from_price_map(&self, price_map: &FxHashMap<Symbol, i64>) -> i64 {
         let position_value: i64 = self
             .positions
             .iter()
@@ -425,7 +437,7 @@ impl Portfolio {
         self.cash + position_value
     }
 
-    fn current_weights_from_price_map(
+    pub(crate) fn current_weights_from_price_map(
         &self,
         price_map: &FxHashMap<Symbol, i64>,
         equity: i64,
