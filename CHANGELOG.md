@@ -7,14 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-05-17 - Ops Hardening & Optimization
+
+This patch release bundles the post-v0.15 reliability work, Python cleanup, and the simplify/optimization pass across the workspace. It keeps behavior stable while making rebalancer execution safer and several hot paths leaner.
+
+### Added
+
+- **HRP optimizer**: Added a Hierarchical Risk Parity optimizer following López de Prado 2016, with review follow-ups for critical and lower-priority issues.
+- **Portfolio research/reporting APIs**: Added backtest attribution decomposition, standard indicator APIs, walk-forward analysis, drawdown analytics, OHLC realized-volatility estimators, and tear-sheet reporting payloads.
+- **Rebalancer production hardening**: Added write-ahead audit checkpoints for orders, positions, quotes, and account/cancel flows; broker-state reconciliation during recovery; feature-flagged rollout support; crash-injection validation; and complete checkpoint coverage fixtures.
+- **Operational safety tooling**: Added graceful shutdown, guaranteed/two-phase kill-switch workflows, forceful open-order cancellation, startup validators, tracing spans/log output, paper-soak preflight/runner/reporting artifacts, and release evidence checklists.
+
+### Changed
+
+- **Patch versions**: Bumped `nanobook` and `nanobook-python` to 0.15.1. Internal workspace crates with code changes are patch-bumped as `nanobook-broker` 0.7.1, `nanobook-risk` 0.6.1, and `nanobook-rebalancer` 0.8.1.
+- **Python package metadata**: Brought `python/pyproject.toml` forward to 0.15.1 so Python packaging matches the v0.15 patch line.
+- **Open-bead accounting**: Documented and labeled remaining live-soak/release beads as blocked on real IBKR paper-live evidence instead of closing them prematurely.
+
 ### Fixed
 
 - **Complete deprecation cleanup**: Removed Python wrapper functions for `garch_forecast`, `optimize_cvar`, and `optimize_cdar` that were accidentally left in place during the v0.15.0 release. The Rust implementations were removed but the Python wrappers remained, causing runtime failures. Users should use the replacement functions: `garch_ewma_forecast`, `inverse_cvar_weights`, and `inverse_cdar_weights`.
+- **Binance and verification cleanup**: Improved Binance client error handling and fixed verification failures around Binance signing tests, backtest stop semantics, formatting, and clippy warnings.
+- **Write-ahead recovery edge cases**: Fixed recovery edge cases found during the write-ahead rollout and extended coverage for incomplete intents, retries, broker reconciliation, and audit-log parsing.
+
+### Performance
+
+- **Portfolio price-map reuse**: Reduced redundant portfolio price-map rebuilds and reused one price map per `run_backtest` bar. Criterion evidence improved the portfolio benchmark from roughly 396 µs to 353 µs, then to about 291 µs in the follow-up pass.
+- **Workspace simplify/optimization pass**: Simplified or optimized each code area with small commits: broker mock fill status handling, rebalancer quote pricing and symbol collection, risk position-map construction, Python symbol-schedule parsing/profile generation, examples report helpers, sanitizer iteration, and LOB price-map construction.
 
 ### Testing
 
 - **Stop loss integration tests**: Added 10 comprehensive integration tests for stop loss functionality, covering ATR-based stops, short position behavior, multiple symbols, config sanitization, position flips, and interactions with rebalancing. Total backtest_bridge tests increased from 8 to 18.
 - **Stop loss test cleanup**: Removed 6 low-quality stop-loss tests with ambiguous or incorrect behavior (mixed concerns, unclear validation semantics, implementation detail tests).
+- **Release verification**: Current release gate passes `cargo fmt --all -- --check`, `cargo check --workspace --all-features`, `cargo test --workspace --all-features`, `cargo clippy --workspace --all-features -- -W clippy::perf -W clippy::complexity`, and Python byte-compilation for `python/`, `examples/`, and `scripts/`.
 
 ## [0.15.0] - 2026-05-13 - Documentation & Infrastructure
 
@@ -869,7 +894,15 @@ Initial release of nanobook - a deterministic limit order book and matching engi
 - Fixed-point price representation (avoids floating-point errors)
 - Deterministic via monotonic timestamps (not system clock)
 
-[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/ricardofrantz/nanobook/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/ricardofrantz/nanobook/compare/v0.15.0...v0.15.1
+[0.15.0]: https://github.com/ricardofrantz/nanobook/compare/v0.14.0...v0.15.0
+[0.14.0]: https://github.com/ricardofrantz/nanobook/compare/v0.13.0...v0.14.0
+[0.13.0]: https://github.com/ricardofrantz/nanobook/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/ricardofrantz/nanobook/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/ricardofrantz/nanobook/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/ricardofrantz/nanobook/compare/v0.9.3...v0.10.0
+[0.9.3]: https://github.com/ricardofrantz/nanobook/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/ricardofrantz/nanobook/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/ricardofrantz/nanobook/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/ricardofrantz/nanobook/compare/v0.8.0...v0.9.0

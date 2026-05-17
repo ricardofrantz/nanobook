@@ -1141,7 +1141,7 @@ dependencies = [
 
 [[package]]
 name = "nanobook"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "criterion",
  "memmap2",
@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "nanobook-broker"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "chrono",
  "futures-util",
@@ -1178,7 +1178,7 @@ dependencies = [
 
 [[package]]
 name = "nanobook-python"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "nanobook",
  "nanobook-broker",
@@ -1190,7 +1190,7 @@ dependencies = [
 
 [[package]]
 name = "nanobook-rebalancer"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1216,7 +1216,7 @@ dependencies = [
 
 [[package]]
 name = "nanobook-risk"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "nanobook",
  "nanobook-broker",

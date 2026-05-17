@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "nanobook"
-version = "0.13.0"
+version = "0.15.1"
 requires-python = ">=3.11"
 description = "Rust-backed Python package for target-weight backtests, portfolio metrics, deterministic order-book simulation, and pre-trade risk checks"
 license = "MIT"
