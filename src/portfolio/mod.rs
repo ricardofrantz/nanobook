@@ -275,7 +275,7 @@ impl Portfolio {
         exchanges: &mut crate::multi_exchange::MultiExchange,
     ) {
         // Collect current prices from exchange BBO
-        let prices: Vec<(Symbol, i64)> = exchanges
+        let price_map: FxHashMap<Symbol, i64> = exchanges
             .symbols()
             .filter_map(|sym| {
                 let ex = exchanges.get(sym)?;
@@ -291,8 +291,6 @@ impl Portfolio {
                 Some((*sym, mid))
             })
             .collect();
-
-        let price_map: FxHashMap<Symbol, i64> = prices.iter().copied().collect();
         let equity = self.total_equity_from_price_map(&price_map);
         if equity <= 0 {
             return;
