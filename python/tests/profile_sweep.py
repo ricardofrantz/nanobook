@@ -7,11 +7,8 @@ def generate_price_series(n_bars, n_stocks):
     series = []
     prices = [10000] * n_stocks
     for _ in range(n_bars):
-        bar = []
-        for i in range(n_stocks):
-            prices[i] = int(prices[i] * (1 + random.uniform(-0.02, 0.02)))
-            bar.append((symbols[i], prices[i]))
-        series.append(bar)
+        prices = [int(price * (1 + random.uniform(-0.02, 0.02))) for price in prices]
+        series.append(list(zip(symbols, prices)))
     return series
 
 def profile_sweep():
