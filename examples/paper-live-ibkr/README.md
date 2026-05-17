@@ -133,7 +133,23 @@ This is a 2-4 calendar week IBKR paper trading soak to validate v0.15's producti
    - Sum of positive weights must be ≤ 1.0
    - Zero weights are not allowed (omit the symbol instead)
 
-### Step 5: Build the Rebalancer
+### Step 5: Run Local Preflight
+
+Before connecting to IBKR, validate the config and target files without touching the broker:
+
+```bash
+./preflight.sh risk-config.toml target.json.example
+```
+
+For real rehearsal/soak runs, pass your copied files:
+
+```bash
+./preflight.sh my-config.toml my-target.json
+```
+
+Preflight checks TOML/JSON syntax, required sections, paper-account-looking account IDs, paper ports, target symbol length, target weight bounds, and cron idempotency metadata.
+
+### Step 6: Build the Rebalancer
 
 1. **From the nanobook workspace root:**
    ```bash
@@ -145,7 +161,7 @@ This is a 2-4 calendar week IBKR paper trading soak to validate v0.15's producti
    ls -la target/release/rebalancer
    ```
 
-### Step 6: Test IBKR Connection
+### Step 7: Test IBKR Connection
 
 1. **Start IBKR Gateway or TWS and log in to your paper account**
 
@@ -159,7 +175,7 @@ This is a 2-4 calendar week IBKR paper trading soak to validate v0.15's producti
    - If successful: "Connected to IB Gateway at 127.0.0.1:4002 (client_id=100)"
    - If failed: Check that Gateway/TWS is running and API is enabled
 
-### Step 7: Run a Test Rebalance
+### Step 8: Run a Test Rebalance
 
 1. **Test with --dry-run flag (no orders executed):**
    ```bash
@@ -171,7 +187,7 @@ This is a 2-4 calendar week IBKR paper trading soak to validate v0.15's producti
    - Verify risk limits are respected
    - Confirm no errors in the plan
 
-### Step 8: Run First Rebalance (Live Execution)
+### Step 9: Run First Rebalance (Live Execution)
 
 1. **Run with actual execution (paper trading only):**
    ```bash
@@ -187,7 +203,7 @@ This is a 2-4 calendar week IBKR paper trading soak to validate v0.15's producti
    - Check that orders appear in your paper account
    - Confirm fills are reflected
 
-### Step 9: Set Up Cron Mode (Automated Execution)
+### Step 10: Set Up Cron Mode (Automated Execution)
 
 1. **Use the runner script for cron-friendly execution:**
    ```bash
@@ -227,7 +243,7 @@ Audit logs are stored in `audit/` directory. These logs contain:
 - Risk limit checks
 - Failure injection events (if any)
 
-**Note:** Audit logs are NOT committed to git (see `.gitignore`). Use `scripts/sanitize-audit.py` to scrub PII before publishing.
+**Note:** Audit logs are NOT committed to git (see `.gitignore`). Use `../../scripts/sanitize-audit.py` to scrub PII before publishing.
 
 ## Post-Run Analysis
 
@@ -235,7 +251,7 @@ After the soak completes:
 1. Review audit logs for anomalies
 2. Verify cron-mode idempotency (no duplicate orders)
 3. Generate HTML report: `python3 report.py audit/audit.jsonl report.html`
-4. Sanitize audit logs before sharing: `python3 scripts/sanitize-audit.py audit/audit.jsonl`
+4. Sanitize audit logs before sharing: `python3 ../../scripts/sanitize-audit.py audit/audit.jsonl > sanitized-audit.jsonl`
 
 ## Troubleshooting
 

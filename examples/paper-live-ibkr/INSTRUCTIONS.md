@@ -10,24 +10,26 @@ All infrastructure for the v0.15 paper trading soak has been set up:
 2. ✅ `runner.sh` script for cron-friendly execution
 3. ✅ `risk-config.toml` template with correct rebalancer config structure
 4. ✅ `target.json.example` with S&P 100 sample portfolio
-5. ✅ Comprehensive 9-step setup guide in README.md
-6. ✅ `audit/` directory for logs
-7. ✅ `scripts/sanitize-audit.py` verified to exist
-8. ✅ rebalancer binary built (`target/release/rebalancer`)
+5. ✅ `preflight.sh` local config/target validator
+6. ✅ Comprehensive 10-step setup guide in README.md
+7. ✅ `audit/` directory for logs
+8. ✅ `scripts/sanitize-audit.py` verified to exist
+9. ✅ rebalancer binary built (`target/release/rebalancer`)
 
 ## What To Do When Ready
 
-Follow the 9-step guide in `README.md`:
+Follow the 10-step guide in `README.md`:
 
 1. Install and configure IBKR Gateway or TWS
 2. Get your IBKR paper account ID
 3. Create your config file (`cp risk-config.toml my-config.toml`)
 4. Create your target portfolio (`cp target.json.example my-target.json`)
-5. Build rebalancer (`cargo build --release -p nanobook-rebalancer`)
-6. Test IBKR connection
-7. Run dry-run test
-8. Run first rebalance
-9. Set up cron automation
+5. Run local preflight (`./preflight.sh my-config.toml my-target.json`)
+6. Build rebalancer (`cargo build --release -p nanobook-rebalancer`)
+7. Test IBKR connection
+8. Run dry-run test
+9. Run first rebalance
+10. Set up cron automation
 
 ## Why This Was Deferred
 
@@ -44,8 +46,9 @@ IBKR Gateway/TWS requires manual download and installation. It's a GUI applicati
 
 1. Download IBKR Gateway from: https://www.interactivebrokers.com/en/trading/ibgateway-stable.php
 2. Follow the detailed setup in `README.md`
-3. Run connection test: `../../target/release/rebalancer --config my-config.toml status`
-4. Start with dry-run: `../../target/release/rebalancer --config my-config.toml run my-target.json --dry-run`
+3. Run preflight: `./preflight.sh my-config.toml my-target.json`
+4. Run connection test: `../../target/release/rebalancer --config my-config.toml status`
+5. Start with dry-run: `../../target/release/rebalancer --config my-config.toml run my-target.json --dry-run`
 
 ## Files To Customize
 
@@ -54,6 +57,7 @@ IBKR Gateway/TWS requires manual download and installation. It's a GUI applicati
 
 ## Files To Use As-Is
 
+- `preflight.sh` - local config/target validator
 - `runner.sh` - cron-friendly execution script
 - `risk-config.toml` - template (copy to my-config.toml)
 - `target.json.example` - template (copy to my-target.json)
@@ -61,4 +65,4 @@ IBKR Gateway/TWS requires manual download and installation. It's a GUI applicati
 ## Documentation
 
 Full setup guide: `README.md`
-Sanitization script: `scripts/sanitize-audit.py`
+Sanitization script: `../../scripts/sanitize-audit.py`
