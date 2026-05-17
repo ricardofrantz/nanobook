@@ -137,6 +137,17 @@ impl MockBroker {
             .expect("submitted_orders mutex poisoned")
             .clone()
     }
+
+    fn fill_status(&self) -> (OrderState, u64, u64) {
+        match &self.fill_mode {
+            FillMode::ImmediateFull => (OrderState::Filled, 100, 0),
+            FillMode::ImmediatePartial(frac) => {
+                let filled = (100.0 * frac) as u64;
+                (OrderState::PartiallyFilled, filled, 100 - filled)
+            }
+            FillMode::Reject => (OrderState::Rejected, 0, 0),
+        }
+    }
 }
 
 impl Broker for MockBroker {
@@ -210,15 +221,7 @@ impl Broker for MockBroker {
             return Err(BrokerError::NotConnected);
         }
 
-        // Return status based on fill mode
-        let (status, filled, remaining) = match &self.fill_mode {
-            FillMode::ImmediateFull => (OrderState::Filled, 100, 0),
-            FillMode::ImmediatePartial(frac) => {
-                let filled = (100.0 * frac) as u64;
-                (OrderState::PartiallyFilled, filled, 100 - filled)
-            }
-            FillMode::Reject => (OrderState::Rejected, 0, 0),
-        };
+        let (status, filled, remaining) = self.fill_status();
 
         Ok(BrokerOrderStatus {
             id,
@@ -234,33 +237,20 @@ impl Broker for MockBroker {
             return Err(BrokerError::NotConnected);
         }
 
-        let open_ids = self
-            .open_orders
-            .lock()
-            .expect("open_orders mutex poisoned")
-            .clone();
-        let mut result = Vec::new();
+        let open_ids = self.open_orders.lock().expect("open_orders mutex poisoned");
+        let (status, filled, remaining) = self.fill_status();
 
-        for id in open_ids {
-            let (status, filled, remaining) = match &self.fill_mode {
-                FillMode::ImmediateFull => (OrderState::Filled, 100, 0),
-                FillMode::ImmediatePartial(frac) => {
-                    let filled = (100.0 * frac) as u64;
-                    (OrderState::PartiallyFilled, filled, 100 - filled)
-                }
-                FillMode::Reject => (OrderState::Rejected, 0, 0),
-            };
-
-            result.push(BrokerOrderStatus {
+        Ok(open_ids
+            .iter()
+            .copied()
+            .map(|id| BrokerOrderStatus {
                 id,
                 status,
                 filled_quantity: filled,
                 remaining_quantity: remaining,
                 avg_fill_price_cents: 0,
-            });
-        }
-
-        Ok(result)
+            })
+            .collect())
     }
 
     fn cancel_order(&self, id: OrderId) -> Result<(), BrokerError> {
