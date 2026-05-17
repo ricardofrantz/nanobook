@@ -1,5 +1,9 @@
 # nanobook
 
+<p align="center">
+  <img src="assets/nanobook1.jpg" alt="nanobook" width="900">
+</p>
+
 [![CI](https://github.com/ricardofrantz/nanobook/actions/workflows/ci.yml/badge.svg)](https://github.com/ricardofrantz/nanobook/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/nanobook.svg)](https://crates.io/crates/nanobook)
 [![docs.rs](https://docs.rs/nanobook/badge.svg)](https://docs.rs/nanobook)
