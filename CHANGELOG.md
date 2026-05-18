@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Public documentation set**: Restored selected public docs for versioning policy, ubiquitous language, event-log schema, API-surface audit, public API baselines, oracle design, ITCH replay learnings, portfolio parity learnings, and unsafe-code audit summary.
+- **Operations documentation index**: Added `docs/README.md` and public rebalancer operations docs for write-ahead audit logging, warm restart, graceful shutdown, kill switch, and operations hardening.
+
+### Changed
+
+- **Sanitized operations docs**: Renamed internal phase documents into public operation-oriented pages under `docs/operations/` and removed private planning, task-tracker, soak, and private-integration references from the published set.
+
 ## [0.15.1] - 2026-05-17 - Ops Hardening & Optimization
 
 This patch release bundles the post-v0.15 reliability work, Python cleanup, and the simplify/optimization pass across the workspace. It keeps behavior stable while making rebalancer execution safer and several hot paths leaner.
@@ -16,13 +25,13 @@ This patch release bundles the post-v0.15 reliability work, Python cleanup, and 
 - **HRP optimizer**: Added a Hierarchical Risk Parity optimizer following López de Prado 2016, with review follow-ups for critical and lower-priority issues.
 - **Portfolio research/reporting APIs**: Added backtest attribution decomposition, standard indicator APIs, walk-forward analysis, drawdown analytics, OHLC realized-volatility estimators, and tear-sheet reporting payloads.
 - **Rebalancer production hardening**: Added write-ahead audit checkpoints for orders, positions, quotes, and account/cancel flows; broker-state reconciliation during recovery; feature-flagged rollout support; crash-injection validation; and complete checkpoint coverage fixtures.
-- **Operational safety tooling**: Added graceful shutdown, guaranteed/two-phase kill-switch workflows, forceful open-order cancellation, startup validators, tracing spans/log output, paper-soak preflight/runner/reporting artifacts, and release evidence checklists.
+- **Operational safety tooling**: Added graceful shutdown, guaranteed/two-phase kill-switch workflows, forceful open-order cancellation, startup validators, tracing spans/log output, and paper-trading preflight/runner/reporting artifacts.
 
 ### Changed
 
 - **Patch versions**: Bumped `nanobook` and `nanobook-python` to 0.15.1. Internal workspace crates with code changes are patch-bumped as `nanobook-broker` 0.7.1, `nanobook-risk` 0.6.1, and `nanobook-rebalancer` 0.8.1.
 - **Python package metadata**: Brought `python/pyproject.toml` forward to 0.15.1 so Python packaging matches the v0.15 patch line.
-- **Open-bead accounting**: Documented and labeled remaining live-soak/release beads as blocked on real IBKR paper-live evidence instead of closing them prematurely.
+- **Live-evidence accounting**: Kept remaining paper-live evidence requirements blocked on real IBKR paper-trading evidence instead of claiming completion prematurely.
 
 ### Fixed
 
@@ -159,8 +168,8 @@ This release completes the v0.13 ops-hardening program with failure-injection te
 - **F1 (duplicate order-status callbacks)**: Duplicate callback deduplication, 2 integration tests
 
 **Operational Documentation:**
-- **`docs/solutions/ops-hardening-learnings.md`**: Consolidated learnings from all 9 failure modes, categorizing which were already handled by v0.10 hardening vs. new bugs surfaced, what changed, and operational takeaways
-- **`docs/ops/warm-restart.md`**: Audit-log → state reconstruction protocol with worked examples for operators, documenting what to do after a crash (how to read audit log, confirm position state matches broker view, when to manually intervene)
+- **`docs/operations/rebalancer-ops-hardening.md`**: Consolidated learnings from operational failure modes, categorizing existing defenses, newly hardened gaps, and operator takeaways
+- **`docs/operations/warm-restart.md`**: Audit-log → state reconstruction protocol with worked examples for operators, documenting what to do after a crash (how to read audit log, confirm position state matches broker view, when to manually intervene)
 
 **CI:**
 - **`failure-injection` job**: GitHub Actions job running all failure-injection tests (IBKR F6, Binance F-bin1, Binance F-bin2) on every PR
@@ -607,7 +616,7 @@ consolidated entries below.
   - `optimize_cvar` — CVaR (Conditional Value at Risk) minimization
   - `optimize_cdar` — CDaR (Conditional Drawdown at Risk) minimization
   - All exposed to Python via PyO3
-- **Extended backtest bridge** for qtrade integration:
+- **Extended backtest bridge** for downstream Python integrations:
   - `py_capabilities()` — feature probing contract
   - Stop-aware `backtest_weights(..., stop_cfg=...)` with stop-loss/trailing support
   - Backtest payload extensions: `holdings`, `symbol_returns`, `stop_events`

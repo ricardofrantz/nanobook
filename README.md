@@ -319,8 +319,11 @@ Engineering decisions that keep the system simple and fast:
 
 ## Documentation
 
+- **[Documentation index](docs/README.md)** — versioning, domain language, operations, audit, and learning notes.
+- **[docs.rs](https://docs.rs/nanobook)** — Rust API docs.
+- **[Versioning policy](SEMVER.md)** — how nanobook handles SemVer while it remains pre-1.0.
+- **[Ubiquitous language](UBIQUITOUS_LANGUAGE.md)** — glossary for order, portfolio, broker, risk, and rebalancer terms.
 - Full developer reference is included below in this README (`## Full Reference`).
-- **[docs.rs](https://docs.rs/nanobook)** — Rust API docs
 
 ## License
 
@@ -765,9 +768,9 @@ Clean aliases (no `py_` prefix) are exported for new integrations:
 `backtest_weights`, `capabilities`, `garch_ewma_forecast`,
 `inverse_cvar_weights`, `inverse_cdar_weights`, and other optimizer helpers.
 
-### qtrade v0.4 Bridge Pattern
+### Capability Probing Pattern
 
-Capability probing contract used by `calc.bridge`:
+Downstream Python applications can probe nanobook capabilities before choosing a Rust-backed fast path or a local fallback:
 
 ```python
 import nanobook
