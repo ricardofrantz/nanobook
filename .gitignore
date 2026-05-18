@@ -27,17 +27,23 @@ Thumbs.db
 .beads/
 .unsafe-audit/
 .unsafe-audic/
-docs/
 CONTEXT.md
-SEMVER.md
 semver.MD
-UBIQUITOUS_LANGUAGE.md
+!SEMVER.md
 ubiquitous-language.md
 ubiquitous_language.md
+!UBIQUITOUS_LANGUAGE.md
 bug-hunt-findings.md
 BUG_HUNT_FINDINGS.md
 plan.md
 PLAN.md
+
+# Private/internal documentation kept off the public branch
+docs/from-*/
+docs/ops/
+docs/solutions/paper-soak-learnings.md
+docs/solutions/v0.15-kill-gate-criteria.md
+docs/solutions/v0.15-kill-gate-evaluation.md
 
 # Beads history
 .beads/.br_history/
